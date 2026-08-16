@@ -1,0 +1,40 @@
+{
+  "_comment": "Barony canonical lore for AI-NPC prompt injection. Paraphrased summary (not verbatim wiki text). Load this in the Python AI service and inject the relevant fields into prompts. Keep injected text SHORT — a few sentences per NPC, not the whole file.",
+
+  "world": {
+    "setting": "A grim first-person dungeon crawl beneath the ruined mining town of Hamlet. The dungeon descends through themed layers: the Mines, then Swamps, a Labyrinth, Ruins, and ultimately Hell. Danger, undead, and hellish monsters fill every level. Tone: dark, morbid, gallows-humored.",
+    "premise": "Adventurers descend into the depths to destroy the lich Baron Herx and lift the curse he laid on the land.",
+    "narrative_style": "Story is environmental and fragmentary — told through scattered books, scrolls, and rare talks with non-hostile NPCs. Most of the world is hostile; friendly faces are the exception."
+  },
+
+  "backstory": {
+    "summary": "Hamlet was once a thriving mining town, but its ruler Baron Herx was a cruel, greedy man who forced the citizens to toil endlessly digging for gold in mines that yielded mostly copper — largely for his own sadistic enjoyment. Worn down, the townsfolk tricked him: they claimed they'd struck gold at the mine's bottom, lured him down, and sealed him inside to die, reclaiming their town.",
+    "the_turn": "Herx did die down there — but his hatred and lust for revenge were so total that he rose again as a Lich, an undead being wielding infernal power. He struck a pact with the devil Baphomet, source of his lich powers. He summoned an army of monsters, broke out, and slaughtered Hamlet.",
+    "aftermath": "A few descendants of the survivors fled deeper and built a small settlement in the mines (Minetown). Herx, too far removed from the surface to return to it, lurks in the depths, waiting to feast on lost humans and reckless adventurers. Hellish monsters have since spread across the land."
+  },
+
+  "factions": {
+    "magicians_guild": "A powerful order that rose to prominence in reclaimed Hamlet. Warned that Herx was a supernatural, existential threat — not a mere political squabble — and resents leadership that ignored that warning.",
+    "hamlet_survivors": "Humans descended from those who escaped Herx's slaughter. Live moderately, warily, among the dangers of the mines. The reclaimed Hamlet holds shops and a Magicians' Guild outpost; its people are humble-looking but surprisingly powerful and well-equipped.",
+    "monsters": "Since Herx's rise the depths teem with goblins, trolls, gnomes, undead skeletons, demons, and worse. Most attack humans and shopkeepers on sight. Monster society is crude, territorial, and hell-touched."
+  },
+
+  "key_figures": {
+    "baron_herx": "The lich. Formerly a wealthy, simple merchant-lord turned tyrant mayor; now an undead horror driven by hatred for anyone beneath him. Greedy, cruel, vengeful, grandiose. Serves Baphomet. Lurks at the bottom of the mines/ruins. Canonically telepathic — reaches into intruders' minds to taunt them as they descend, growing from mocking to openly hostile the closer they get.",
+    "baphomet": "The devil, dwelling in Hell (reachable via a hidden route, the Molten Throne). Source of Herx's lich powers. Barely interacts — mostly silent, alien, wordless. Defeating him voids the pact and turns Herx to ash. The alternate/secret ending.",
+    "orpheus_and_erudyce": "Two arch-wizard lich siblings (Archmagisters of the Magicians' Guild). The deeper endgame antagonists, encountered in the Caves beyond Hamlet after Herx/Baphomet falls. Orpheus favors melee and fire; Erudyce ranged attacks and ice."
+  },
+
+  "places": {
+    "hamlet": "The ruined mining town at the story's center; partly reclaimed and renovated by freed prisoners. A rare safe hub with shops and a Magicians' Guild outpost, reached after defeating Herx. Monsters entering are attacked on sight.",
+    "minetown": "A small settlement humans built deeper in the mines after fleeing Herx's massacre.",
+    "the_depths": "Mines to Swamps to Labyrinth to Ruins to Hell — descending layers of increasing danger."
+  },
+
+  "usage_notes_for_prompting": {
+    "human_npc": "Knows Hamlet's tragedy, fears/hates Herx and his monsters, may reference the Guild, mining, survival. Wary of the player but potentially allied.",
+    "monster_npc": "Crude, territorial, hell-touched. Usually hostile to humans. May not know or care about the fuller history — keep their knowledge shallow and instinctive unless they're notable.",
+    "boss_npc": "Herx = telepathic, grandiose, vengeful, escalating menace. Baphomet = silent/alien. Orpheus/Erudyce = arrogant arch-wizard siblings who bicker. These are AUTHORED, not generated.",
+    "rule": "Inject only the slice relevant to who the player is talking to. A goblin doesn't get the Magicians' Guild history; a Hamlet human does. Keep it to a few sentences."
+  }
+}

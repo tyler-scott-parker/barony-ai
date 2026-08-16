@@ -1,0 +1,13 @@
+{
+  "_comment": "Comprehension groups. If the player's current race and the speaker's race share a group, the player understands real dialogue. Otherwise they hear noises. 'noises' maps a race to its untranslated sound. Edit freely; restart service.",
+  "groups": {
+    "beast": ["rat", "spider", "scorpion", "scarab", "cave crawler", "insectoid"],
+    "humanoid": ["human", "goblin", "skeleton", "goatman", "gnome", "automaton", "shopkeeper"]
+  },
+  "noises": {
+    "rat": ["*Squeak!*", "*skreee...*", "*chitter chitter*", "*angry squeaking*"],
+    "spider": ["*chk-chk-chk*", "*hissing clicks*", "*a dry rattle of fangs*"],
+    "scorpion": ["*clacking pincers*", "*a venomous hiss*"],
+    "default_beast": ["*an animal snarl*", "*guttural chittering*", "*a low growl*"]
+  }
+}

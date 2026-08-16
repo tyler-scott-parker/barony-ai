@@ -1,0 +1,7 @@
+{
+  "_comment": "Maps a race (lowercased) to canonical in-game book filenames whose text gets injected for that NPC type. Books are short enough to inject raw. Edit freely; restart service to apply. Races not listed get no book (just the race tag + world lore).",
+  "goblin": ["A Brief Survey of Goblins.txt"],
+  "skeleton": ["Concerning the Undead.txt", "Sightings of the Lich.txt"],
+  "human": ["Surviving the Mines.txt", "The History of Baron Herx.txt"],
+  "automaton": ["Citadel Servant FAQ.txt"]
+}
