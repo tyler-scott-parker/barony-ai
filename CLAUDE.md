@@ -238,8 +238,25 @@ Worth having written down, because two assumptions here were wrong:
 | 15 | labyrinthtoruins | 30 | cavestocitadel |
 | 16–19 | ruins | 31–34 | citadel, 35 sanctum |
 
-**The town is level 25 and gates behind Baphomet, not the Baron.** The lore file's own hamlet canon
-agrees: *"reached after the Baron/Baphomet sequence."*
+**Hamlet is level 25, but there is more than one route to it, and Hell is OPTIONAL.** Beating the
+Baron can take you there directly; going through Hell (21–23) to Baphomet (24) is the other way.
+Do not describe the town as "gated behind Baphomet" — that was wrong.
+
+Supporting evidence in the source: `actWinningPortal` only appears on `"Boss"` / `"Hell Boss"` when
+`SV_FLAG_CLASSIC` is set (`actladder.cpp:445`) — in the default expanded campaign it hides itself,
+so killing Herx does **not** end the run. It is a genuine midpoint, which is also why friendship 50
+fits the Herx secret.
+
+**The routing does not affect region resolution**, which is the thing that matters here: custom
+portals jump by map NAME, setting `skipLevelsOnLoad = levelToJumpTo - currentlevel` where
+`levelToJumpTo` is that map's index in `levels.txt` (`actladder.cpp:1538`). So arriving at Hamlet
+means `currentlevel == 25` by whichever road.
+
+**The game has its OWN floor→region mapping — use it as the reference** (`mod_tools.cpp:17273`):
+`1-4 mines · 6-9 swamps · 11-14 labyrinth · 16-19 ruins · 20 herx lair · 21-23 hell ·
+24 molten throne · 25 hamlet · 26-29 crystal caves · 31-34 arcane citadel · 35 citadel sanctum`,
+with 5/10/15/30 explicitly called "transition floor". Our table matches it; we assign the four
+transition floors to the region they lead into, which is the only deliberate difference.
 
 **`floor_to_region` was misaligned with this and wrong for 21 of 35 floors** — every floor from 19 up,
 including telling floor-25 townsfolk they were in *hell*. Six of the lore file's 19 location profiles
