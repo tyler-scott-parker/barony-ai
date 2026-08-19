@@ -95,7 +95,7 @@ def _book_block(race_l):
     lore = get_book_lore(race_l)
     return ("RELEVANT LORE (what your kind knows):\n" + lore + "\n") if lore else ""
 
-def _persona(race, grounded, floor):
+def _persona(race, grounded, floor, map_name=""):
     """The opening every prompt shares: setting, character guidance, and
     (except for ambient babble) canonical grounding + hard limits."""
     race_l = race.lower()
@@ -103,7 +103,7 @@ def _persona(race, grounded, floor):
     head = f"SETTING: {WORLD}\n"
     tail = f"CHARACTER GUIDANCE: {slice_}\n"
     if grounded:
-        facts, constraints = build_lore_context(race_l, floor)
+        facts, constraints = build_lore_context(race_l, floor, map_name=map_name)
         tail += _grounding_block(facts) + _limits_block(constraints)
     return head, tail + _book_block(race_l)
 
@@ -297,10 +297,81 @@ def record_follower_interaction(uid, says, floor=0, player=0):
 
 # ---- Priority-ordered lore retrieval -----------------------------------------
 
-REGION_BY_MAX_FLOOR = ((4, "mines"), (8, "swamp"), (13, "sand_labyrinth"),
-                       (18, "ruins"), (24, "underworld"))
+# Region resolution. Barony itself identifies regions by substring-matching map.name
+# (see doorFrameSprite() in maps.cpp), which is the only thing that works for secret
+# levels and DLC maps -- floor numbers cannot distinguish them. So we match the map name
+# first and fall back to the floor table.
+#
+# ORDER MATTERS: more specific entries first. "Hell Boss" contains "boss", "Minetown" and
+# "The Gnomish Mines" both contain "mine". Note hamlet.lmp's internal map name is
+# "Mages Guild", NOT "hamlet" -- files.cpp already special-cases that string.
+MAP_NAME_TO_REGION = (
+    ("hell boss",       "hell"),
+    ("gnomish mines",   "gnomish_mines"),
+    ("minetown",        "minetown"),
+    ("mages guild",     "hamlet"),
+    ("hamlet",          "hamlet"),
+    ("mystic library",  "mystic_library"),
+    ("minotaur",        "minotaur_maze"),
+    ("cockatrice",      "cockatrice_lair"),
+    ("haunted castle",  "haunted_castle"),
+    ("bram",            "brams_castle"),
+    ("sokoban",         "sokoban"),
+    ("temple",          "temple"),
+    ("underworld",      "underworld"),
+    ("sanctum",         "citadel"),
+    ("citadel",         "citadel"),
+    ("caves",           "crystal_caves"),
+    ("hell",            "hell"),
+    ("boss",            "lich_bastion"),
+    ("labyrinth",       "sand_labyrinth"),
+    ("ruins",           "ruins"),
+    ("swamp",           "swamp"),
+    ("mine",            "mines"),
+)
 
-def floor_to_region(floor):
+# Fallback, corrected against maps/levels.txt. The previous table was offset from the real
+# level list and wrong for every floor from 19 up -- it called the Hamlet (the TOWN, floor 25)
+# "hell", and had no entry at all for the town, the crystal caves, the citadel or Herx's lair.
+# Transition floors (minetoswamp 5, swamptolabyrinth 10, labyrinthtoruins 15,
+# cavestocitadel 30) are assigned to the region they lead INTO, which is how a player
+# experiences them.
+REGION_BY_MAX_FLOOR = ((4,  "mines"),          # 1-4   mine
+                       (9,  "swamp"),          # 5     minetoswamp, 6-9 swamp
+                       (14, "sand_labyrinth"), # 10    swamptolabyrinth, 11-14 labyrinth
+                       (19, "ruins"),          # 15    labyrinthtoruins, 16-19 ruins
+                       (20, "lich_bastion"),   # 20    boss -- Herx
+                       (24, "hell"),           # 21-23 hell, 24 hellboss -- Baphomet
+                       (25, "hamlet"),         # 25    hamlet -- the TOWN
+                       (29, "crystal_caves"),  # 26-29 caves
+                       (34, "citadel"))        # 30    cavestocitadel, 31-34 citadel
+                                               # 35+   sanctum -> citadel (default below)
+
+# Plain-language name for each region. The prompt used to carry the region only inside
+# "ABOUT THIS PLACE (hamlet): ..." grounding bullets and never simply said where the speaker
+# was standing -- so a Hamlet townsman said "I've lived in these mines my whole life",
+# picking up "the Mines" from the SETTING line instead. Naming the place outright fixes it.
+REGION_DISPLAY = {
+    "mines": "the Mines", "swamp": "the Swamp", "sand_labyrinth": "the Labyrinth",
+    "ruins": "the Ruins", "lich_bastion": "Baron Herx's stronghold", "hell": "Hell",
+    "hamlet": "the town of Hamlet", "crystal_caves": "the Crystal Caves",
+    "citadel": "the Citadel", "underworld": "the Underworld",
+    "gnomish_mines": "the Gnomish Mines", "minetown": "Minetown",
+    "minotaur_maze": "the Minotaur Maze", "mystic_library": "the Mystic Library",
+    "sokoban": "Sokoban", "temple": "the Temple", "haunted_castle": "the Haunted Castle",
+    "brams_castle": "Bram's Castle", "cockatrice_lair": "the Cockatrice Lair",
+}
+
+def place_name(floor, map_name=""):
+    r = floor_to_region(floor, map_name)
+    return REGION_DISPLAY.get(r, "") if r else ""
+
+def floor_to_region(floor, map_name=""):
+    if map_name:
+        low = map_name.strip().lower()
+        for frag, region in MAP_NAME_TO_REGION:
+            if frag in low:
+                return region
     try:
         f = int(floor)
     except (TypeError, ValueError):
@@ -310,9 +381,9 @@ def floor_to_region(floor):
     for limit, name in REGION_BY_MAX_FLOOR:
         if f <= limit:
             return name
-    return "hell"
+    return "citadel"
 
-def build_lore_context(race, floor, budget=16):
+def build_lore_context(race, floor, budget=16, map_name=""):
     """Priority-ordered static context (per the file's runtime_context_priority):
     entry-specific canon -> base race -> location. Returns (facts, constraints)."""
     r = race.lower()
@@ -344,7 +415,7 @@ def build_lore_context(race, floor, budget=16):
             facts.append(f"TYPICAL TEMPERAMENT (pick what fits, don't be all): {', '.join(axes[:4])}")
 
     # 5. Location: canon + local knowledge
-    region = floor_to_region(floor)
+    region = floor_to_region(floor, map_name)
     loc = FULL.get("location_knowledge_audit", {}).get("location_profiles", {}).get(region, {}) if region else {}
     for lc in loc.get("canon", [])[:2]:
         facts.append(f"ABOUT THIS PLACE ({region}): {lc.strip()}")
@@ -383,6 +454,7 @@ def reset_run():
                        "is_false": False, "player": 0})
     BOON_STATE["good_used"].clear()
     LAST_BOON.clear()
+    npc_state.clear()
     print(f"[SERVICE-DBG] NEW RUN: cleared {n} follower(s), all boon latches, and the Herx secret")
 
 def record_event(uid, race, etype, floor, player=0):
@@ -589,8 +661,8 @@ def _follower_sections(uid, race, floor, says, player=0):
     return (history + memory + _name_section(st) + secret + boon + alleg
             + _obedience_section(st["friendship"]))
 
-def build_prompt(race, floor, says="", uid=0, player=0, player_name="", party=1):
-    head, body = _persona(race, True, floor)
+def build_prompt(race, floor, says="", uid=0, player=0, player_name="", party=1, map_name=""):
+    head, body = _persona(race, True, floor, map_name)
     who = player_name.strip() if player_name else ""
     # In co-op the follower belongs to ONE adventurer but others are present; naming the
     # leader keeps a shared chat feed legible and stops the model addressing the wrong person.
@@ -606,7 +678,10 @@ def build_prompt(race, floor, says="", uid=0, player=0, player_name="", party=1)
                        else f"{speaker} approaches you.\n")
     return (
         head
-        + f"YOU ARE: a {race} on dungeon floor {floor}, an ally the adventurer can command.\n"
+        + (f"YOU ARE: a {race} in {place_name(floor, map_name)}, on dungeon floor {floor}, "
+           "an ally the adventurer can command.\n"
+           if place_name(floor, map_name) else
+           f"YOU ARE: a {race} on dungeon floor {floor}, an ally the adventurer can command.\n")
         + body
         + party_line
         + (_follower_sections(uid, race, floor, says, player) if uid else "")
@@ -619,6 +694,109 @@ def build_prompt(race, floor, says="", uid=0, player=0, player_name="", party=1)
         + (spy_crack_section(get_follower_state(uid, race, player)) if uid else "")
         + 'Respond ONLY with JSON, no other text, like: {"speech": "your line", "action": "FOLLOW"}'
     )
+
+# ---- Non-follower NPCs: townsfolk, merchants, named characters ----------------
+# These are NOT followers. They take no orders, have no friendship ladder, earn no boons
+# and hold no allegiance -- all of that is follower machinery. What they get is light
+# per-run memory so they recognise you on a second visit and stop contradicting themselves.
+#
+# Unlike follower_state, exchanges store BOTH sides of the conversation. Followers store
+# only the player's half, which is why they contradict themselves across turns (a rat
+# claimed to love cheese, then to not eat cheese). Starting NPCs with both halves avoids
+# inheriting that bug.
+
+npc_state = {}   # uid -> {race, name, role, shop, first_floor, met, exchanges}
+
+NPC_EXCHANGE_MEMORY = 4   # how many prior turns to replay into the prompt
+
+# monsterStoreType -> what this merchant actually deals in (shops.cpp:453 switch).
+SHOP_TYPES = {
+    0: "arms and armor", 1: "hats and headwear", 2: "jewelry, rings and gems",
+    3: "books, scrolls and spellbooks", 4: "potions and alchemy", 5: "magic staffs",
+    6: "food and provisions", 7: "tools and lanterns", 8: "hunting gear and bows",
+    9: "general goods", 10: "rare and specialist goods",
+}
+
+def get_npc_state(uid, race, name="", role="townsfolk", shop=-1, floor=0):
+    st = npc_state.get(uid)
+    if st is None:
+        st = {"race": race, "name": name, "role": role, "shop": shop,
+              "first_floor": floor, "met": 0, "exchanges": []}
+        npc_state[uid] = st
+        print(f"[SERVICE-DBG] new NPC {uid}: {name or race} ({role}"
+              + (f", sells {SHOP_TYPES.get(shop, 'goods')}" if role == "shopkeeper" else "") + ")")
+    else:
+        # keep whatever the game now knows; it may have learned the name since
+        if name and not st.get("name"):
+            st["name"] = name
+        if race:
+            st["race"] = race
+    return st
+
+def record_npc_exchange(st, who, said, replied):
+    st["exchanges"].append({"who": who or "the adventurer", "said": said, "replied": replied})
+    st["exchanges"] = st["exchanges"][-NPC_EXCHANGE_MEMORY:]
+
+def _npc_identity(st, race, floor, map_name=""):
+    place = place_name(floor, map_name)
+    where = f" You are in {place} right now, and you speak as someone who is here." if place else ""
+    name = st.get("name", "")
+    role = st.get("role", "townsfolk")
+    who = f"{name}, a {race}" if name else f"a {race}"
+    if role == "shopkeeper":
+        goods = SHOP_TYPES.get(st.get("shop", -1), "goods")
+        line = (f"YOU ARE: {who}. You keep a shop here and deal in {goods}. This is your trade "
+                "and your living; you have opinions about your stock, your prices and your customers."
+                + where + "\n")
+    elif role == "named":
+        line = (f"YOU ARE: {who} — someone of note, known by name in these parts." + where + "\n")
+    else:
+        line = (f"YOU ARE: {who}, living here rather than passing through." + where + "\n")
+    return line
+
+# The single rule that separates an NPC from a follower. Without it the 8B slides straight
+# into companion voice -- offering to come along, awaiting orders, calling the player master.
+NPC_STANDING = (
+    "YOU ARE NOT THIS ADVENTURER'S FOLLOWER AND YOU DO NOT TAKE ORDERS FROM THEM.\n"
+    "You are not travelling with them, you owe them nothing, and you are not waiting to be "
+    "commanded. Do NOT offer to join them, follow them, fight for them, or await their "
+    "instructions. Do NOT call them master, boss, leader, or captain. You have your own life "
+    "here and your own reasons to be civil, curious, wary or busy. If they ask you to come "
+    "along or to do something for them, respond as a person with their own life would — which "
+    "usually means no, or a price.\n"
+)
+
+def _npc_memory_block(st):
+    if not st["exchanges"]:
+        return ""
+    lines = []
+    for e in st["exchanges"]:
+        lines.append(f'{e["who"]} said: "{e["said"]}" — you replied: "{e["replied"]}"')
+    return ("WHAT YOU ALREADY SAID TO THEM (stay consistent with this; do not contradict "
+            "yourself):\n" + _bullets(lines) + "\n")
+
+def build_npc_prompt(race, floor, says="", uid=0, player=0, player_name="",
+                     name="", role="townsfolk", shop=-1, map_name="", greeting=False):
+    st = get_npc_state(uid, race, name, role, shop, floor) if uid else {
+        "name": name, "role": role, "shop": shop, "exchanges": []}
+    head, body = _persona(race, True, floor, map_name)
+    who = player_name.strip() or "The adventurer"
+    if greeting:
+        closing = (f"{who} has just walked up to you. Greet them, or say whatever you would "
+                   "actually say to a stranger who approached you right now. ONE or TWO short "
+                   "sentences. Do not ask how you can help them unless you are a merchant.\n")
+    else:
+        met = st.get("met", 0)
+        again = (" You have spoken with them before.\n" if met > 1 else "\n")
+        closing = (f'{who} says to you: "{says}"' + again +
+                   "Reply in character, in ONE to THREE sentences. Answer what they actually asked.\n")
+    return (head
+            + _npc_identity(st, race, floor, map_name)
+            + body
+            + NPC_STANDING
+            + _npc_memory_block(st)
+            + closing
+            + 'Respond ONLY with JSON, no other text, like: {"speech": "your line"}')
 
 # ---- Reply parsing -----------------------------------------------------------
 
@@ -720,6 +898,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
             player = int(data.get("player", 0) or 0)
             player_name = (data.get("player_name") or "").strip()
             party = max(1, int(data.get("party", 1) or 1))
+            map_name = (data.get("map") or "").strip()
+            # Non-follower NPCs (townsfolk, merchants, named characters). "greeting" is the
+            # line they say when a player first walks up and engages them.
+            npc = bool(data.get("npc", False))
+            greeting = bool(data.get("greeting", False))
+            npc_name = (data.get("npc_name") or "").strip()
+            npc_role = (data.get("npc_role") or "townsfolk").strip()
+            npc_shop = int(data.get("shop", -1) or -1)
 
             # Fire-and-forget event record (e.g. recruitment): no dialogue, just remember it.
             evt = data.get("event", "")
@@ -746,10 +932,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     prompt = build_taunt_prompt(race, floor)
                 elif ambient:
                     prompt = build_ambient_prompt(race, floor, data.get("relation", "hostile"))
+                elif npc:
+                    if uid:
+                        get_npc_state(uid, race, npc_name, npc_role, npc_shop, floor)["met"] += 1
+                    prompt = build_npc_prompt(race, floor, says, uid, player, player_name,
+                                              npc_name, npc_role, npc_shop, map_name, greeting)
                 else:
-                    prompt = build_prompt(race, floor, says, uid, player, player_name, party)
+                    prompt = build_prompt(race, floor, says, uid, player, player_name, party, map_name)
             who = player_name or f"player{player}"
-            print(f"[SERVICE] {race} floor {floor} ({who})")
+            kind = "NPC" if npc else "follower"
+            print(f"[SERVICE] {race} floor {floor} [{kind}] ({who})")
 
             raw = ask_ollama(prompt)
             speech, action = parse_reply(raw)
@@ -757,6 +949,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 speech = "..."  # model declined; show a beat, not nothing
             if action not in VALID_ACTIONS:
                 action = "NONE"
+
+            # NPCs keep their own light memory and never touch follower state.
+            if npc:
+                with STATE_LOCK:
+                    if uid:
+                        st = get_npc_state(uid, race, npc_name, npc_role, npc_shop, floor)
+                        if not greeting:
+                            record_npc_exchange(st, player_name, says, speech)
+                        else:
+                            record_npc_exchange(st, player_name, "(walked up to you)", speech)
+                print(f"[SERVICE] -> npc speech={speech}")
+                return self._send_json({"reply": speech, "action": "NONE", "name": npc_name,
+                                        "player": player, "secret": "", "boon": ""})
 
             name, secret, boon = "", "", ""
             with STATE_LOCK:

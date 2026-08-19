@@ -39,7 +39,9 @@ Fetch upstream with `git fetch origin`; push your work with `git push mine mymod
 | `files.cpp` | `new_run` event in `physfsLoadMapFile` at `levelToLoad <= 1`; plus a `__attribute__((weak))` `mymod_recordEvent` stub | The weak stub exists because the **editor** target compiles `files.cpp` without the mod and would otherwise fail to link |
 | `monster_lich.cpp` | Herx debuff block after `my->setHardcoreStats(*myStats)` | inside the `!MONSTER_INIT` guard, so it can't double-apply |
 | `consolecommand.cpp` | `/aicommand`, `/aiserver`, `/aitest` + `#include "../mymod/mymod.hpp"` | commands legitimately belong here |
-| `net.cpp` | `{'MYAI', ...}` in `serverPacketHandlers`, `{'MYNM', ...}` in `clientPacketHandlers` + `#include "mymod/mymod.hpp"` | the two mod packets. The tables are file-`static`, so registration cannot happen from `mymod.cpp` — 3 lines total |
+| `net.cpp` | `{'MYAI', ...}` in `serverPacketHandlers`; `{'MYNM', ...}` and `{'MYSH', ...}` in `clientPacketHandlers` + `#include "mymod/mymod.hpp"` | the three mod packets. The tables are file-`static`, so registration cannot happen from `mymod.cpp` |
+| `actmonster.cpp` | `mymod_npcEngage()` at the top of `handleMonsterChatter` (~12216) | clicking a talking NPC. **Falls through to the vanilla canned line when it returns false**, so an NPC is never mute if the service is down |
+| `shops.cpp` | `mymod_npcEngage()` at the end of `startTradingServer` | merchant greets on shop open. At the END of the function on purpose — the local-player and remote-client branches both flow through it |
 
 ## Build & run
 
@@ -173,6 +175,87 @@ Types, resolved in strict priority order (first match wins): **trap disarm** (gn
 Display: status lines (thinking/listening/transcribing/executed) are `printlog` (terminal only). **Double-print fixed** — every line used to print twice (a `MESSAGE_MISC` *and* the `MESSAGE_CHAT` broadcast); now one chat line + one bubble. Each conversation slot carries its own `speaker_uid` (whose head the bubble goes over) and `prefix` (the `[taunt]`/`[overheard]` label, or the co-op `"<Player>'s <Follower>: "` attribution).
 
 ---
+
+### Non-follower NPCs — townsfolk, merchants, named characters
+
+Followers are one relationship; the world is full of people who are **not** following you.
+Talking to them runs on separate state and a separate prompt.
+
+**Engaging.** Clicking an NPC is the game's own affordance, so that is the verb: `handleMonsterChatter`
+(the canned-line path, `actmonster.cpp:12210`) is intercepted, and the NPC becomes that player's
+**conversation partner**. `/aicommand` and voice then address the partner instead of the follower,
+until they die, are left >8 tiles behind, or another NPC is engaged. `mymod_partner[MAXPLAYERS]`,
+so four players each hold their own conversation.
+
+The decision tree already in `actMonster`, and where the mod attaches:
+
+| Condition | Vanilla does | Mod does |
+|---|---|---|
+| `STAT_FLAG_NPC == 0` | `makeFollower()` | recruitment event (unchanged) |
+| `STAT_FLAG_NPC != 0` | `handleMonsterChatter()` — canned `Language::get(2700+…)` | **AI dialogue**, falling back to canned |
+| shopkeeper / trader | `startTradingServer()` | **AI greeting into the shop window** |
+
+**`STAT_FLAG_NPC` is overloaded** — for shopkeepers it is the *store type* (stored as `store + 1`,
+so never 0 for them); for everyone else it is the *dialogue type*. `mymod_npcDescribe()` reads
+`monsterStoreType` for merchants and `monsterNameIsGeneric()` to spot the ~30 named NPCs that
+`monster_data.json` already defines (King Arthur, Merlin, Lilith, Bram Kindly, Gharbad, Algernon…).
+
+**Merchants speak in the shop window, not a floating bubble** — that is where the player is looking.
+The shop GUI already owns a speech box: `updateShopWindow()` copies `shopspeech[player]` into
+`shopGUI.chatStrFull` with a typewriter effect. Two hazards, both handled in `mymod_setShopLine` /
+`mymod_holdShopLine`:
+- an idle **chitchat timer overwrites `shopspeech` every ~600 ticks**, so the AI line is re-asserted
+  every frame while live. Re-asserting the *same* string is free — `updateShopWindow` guards on
+  `chatStrFull != buf`, so the typewriter does not restart.
+- **`shopspeech` is used as a printf FORMAT STRING** (`shopgui.cpp:286`). Stray `%` in model output
+  corrupts the line, so it goes through `messageSanitizePercentSign` first. Same class of bug as the
+  `"%s"` guard on speech bubbles.
+
+Clients get merchant lines via `MYSH`; the shop GUI is local to whoever has it open.
+
+**State: light per-run memory, no friendship.** `npc_state[uid]` holds race/name/role/shop and the
+last 4 exchanges. No friendship ladder, no obedience, no boons, no allegiance — that is all follower
+machinery. **Unlike `follower_state`, exchanges store BOTH sides**, which is the fix for the known
+contradiction bug (a rat that loved cheese and then did not eat cheese); verified — asked the same
+question twice, got the same answer.
+
+**The one rule that makes an NPC not a follower** is `NPC_STANDING`. Without it the 8B slides
+straight into companion voice — offering to come along, awaiting orders, saying "master". It
+forbids those routes by name, the same technique as the hard-limits and spy-crack blocks. Verified:
+asked a merchant to come fight, got *"I'm a shopkeeper, not a soldier."*
+
+### Where things actually are (`maps/levels.txt`)
+
+Worth having written down, because two assumptions here were wrong:
+
+| Floor | Map | Floor | Map |
+|---|---|---|---|
+| 1–4 | mine | 20 | **boss — Baron Herx** |
+| 5 | minetoswamp | 21–23 | hell |
+| 6–9 | swamp | 24 | **hellboss — Baphomet** |
+| 10 | swamptolabyrinth | 25 | **hamlet — the TOWN** |
+| 11–14 | labyrinth | 26–29 | caves |
+| 15 | labyrinthtoruins | 30 | cavestocitadel |
+| 16–19 | ruins | 31–34 | citadel, 35 sanctum |
+
+**The town is level 25 and gates behind Baphomet, not the Baron.** The lore file's own hamlet canon
+agrees: *"reached after the Baron/Baphomet sequence."*
+
+**`floor_to_region` was misaligned with this and wrong for 21 of 35 floors** — every floor from 19 up,
+including telling floor-25 townsfolk they were in *hell*. Six of the lore file's 19 location profiles
+were reachable; `hamlet`, `crystal_caves`, `citadel`, `lich_bastion`, `gnomish_mines` and `minetown`
+never resolved at all. Now fixed, and **resolution is by `map.name` first**, mirroring Barony's own
+`doorFrameSprite()` (`maps.cpp:239`) — the only thing that works for secret levels and DLC maps,
+since floor numbers cannot distinguish them. The floor table is now just the fallback.
+
+⚠ **`hamlet.lmp`'s internal `map.name` is `"Mages Guild"`, not "hamlet"** — `files.cpp` already
+special-cases that string. Guessing the name would have failed silently.
+
+**Prompts now name the place, not just the floor.** Grounding bullets said `ABOUT THIS PLACE (hamlet)`
+but nothing ever stated where the speaker was standing, so a Hamlet townsman said *"I've lived in
+these mines my whole life"* — picking up "the Mines" from the SETTING line. `place_name()` fixes it
+for NPCs and followers alike. Verified: 4/4 said Hamlet after, and a follower on floor 20 named
+Herx's stronghold unprompted.
 
 ### Multiplayer (host-authoritative)
 
