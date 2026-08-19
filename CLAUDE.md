@@ -25,7 +25,8 @@ Fetch upstream with `git fetch origin`; push your work with `git push mine mymod
 
 - All mod C++ now lives in **`src/mymod/mymod.cpp`** + `mymod.hpp` (extracted so upstream merges stay clean)
 - Listed in `src/CMakeLists.txt` under `GAME_SOURCES` — **not** in `EDITOR_SOURCES`
-- Service: `~/barony-ai/service.py` (port 5001), plus `barony_lore_full.json` (449KB, 45 sections), `race_lore.json`, `race_books.json`, `comprehension.json`, `voice_bridge.py`
+- Service: `~/barony-ai/service.py` (port 5001), plus `barony_lore_full.json` (449KB, 45 sections), `barony_lore.json` (**only** source of `world.setting` — its wording differs from the full file's, so they are not interchangeable), `race_lore.json`, `race_books.json`, `comprehension.json`, `voice_bridge.py`
+- Data files are resolved relative to `service.py`, so the repo can live anywhere
 - Dev binary: `~/.local/share/Steam/steamapps/common/Barony/barony-modded`
 - IPC via `/tmp/mymod_*.json` (Linux-specific; needs a portability pass before release)
 
@@ -38,6 +39,7 @@ Fetch upstream with `git fetch origin`; push your work with `git push mine mymod
 | `files.cpp` | `new_run` event in `physfsLoadMapFile` at `levelToLoad <= 1`; plus a `__attribute__((weak))` `mymod_recordEvent` stub | The weak stub exists because the **editor** target compiles `files.cpp` without the mod and would otherwise fail to link |
 | `monster_lich.cpp` | Herx debuff block after `my->setHardcoreStats(*myStats)` | inside the `!MONSTER_INIT` guard, so it can't double-apply |
 | `consolecommand.cpp` | `/aicommand`, `/aiserver`, `/aitest` + `#include "../mymod/mymod.hpp"` | commands legitimately belong here |
+| `net.cpp` | `{'MYAI', ...}` in `serverPacketHandlers`, `{'MYNM', ...}` in `clientPacketHandlers` + `#include "mymod/mymod.hpp"` | the two mod packets. The tables are file-`static`, so registration cannot happen from `mymod.cpp` — 3 lines total |
 
 ## Build & run
 
@@ -57,6 +59,10 @@ Service + voice in separate terminals:
 python3 ~/barony-ai/service.py
 python3 ~/barony-ai/voice_bridge.py
 ```
+
+Service config is env-overridable, so a released build needs no file edits:
+`BARONY_AI_OLLAMA`, `BARONY_AI_MODEL`, `BARONY_AI_PORT`, `BARONY_AI_BOOKS` (the books dir still
+defaults to the hardcoded Steam path — that default is the remaining portability blocker).
 
 In-game test harness: `/enablecheats` → `/summonall` → `/friendly`, then interact-recruit.
 
@@ -107,7 +113,7 @@ Friendship ≥5 unlocks a nudge; follower names itself. `extract_name(raw, speec
 ### Herx secret weakness
 Gate: eligible race (skeleton/human) **and** named **and** friendship ≥50 **and** ≥4 `fought_alongside` events, then an escalating roll (+30% if the player asks about Herx directly, +25% if the follower is a spy). One reveal per run.
 
-Four paired truth/debuff variants — the flavor always matches the mechanic. Reply carries `"secret": "<debuff>:<uid>"`, parsed from `::SECRET::`.
+Four paired truth/debuff variants — the flavor always matches the mechanic. Reply carries `"secret": "<debuff>:<uid>"`. There is **no sentinel in the model's output** — `herx_detect(uid, raw, speech)` decides whether the secret was *actually told* by matching the variant's `keywords` against `speech + raw`, plus a literal `"secret"` substring check on `raw`. A pending offer that the model talks around is dropped (`HERX_STATE["pending"] = None` either way).
 
 `initLich` applies it: **tier 1** = knowledge alone; **tier 2** = double, if the informant is alive at spawn (`uidToEntity(informant)`, `HP > 0`). Evaluated once at spawn, not continuously.
 
@@ -123,14 +129,81 @@ Weighted roll at recruitment: **loyal 70 / self_interested 15 / fearful 8 / spy 
 ### Boons
 `boon_roll(st, floor)`: friendship ≥10, one per follower per floor, `chance = min(0.35, (f-10)/200)`. Measured: none at f9, ~2% at f15, ~9% at f30, ~19% at f45, ~25% at f60.
 
-Types: **info** (a fact from the lore context, volunteered), **mundane item** (bread/cheese/glass gem/torch), **one good item per run** (healing potion/garnet, f≥40), **trap disarm** (gnome/automaton/kobold/goblin only, f≥30, rarest). Reply carries `"boon"`, parsed from `::BOON::`.
+Types, resolved in strict priority order (first match wins): **trap disarm** (gnome/automaton/kobold/goblin only, f≥30, 15%) → **one good item per run** (healing/extra healing potion or garnet, f≥40, 20%, latched globally by `BOON_STATE["good_used"]`) → **info** (60%) → **mundane item** (bread/cheese/glass gem/torch, the remainder). A successful stage-1 roll stamps `last_boon_floor` immediately, so it consumes the floor's slot whichever type comes out.
+
+**The boon never round-trips through the model** — there is no `::BOON::` sentinel. `boon_roll` writes `"traps:"` or `"item:TYPE:N"` straight into `LAST_BOON[uid]` (via `_boon_section`), and the handler `pop`s it into the reply's `"boon"` field. The `UNPROMPTED:` prompt line is flavor only: items and trap disarms fire even if the 8B never mentions them. **`info` is the exception** — it writes no payload, so it exists *only* as whatever the model chooses to say, and silently evaporates if the instruction is ignored.
 
 `mymod_disarmFloorTraps()` sets `actTrapSabotaged = 1` — **Barony's own sabotage flag**, checked by every trap type (arrow, boulder ×5, magic, spear). Items spawn via `newItem(...)` + `dropItemMonster(it, giver, ...)` at the follower's feet.
 
 ### Robustness
 `parse_reply(raw)` — strict `json.loads` first, then a regex fallback for malformed 8B output. Tested against 9 patterns. Logs `(JSON malformed - recovered via fallback)`; observed firing in real play.
 
-Display: status lines (thinking/listening/transcribing/executed) are `printlog` (terminal only). Ambient/taunt bubbles use `mymod_ambient_speaker_uid`. **Double-print fixed** — every line used to print twice (a `MESSAGE_MISC` *and* the `MESSAGE_CHAT` broadcast); now one chat line + one bubble, with `mymod_chat_prefix` carrying the `[taunt]`/`[overheard]` label.
+Display: status lines (thinking/listening/transcribing/executed) are `printlog` (terminal only). **Double-print fixed** — every line used to print twice (a `MESSAGE_MISC` *and* the `MESSAGE_CHAT` broadcast); now one chat line + one bubble. Each conversation slot carries its own `speaker_uid` (whose head the bubble goes over) and `prefix` (the `[taunt]`/`[overheard]` label, or the co-op `"<Player>'s <Follower>: "` attribution).
+
+---
+
+### Multiplayer (host-authoritative)
+
+**The host is the only machine that touches Python, Ollama, or the model.** Clients install the
+mod and join — no service, no config, no port-forward. Setup lands entirely on the host, by design.
+The service still binds `127.0.0.1` only: clients talk to the *host's game*, never to the service.
+
+Two findings made this cheap, and both are worth remembering before writing any new netcode here:
+
+- **`messagePlayerColor()` and `createDialogueTooltip()` self-replicate.** Called on the host for
+  a remote player, they emit the vanilla `MSGS` / `BUBL` packets themselves (`net.cpp:431`,
+  `GameUI.cpp:41828`). So host→client dialogue delivery — chat lines *and* speech bubbles — needed
+  no new packets at all. Vanilla's own idiom for a party-wide bubble is a plain
+  `for (c < MAXPLAYERS)` loop that lets the call route itself (`entity.cpp:24463`); `mymod_broadcastLine`
+  matches it.
+- **`monsterAllyIndex` is `skill[42]` and is already replicated** (`serverUpdateEntitySkill(e, 42)`).
+  It gives a follower's owning player on both sides. **But `forceFollower` sets it to `-1` immediately
+  before the recruitment hook runs**, so `mymod_ownerOf()` falls back to `leader_uid → actPlayer→skill[2]`.
+  That fallback is what covers the `/friendly` + force-recruit path — don't remove it.
+
+So the only new netcode is **two packets**:
+
+| Packet | Direction | Payload | Why it must exist |
+|---|---|---|---|
+| `MYAI` | client → host | `[4]`=pnum, `[5..]`=utterance | the client→host direction has no vanilla equivalent |
+| `MYNM` | host → clients | `[4..7]`=uid, `[8..]`=name | vanilla fills a follower's `clientStats->name` **only at recruit time** (`LEAD`); a later rename needs its own packet or the party HUD never updates |
+
+**Per-player state.** `mymod_convo[MAXPLAYERS + 1]` — one conversation slot per player, plus
+`MYMOD_WORLD_SLOT` for ambient/taunts. Everything that was a global singleton (inflight, ready,
+reply, action, name, boon, follower_uid) is now per-slot, so four players never stomp each other.
+`mymod.hpp`'s extern surface shrank to three globals; the rest is file-static.
+
+**Gating.** `gameLogic()` runs on hosts *and* clients, so `mymod_pollAI()` was firing HTTP calls
+to a nonexistent localhost service on every client. Now: ambient/taunts, delivery, and
+`mymod_recordEvent` are all host-only. The `new_run` guard matters most — a client loading a level
+would otherwise wipe the host's entire run state.
+
+**Service is threaded.** `ThreadingTCPServer` + a single `STATE_LOCK` held around state mutation
+but deliberately **not** across `ask_ollama`. Measured: a fire-and-forget event record returns in
+0.00s while a 5.3s generation is in flight. Under the old single-threaded `TCPServer` it waited the
+full 5.3s — with four players that compounds badly.
+
+**Scoping decisions.** Shared feed *and* shared bubbles: everyone sees every follower's line,
+prefixed `"<Player>'s <Follower>: "` (singleplayer keeps the bare line). Herx stays **run-global**
+(one boss, one secret, first reveal wins — `herx_detect` now re-checks `revealed`); the
+once-per-run good item is **per-player**, so joining a party doesn't quarter your follower's
+generosity. `HERX_STATE["pending"]` is keyed by uid now — as a single slot, two concurrent offers
+raced and one was silently dropped.
+
+**Prompt.** Requests carry `player`, `player_name`, and `party`. At `party > 1` the prompt names the
+follower's own adventurer and states the others are companions, not leaders. Verified: a goblin
+answered Bram by name without being told to.
+
+**Voice in co-op:** clients get typed text with zero setup. Push-to-talk still works on a client
+*if* that player chooses to run `voice_bridge.py` (Python + faster-whisper) — transcribed text goes
+out over the same `MYAI` path. Optional extra, never a requirement.
+
+## Decisions on record
+
+- **TTS: no**, for now. Text-first protects reply quality and flexibility (any length/style, no mispronounced generated names, no extra VRAM atop 8B + Whisper, fits the text-native shared feed and the BYO/publishing design). Parked as a possible later optional toggle — if voice ever comes, it adapts to the text, not vice versa.
+- **Obedience is earned, not gated in C++** — prompt-driven, so it stays probabilistic and characterful. A hard C++ friendship gate is a possible later layer.
+- **ATTACK stays diegetic** — target-based attack needs cursor-aim, parked.
+- **The event log is structured records, not flat strings** — so new event types slot in with just a type + importance.
 
 ---
 
@@ -142,6 +215,17 @@ Display: status lines (thinking/listening/transcribing/executed) are `printlog` 
 - Are spy tells catchable *live*, not side-by-side?
 - Do items at a follower's feet get noticed?
 - Do the debuff numbers matter against a 1250 HP boss? (`initLich` logs the applied stats)
+
+**Multiplayer is built but has never met a second machine.** It compiles, the service side is
+verified by curl (two players concurrently, independent state, correct routing), and the host path
+is unchanged from the single-player path that already works. Untested in an actual session:
+- Does a client's `MYAI` actually arrive and come back as chat + bubble?
+- Do shared bubbles render for a player who is nowhere near the speaker? (`createDialogueTooltip`
+  is keyed by uid; if the entity isn't loaded on that client the bubble presumably just doesn't draw.)
+- Does `MYNM` land before the player next opens the follower HUD?
+- Four players talking at once: Ollama queues on one GPU, so replies serialize. How bad does that
+  feel? A queue-depth cap or a "your follower is thinking" nudge may be needed.
+- Recruitment attribution for a *client's* follower — `mymod_ownerOf` is verified by reading, not by play.
 
 **Known gaps:**
 - The **false secret has never been observed firing** — all test rolls landed non-spy. It's the one branch where a bug would be invisible.
@@ -171,4 +255,5 @@ These cost many rounds before Claude Code:
 - **Never bound a replacement by "up to the next `def`/function"** — that silently deleted `build_prompt`'s grounding block, leaving conversation with no canonical grounding *and no hard limits* for several tests. The tell was the prompt token count not moving.
 - When a change doesn't move the token count, **`grep -n "^def "` to map the file** is the first diagnostic, not the fourth.
 - Assert anchor uniqueness before writing (there are four copies of `Entity* pl = players[clientnum]->entity;` in the old `consolecommand.cpp`).
+- **Pass primitives across a cross-file boundary and resolve names where the function links.** `mymod_recordEvent` takes the race as a raw int enum because `getMonsterLocalizedName` links in `mymod.cpp` but not in `actmonster.cpp` — passing the enum dodges the linker error.
 - Watch tab-vs-space indentation; reconstructed multi-line anchors usually fail.

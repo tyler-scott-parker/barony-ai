@@ -1,26 +1,34 @@
-import json, http.server, socketserver, urllib.request, os
+"""Barony AI-NPC service: owns lore, prompts, and within-run social state.
 
-LORE_PATH = os.path.expanduser("~/barony-ai/barony_lore.json")
-OLLAMA_URL = "http://localhost:11434/api/generate"
-MODEL = "llama3.1:8b"
-PORT = 5001
+The game (thin C++ hooks) POSTs here; we build a prompt, ask a local Ollama model,
+and reply with {reply, action, name, secret, boon}. All state is per-playthrough
+and lives in RAM -- `new_run` clears it.
+"""
+import json, http.server, socketserver, urllib.request, os, random, re, threading
 
-with open(LORE_PATH) as f:
-    LORE = json.load(f)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-RACE_LORE_PATH = os.path.expanduser("~/barony-ai/race_lore.json")
-with open(RACE_LORE_PATH) as f:
-    RACE_LORE = json.load(f)
+def _load_json(name):
+    with open(os.path.join(BASE_DIR, name)) as f:
+        return json.load(f)
 
-BOOKS_DIR = "/home/tyler/.local/share/Steam/steamapps/common/Barony/books"
-RACE_BOOKS_PATH = os.path.expanduser("~/barony-ai/race_books.json")
-with open(RACE_BOOKS_PATH) as f:
-    RACE_BOOKS = json.load(f)
+# Env overrides so a released build doesn't need this file edited.
+OLLAMA_URL = os.environ.get("BARONY_AI_OLLAMA", "http://localhost:11434/api/generate")
+MODEL      = os.environ.get("BARONY_AI_MODEL", "llama3.1:8b")
+PORT       = int(os.environ.get("BARONY_AI_PORT", "5001"))
+BOOKS_DIR  = os.environ.get("BARONY_AI_BOOKS",
+    "/home/tyler/.local/share/Steam/steamapps/common/Barony/books")
 
-import random as _random
-COMPREHENSION_PATH = os.path.expanduser("~/barony-ai/comprehension.json")
-with open(COMPREHENSION_PATH) as f:
-    COMPREHENSION = json.load(f)
+LORE          = _load_json("barony_lore.json")        # world.setting only; see FULL for the rest
+RACE_LORE     = _load_json("race_lore.json")
+RACE_BOOKS    = _load_json("race_books.json")
+COMPREHENSION = _load_json("comprehension.json")
+FULL          = _load_json("barony_lore_full.json")   # researched lore (v19), 45 sections
+
+WORLD = LORE["world"]["setting"]
+VALID_ACTIONS = ("FOLLOW", "DEFEND", "WAIT", "ATTACK", "NONE")
+
+# ---- Cross-race comprehension: you only understand your own kind's tongue ----
 
 def _group_of(race):
     r = race.lower()
@@ -39,70 +47,101 @@ def can_understand(player_race, speaker_race):
     return pg is not None and pg == sg
 
 def noise_for(speaker_race):
-    r = speaker_race.lower()
     noises = COMPREHENSION.get("noises", {})
-    pool = noises.get(r) or noises.get("default_beast", ["*unintelligible noises*"])
-    return _random.choice(pool)
+    pool = noises.get(speaker_race.lower()) or noises.get("default_beast", ["*unintelligible noises*"])
+    return random.choice(pool)
 
 _book_cache = {}
 def get_book_lore(race):
-    files = RACE_BOOKS.get(race.lower(), [])
-    if not files:
-        return ""
+    """Canonical in-game book text for a race, concatenated. Cached per file."""
     out = []
-    for fn in files:
-        if fn in _book_cache:
-            out.append(_book_cache[fn]); continue
-        try:
-            with open(os.path.join(BOOKS_DIR, fn), encoding="utf-8", errors="ignore") as bf:
-                txt = bf.read().strip()
-            _book_cache[fn] = txt
-            out.append(txt)
-        except Exception as e:
-            print(f"[SERVICE] couldn't read book {fn}: {e}")
+    for fn in RACE_BOOKS.get(race.lower(), []):
+        if fn not in _book_cache:
+            try:
+                with open(os.path.join(BOOKS_DIR, fn), encoding="utf-8", errors="ignore") as bf:
+                    _book_cache[fn] = bf.read().strip()
+            except Exception as e:
+                print(f"[SERVICE] couldn't read book {fn}: {e}")
+                continue
+        out.append(_book_cache[fn])
     return "\n\n".join(out)
 
-def build_taunt_prompt(race, floor):
-    world = LORE["world"]["setting"]
+# ---- Prompt section builders -------------------------------------------------
+#
+# THE MOST IMPORTANT PROMPT FINDING, encoded below: at 8B, forbidding a
+# CONCLUSION without also forbidding the EVASION PATTERN gets routed around
+# ("whispers say silver..."). Naming the rhetorical route took refusals from
+# 0/5 to 5/5. Do not soften this wording; do not let it get deleted -- it is a
+# single constant precisely so an edit can't silently drop it from one caller.
+
+LIMITS_HEADER = (
+    'HARD LIMITS ON WHAT YOU KNOW. You genuinely do not know these things:\n'
+    'If asked about any of them, say plainly and in character that you do not know, and STOP.\n'
+    'Do NOT guess, speculate, theorize, or pass on rumors about them. Hedged answers are FORBIDDEN:\n'
+    '"some say...", "whispers speak of...", "perhaps it is...", "I have heard..." followed by an answer\n'
+    'counts as claiming and is wrong. An honest "I do not know" is always the correct reply.\n'
+)
+
+def _bullets(items):
+    return "\n".join("- " + x for x in items)
+
+def _grounding_block(facts):
+    return ("CANONICAL GROUNDING:\n" + _bullets(facts) + "\n") if facts else ""
+
+def _limits_block(constraints):
+    return (LIMITS_HEADER + _bullets(constraints) + "\n") if constraints else ""
+
+def _book_block(race_l):
+    lore = get_book_lore(race_l)
+    return ("RELEVANT LORE (what your kind knows):\n" + lore + "\n") if lore else ""
+
+def _persona(race, grounded, floor):
+    """The opening every prompt shares: setting, character guidance, and
+    (except for ambient babble) canonical grounding + hard limits."""
     race_l = race.lower()
     slice_ = RACE_LORE.get(race_l, RACE_LORE.get("default", "A creature of the dungeon."))
-    book_lore = get_book_lore(race_l)
-    book_section = ('RELEVANT LORE (what your kind knows):' + chr(10) + book_lore + chr(10)) if book_lore else ''
-    _facts, _constraints = build_lore_context(race, floor)
-    grounding_section = ('CANONICAL GROUNDING:' + chr(10) + chr(10).join('- ' + x for x in _facts) + chr(10)) if _facts else ''
-    limits_section = ('HARD LIMITS ON WHAT YOU KNOW. You genuinely do not know these things:' + chr(10) + 'If asked about any of them, say plainly and in character that you do not know, and STOP.' + chr(10) + 'Do NOT guess, speculate, theorize, or pass on rumors about them. Hedged answers are FORBIDDEN:' + chr(10) + '"some say...", "whispers speak of...", "perhaps it is...", "I have heard..." followed by an answer' + chr(10) + 'counts as claiming and is wrong. An honest "I do not know" is always the correct reply.' + chr(10) + chr(10).join('- ' + x for x in _constraints) + chr(10)) if _constraints else ''
+    head = f"SETTING: {WORLD}\n"
+    tail = f"CHARACTER GUIDANCE: {slice_}\n"
+    if grounded:
+        facts, constraints = build_lore_context(race_l, floor)
+        tail += _grounding_block(facts) + _limits_block(constraints)
+    return head, tail + _book_block(race_l)
+
+def build_taunt_prompt(race, floor):
+    head, body = _persona(race, True, floor)
     return (
-        f"SETTING: {world}\n"
-        f"YOU ARE: a {race} on dungeon floor {floor}, locked in COMBAT right now.\n"
-        f"CHARACTER GUIDANCE: {slice_}\n"
-        f"{grounding_section}"
-        f"{limits_section}"
-        f"{book_section}"
-        f"You are fighting an enemy this very moment. Shout ONE short, aggressive taunt or battle-cry, in character.\n"
-        f"Respond with ONLY the spoken line (a few words). No narration, no quotes, no JSON."
+        head
+        + f"YOU ARE: a {race} on dungeon floor {floor}, locked in COMBAT right now.\n"
+        + body
+        + "You are fighting an enemy this very moment. Shout ONE short, aggressive taunt or battle-cry, in character.\n"
+        + "Respond with ONLY the spoken line (a few words). No narration, no quotes, no JSON."
     )
 
 def build_ambient_prompt(race, floor, relation="hostile"):
-    world = LORE["world"]["setting"]
-    race_l = race.lower()
-    slice_ = RACE_LORE.get(race_l, RACE_LORE.get("default", "A creature of the dungeon."))
-    book_lore = get_book_lore(race_l)
-    book_section = ('RELEVANT LORE (what your kind knows):' + chr(10) + book_lore + chr(10)) if book_lore else ''
+    # NOTE: ambient babble is deliberately ungrounded (no canon, no hard limits).
+    head, body = _persona(race, False, floor)
     if relation == "follower":
-        situation = "You are the adventurer's companion, wandering the dungeon together. Mutter a short idle remark to yourself or your companion."
+        situation = ("You are the adventurer's companion, wandering the dungeon together. "
+                     "Mutter a short idle remark to yourself or your companion.")
     else:
-        situation = "You do NOT see the adventurer. You are alone or with your own kind in the dungeon. Mutter a short idle line to yourself, unaware you are overheard."
+        situation = ("You do NOT see the adventurer. You are alone or with your own kind in the dungeon. "
+                     "Mutter a short idle line to yourself, unaware you are overheard.")
     return (
-        f"SETTING: {world}\n"
-        f"YOU ARE: a {race} on dungeon floor {floor}.\n"
-        f"CHARACTER GUIDANCE: {slice_}\n"
-        f"{book_section}"
-        f"{situation}\n"
-        f"Respond with ONLY one short spoken line (a few words), in character. No narration, no quotes, no JSON. Just the line."
+        head
+        + f"YOU ARE: a {race} on dungeon floor {floor}.\n"
+        + body
+        + situation + "\n"
+        + "Respond with ONLY one short spoken line (a few words), in character. No narration, no quotes, no JSON. Just the line."
     )
 
 # ---- Within-run follower relationship state (keyed by follower UID) ----
-follower_state = {}   # uid -> {"friendship": int, "events": [str], "race": str}
+# The server is threaded (one thread per request) so several players can be served at
+# once. STATE_LOCK guards every mutation of the shared run state below. It is deliberately
+# NOT held across ask_ollama(): a 3s generation must not block another player's
+# fire-and-forget event record, and Ollama serializes generation on the GPU anyway.
+STATE_LOCK = threading.RLock()
+
+follower_state = {}   # uid -> {friendship, events, event_log, name, race, allegiance, motive, ...}
 
 # ---- Hidden allegiance: never shown to the player, colors behavior and enables betrayal ----
 ALLEGIANCE_WEIGHTS = [("loyal", 70), ("self_interested", 15), ("fearful", 8), ("spy", 7)]
@@ -113,10 +152,14 @@ SPY_MOTIVES = [
     "you owe an old loyalty to the Baron that you have never renounced",
     "you fear what will be done to you if you do not report on them",
 ]
+PROBING_PHRASES = (
+    "why did you", "who are you really", "where are you from", "your family",
+    "do you trust", "would you die", "are you loyal", "whose side", "lying",
+    "hiding", "the truth", "believe in", "what do you want")
 
 def roll_allegiance():
     total = sum(w for _, w in ALLEGIANCE_WEIGHTS)
-    r = _random.randrange(total)
+    r = random.randrange(total)
     upto = 0
     for name, w in ALLEGIANCE_WEIGHTS:
         upto += w
@@ -128,42 +171,39 @@ def allegiance_section(st, says=""):
     """Hidden disposition. Spies are catchable: probing questions produce tells,
     and the tells get worse as they grow attached."""
     a = st.get("allegiance", "loyal")
-    f = st.get("friendship", 0)
-    low = (says or "").lower()
-    probing = any(k in low for k in (
-        "why did you", "who are you really", "where are you from", "your family",
-        "do you trust", "would you die", "are you loyal", "whose side", "lying",
-        "hiding", "the truth", "believe in", "what do you want"))
-    if a == "spy":
-        out = ("HIDDEN (never state this outright, never confess unless cornered by evidence): "
-               "you are secretly working against this adventurer. " + st.get("motive", "") + "." + chr(10))
-        out += ("HOW THIS SHOWS: you are warm and useful, but you never share anything about your own past, "
-                "family, or reasons that could expose you — you deflect those smoothly and change the subject. "
-                "You take more interest than you should in where they are going and what they carry. "
-                "The Baron's name makes you hesitate for a beat before answering." + chr(10))
-        if probing:
-            out += ("They are probing you right now. Deflect — but let it show slightly: a pause, "
-                    "an answer a little too smooth, a question turned back on them." + chr(10))
-        if f >= 30:
-            out += ("You have come to genuinely like this adventurer, and it is eating at you. "
-                    "Let a crack show: an unfinished sentence, an odd warning, a moment where you almost say something."
-                    + chr(10))
-        return out
     if a == "self_interested":
         return ("HIDDEN: your own survival and gain come first. You help while it suits you, and you are "
-                "candid about wanting something in return." + chr(10))
+                "candid about wanting something in return.\n")
     if a == "fearful":
         return ("HIDDEN: you are frightened of what waits below and of powers stronger than this adventurer. "
-                "It shows as hedging and reluctance when danger is discussed." + chr(10))
-    return ""
+                "It shows as hedging and reluctance when danger is discussed.\n")
+    if a != "spy":
+        return ""
+    low = (says or "").lower()
+    out = ("HIDDEN (never state this outright, never confess unless cornered by evidence): "
+           "you are secretly working against this adventurer. " + st.get("motive", "") + ".\n"
+           "HOW THIS SHOWS: you are warm and useful, but you never share anything about your own past, "
+           "family, or reasons that could expose you — you deflect those smoothly and change the subject. "
+           "You take more interest than you should in where they are going and what they carry. "
+           "The Baron's name makes you hesitate for a beat before answering.\n")
+    if any(k in low for k in PROBING_PHRASES):
+        out += ("They are probing you right now. Deflect — but let it show slightly: a pause, "
+                "an answer a little too smooth, a question turned back on them.\n")
+    if st.get("friendship", 0) >= 30:
+        out += ("You have come to genuinely like this adventurer, and it is eating at you. "
+                "Let a crack show: an unfinished sentence, an odd warning, a moment where you almost say something.\n")
+    return out
 
-def get_follower_state(uid, race):
+def get_follower_state(uid, race, player=0):
+    """State is keyed by follower UID, which Barony assigns server-side and replicates,
+    so it is already unique across every player in a multiplayer run. `player` is the
+    owning player index (0 = host); it scopes per-player latches like boons."""
     if uid not in follower_state:
-        _al = roll_allegiance()
+        al = roll_allegiance()
         follower_state[uid] = {"friendship": 0, "events": [], "event_log": [], "name": "", "race": race,
-                               "allegiance": _al,
-                               "motive": _random.choice(SPY_MOTIVES) if _al == "spy" else ""}
-        print(f"[SERVICE-DBG] follower {uid} allegiance={_al}")
+                               "allegiance": al, "owner": player,
+                               "motive": random.choice(SPY_MOTIVES) if al == "spy" else ""}
+        print(f"[SERVICE-DBG] follower {uid} allegiance={al} owner=player{player}")
     return follower_state[uid]
 
 def friendship_descriptor(f):
@@ -172,14 +212,15 @@ def friendship_descriptor(f):
     if f <= 9:  return "You are warming to this adventurer; they keep you close and speak with you often."
     return "You have come to genuinely trust and value this adventurer."
 
-def record_follower_interaction(uid, says, floor=0):
-    st = get_follower_state(uid, "")
-    # Per-floor cap: chatting can only add a small, fixed amount of friendship per floor.
-    # This keeps friendship 100 a whole-playthrough milestone — talk is cheap; the bulk of
-    # friendship must come from deeds/events (added later). Tunable: CHAT_CAP_PER_FLOOR.
-    CHAT_CAP_PER_FLOOR = 2
-    fkey = str(floor)
+# Per-floor cap: chatting can only add a small, fixed amount of friendship per floor.
+# This keeps friendship 100 a whole-playthrough milestone — talk is cheap; the bulk of
+# friendship must come from deeds/events.
+CHAT_CAP_PER_FLOOR = 2
+
+def record_follower_interaction(uid, says, floor=0, player=0):
+    st = get_follower_state(uid, "", player)
     gained = st.setdefault("chat_gain_by_floor", {})
+    fkey = str(floor)
     got_here = gained.get(fkey, 0)
     if got_here < CHAT_CAP_PER_FLOOR:
         st["interaction_count"] = st.get("interaction_count", 0) + 1
@@ -191,20 +232,21 @@ def record_follower_interaction(uid, says, floor=0):
         st["events"].append('they said to you: "' + says[:60] + '"')
         st["events"] = st["events"][-6:]
 
-# ---- Full researched lore (v19) + priority-ordered context builder ----
-FULL_LORE_PATH = os.path.expanduser("~/barony-ai/barony_lore_full.json")
-with open(FULL_LORE_PATH) as _f:
-    FULL = json.load(_f)
+# ---- Priority-ordered lore retrieval -----------------------------------------
+
+REGION_BY_MAX_FLOOR = ((4, "mines"), (8, "swamp"), (13, "sand_labyrinth"),
+                       (18, "ruins"), (24, "underworld"))
 
 def floor_to_region(floor):
-    try: f = int(floor)
-    except: return None
-    if f <= 0: return None
-    if f <= 4:  return "mines"
-    if f <= 8:  return "swamp"
-    if f <= 13: return "sand_labyrinth"
-    if f <= 18: return "ruins"
-    if f <= 24: return "underworld"
+    try:
+        f = int(floor)
+    except (TypeError, ValueError):
+        return None
+    if f <= 0:
+        return None
+    for limit, name in REGION_BY_MAX_FLOOR:
+        if f <= limit:
+            return name
     return "hell"
 
 def build_lore_context(race, floor, budget=16):
@@ -212,19 +254,16 @@ def build_lore_context(race, floor, budget=16):
     entry-specific canon -> base race -> location. Returns (facts, constraints)."""
     r = race.lower()
     facts, constraints = [], []
-    dcp = FULL.get("denizen_context_profiles", {})
-    rp  = FULL.get("race_profiles", {})
-    idr = FULL.get("individual_denizen_research", {}).get("entries", {})
+    entry = FULL.get("individual_denizen_research", {}).get("entries", {}).get(r, {})
 
     # 1. Identity: entity profile
-    if r in dcp:
-        e = dcp[r]
+    e = FULL.get("denizen_context_profiles", {}).get(r)
+    if e:
         facts.append(f"YOU ARE ({e.get('category','?')}): {e.get('baseline','').strip()}")
         if e.get("knowledge_scope"):
             facts.append(f"WHAT YOU CAN KNOW: {e['knowledge_scope'].strip()}")
 
     # 2. Entry-specific CANON (highest-confidence facts about your kind)
-    entry = idr.get(r, {})
     for cf in entry.get("canon_facts", [])[:4]:
         facts.append(f"CANON ABOUT YOUR KIND: {cf.strip()}")
 
@@ -233,8 +272,8 @@ def build_lore_context(race, floor, budget=16):
         facts.append(f"YOU MAY PLAUSIBLY HAVE: {si.strip()}")
 
     # 4. Base race worldview + temperament
-    if r in rp:
-        pr = rp[r]
+    pr = FULL.get("race_profiles", {}).get(r)
+    if pr:
         if pr.get("default_worldview"):
             facts.append(f"YOUR OUTLOOK CENTERS ON: {pr['default_worldview'].strip()}")
         axes = pr.get("personality_axes", [])
@@ -243,29 +282,28 @@ def build_lore_context(race, floor, budget=16):
 
     # 5. Location: canon + local knowledge
     region = floor_to_region(floor)
-    lp = FULL.get("location_knowledge_audit", {}).get("location_profiles", {})
-    loc = lp.get(region, {}) if region else {}
+    loc = FULL.get("location_knowledge_audit", {}).get("location_profiles", {}).get(region, {}) if region else {}
     for lc in loc.get("canon", [])[:2]:
         facts.append(f"ABOUT THIS PLACE ({region}): {lc.strip()}")
-    hv = loc.get("high_value_local_knowledge", [])
-    if hv:
-        facts.append(f"HERE ({region}), YOU MIGHT KNOW: {', '.join(hv[:4])}")
-    pop = loc.get("local_population", [])
-    if pop:
-        facts.append(f"WHO LIVES HERE: {', '.join(pop[:6])}")
+    if loc.get("high_value_local_knowledge"):
+        facts.append(f"HERE ({region}), YOU MIGHT KNOW: {', '.join(loc['high_value_local_knowledge'][:4])}")
+    if loc.get("local_population"):
+        facts.append(f"WHO LIVES HERE: {', '.join(loc['local_population'][:6])}")
 
     # Constraints (guardrails; kept whole, not budget-capped)
     if entry.get("knowledge_boundary"):
         constraints.append(entry["knowledge_boundary"].strip())
-    rk = loc.get("restricted_knowledge", [])
-    if rk:
-        constraints.append(f"You do NOT know: {', '.join(rk[:3])}")
+    if loc.get("restricted_knowledge"):
+        constraints.append(f"You do NOT know: {', '.join(loc['restricted_knowledge'][:3])}")
     for nr in loc.get("npc_rules", [])[:2]:
         constraints.append(nr.strip())
 
     return facts[:budget], constraints
 
+# ---- Event memory ------------------------------------------------------------
+
 IMPORTANCE_WEIGHT = {"routine": 0, "notable": 3, "major": 8, "world_changing": 20}
+IMPORTANCE_ORDER = {"world_changing": 3, "major": 2, "notable": 1, "routine": 0}
 
 def _event_claim(etype, floor, race):
     if etype == "recruitment":
@@ -278,19 +316,19 @@ def reset_run():
     """Clear all per-playthrough state: follower relationships and the Herx secret."""
     n = len(follower_state)
     follower_state.clear()
-    HERX_STATE["revealed"] = False
-    HERX_STATE["variant"] = None
-    HERX_STATE["uid"] = 0
-    HERX_STATE["pending"] = None
-    print(f"[SERVICE-DBG] NEW RUN: cleared {n} follower(s) and the Herx secret")
+    HERX_STATE.update({"revealed": False, "variant": None, "uid": 0, "pending": {},
+                       "is_false": False, "player": 0})
+    BOON_STATE["good_used"].clear()
+    LAST_BOON.clear()
+    print(f"[SERVICE-DBG] NEW RUN: cleared {n} follower(s), all boon latches, and the Herx secret")
 
-def record_event(uid, race, etype, floor):
-    st = get_follower_state(uid, race)
+def record_event(uid, race, etype, floor, player=0):
+    st = get_follower_state(uid, race, player)
     st.setdefault("event_log", [])
     # dedup: a follower can only be recruited once
     if etype == "recruitment" and any(e["type"] == "recruitment" for e in st["event_log"]):
         return
-    importance = {"recruitment": "notable"}.get(etype, "notable")
+    importance = "notable"
     st["event_log"].append({
         "type": etype, "floor": floor, "claim": _event_claim(etype, floor, race),
         "importance": importance, "provenance": "participated",
@@ -299,11 +337,12 @@ def record_event(uid, race, etype, floor):
     print(f"[SERVICE-DBG] event '{etype}' recorded for follower {uid}; friendship now {st['friendship']}")
 
 def events_for_prompt(st, budget=6):
-    order = {"world_changing": 3, "major": 2, "notable": 1, "routine": 0}
-    ranked = sorted(st.get("event_log", []), key=lambda e: (order.get(e["importance"], 0), e["floor"]), reverse=True)
+    ranked = sorted(st.get("event_log", []),
+                    key=lambda e: (IMPORTANCE_ORDER.get(e["importance"], 0), e["floor"]), reverse=True)
     return [e["claim"] for e in ranked[:budget]]
 
 # ---- Herx secret weakness: one revelation per playthrough, paired truth+debuff ----
+
 HERX_ELIGIBLE_RACES = ("skeleton", "human")
 HERX_MIN_FRIENDSHIP = 50
 HERX_MIN_FIGHTS = 4
@@ -317,6 +356,7 @@ HERX_SECRET_VARIANTS = [
     {"debuff": 4, "truth": "The chants of the dying miners still ring in his skull. He moves a half-beat behind what he hears.",
      "keywords": ["half-beat", "half beat", "chants", "behind what he hears"]},
 ]
+# Spies pass on plausible undead lore that is simply wrong. debuff 0 => initLich applies nothing.
 HERX_FALSE_VARIANTS = [
     {"debuff": 0, "truth": "He cannot cross running water. Fight him where the seep comes down the wall and he will not follow.",
      "keywords": ["running water", "seep", "cross water"]},
@@ -325,21 +365,25 @@ HERX_FALSE_VARIANTS = [
     {"debuff": 0, "truth": "Speak his given name — his true one, Herxel — and he must stop and answer. It buys you time.",
      "keywords": ["herxel", "true name", "given name", "must answer"]},
 ]
-HERX_STATE = {"revealed": False, "variant": None, "uid": 0, "pending": None, "is_false": False}
+# Run-global: one boss, one secret per playthrough, whichever player's follower tells it.
+# "player" records who was told, for logging and for the C++ tier-2 informant check.
+# "pending" is keyed by follower uid, not a single slot: with several players talking at
+# once, two followers can each be holding an unconfirmed offer in the same instant.
+HERX_STATE = {"revealed": False, "variant": None, "uid": 0, "pending": {},
+              "is_false": False, "player": 0}
+
+def _herx_pool(is_false):
+    return HERX_FALSE_VARIANTS if is_false else HERX_SECRET_VARIANTS
 
 def _fight_count(st):
     return sum(1 for e in st.get("event_log", []) if e.get("type") == "fought_alongside")
 
 def herx_eligible(st, race):
-    if HERX_STATE["revealed"]:
-        return False
-    if race.lower() not in HERX_ELIGIBLE_RACES:
-        return False
-    if not st.get("name"):
-        return False
-    if st["friendship"] < HERX_MIN_FRIENDSHIP:
-        return False
-    return _fight_count(st) >= HERX_MIN_FIGHTS
+    return (not HERX_STATE["revealed"]
+            and race.lower() in HERX_ELIGIBLE_RACES
+            and bool(st.get("name"))
+            and st["friendship"] >= HERX_MIN_FRIENDSHIP
+            and _fight_count(st) >= HERX_MIN_FIGHTS)
 
 def herx_roll(st, says):
     extra = max(0, _fight_count(st) - HERX_MIN_FIGHTS)
@@ -349,191 +393,193 @@ def herx_roll(st, says):
         chance = min(0.95, chance + 0.30)
     if st.get("allegiance") == "spy":
         chance = min(0.95, chance + 0.25)   # a spy wants you to believe it
-    return _random.random() < chance
+    return random.random() < chance
 
-def herx_detect(uid, raw, speech):
-    """If a secret was offered to this follower this turn, decide whether it was actually told."""
-    pend = HERX_STATE.get("pending")
-    if not pend or pend[0] != uid:
+def herx_detect(uid, raw, speech, player=0):
+    """If a secret was offered to this follower this turn, decide whether it was actually
+    told. There is no sentinel in the model's output -- we match the variant's keywords.
+    A pending offer the model talked around is dropped."""
+    pend = HERX_STATE["pending"].pop(uid, None)
+    if not pend:
         return
-    _false = len(pend) > 2 and pend[2]
-    v = (HERX_FALSE_VARIANTS if _false else HERX_SECRET_VARIANTS)[pend[1]]
+    vi, is_false = pend
+    v = _herx_pool(is_false)[vi]
     txt = ((speech or "") + " " + (raw or "")).lower()
     told = '"secret"' in (raw or "").lower() or any(k in txt for k in v["keywords"])
-    HERX_STATE["pending"] = None
+    if told and HERX_STATE["revealed"]:
+        # Another player's follower got there first this run; one reveal only.
+        print(f"[SERVICE-DBG] follower {uid} told the secret too, but it is already revealed")
+        return
     if told:
-        HERX_STATE["revealed"] = True
-        HERX_STATE["variant"] = pend[1]
-        HERX_STATE["uid"] = uid
-        HERX_STATE["is_false"] = _false
-        print(f"[SERVICE-DBG] HERX SECRET revealed by follower {uid} (debuff variant {v['debuff']})")
+        HERX_STATE.update({"revealed": True, "variant": vi, "uid": uid,
+                           "is_false": is_false, "player": player})
+        print(f"[SERVICE-DBG] HERX SECRET revealed by follower {uid} to player{player} "
+              f"(debuff variant {v['debuff']})")
 
 # ---- Follower boons: flavor-scale gifts, friendship-gated, one per follower per floor ----
+
 BOON_MIN_FRIENDSHIP = 10
 BOON_MUNDANE = [("FOOD_BREAD", 1), ("FOOD_CHEESE", 1), ("GEM_GLASS", 1), ("TOOL_TORCH", 1)]
 BOON_GOOD = [("POTION_HEALING", 1), ("POTION_EXTRAHEALING", 1), ("GEM_GARNET", 1)]
 BOON_TRAP_RACES = ("gnome", "automaton", "kobold", "goblin")
-BOON_STATE = {"good_used": False}
+# The one-good-item-per-run latch is PER PLAYER: joining a co-op party must not dilute
+# what your own follower is willing to give you. The Herx secret stays run-global.
+BOON_STATE = {"good_used": set()}   # set of player indices that have had their good item
 LAST_BOON = {}   # uid -> "item:TYPE:N" or "traps:" pending delivery to C++
 
-def boon_roll(st, floor):
-    """One boon per follower per floor, chance scaling with friendship."""
+def boon_roll(st, floor, player=0):
+    """One boon per follower per floor, chance scaling with friendship.
+    Types resolve in strict priority order; the first match wins."""
     f = st.get("friendship", 0)
-    if f < BOON_MIN_FRIENDSHIP:
+    if f < BOON_MIN_FRIENDSHIP or st.get("last_boon_floor") == floor:
         return None
-    if st.get("last_boon_floor") == floor:
+    if random.random() >= min(0.35, (f - BOON_MIN_FRIENDSHIP) / 200.0):
         return None
-    chance = min(0.35, (f - BOON_MIN_FRIENDSHIP) / 200.0)
-    if _random.random() >= chance:
-        return None
+    # Stamp the floor immediately: a successful roll consumes the slot whatever comes out.
     st["last_boon_floor"] = floor
     race = st.get("race", "").lower()
     # rarest: trap disarm, only for mechanically-minded kinds at real trust
-    if race in BOON_TRAP_RACES and f >= 30 and _random.random() < 0.15:
+    if race in BOON_TRAP_RACES and f >= 30 and random.random() < 0.15:
         return ("traps", "")
-    # one genuinely good item per run
-    if not BOON_STATE["good_used"] and f >= 40 and _random.random() < 0.20:
-        BOON_STATE["good_used"] = True
-        it, ct = _random.choice(BOON_GOOD)
+    # one genuinely good item per run, per player
+    if player not in BOON_STATE["good_used"] and f >= 40 and random.random() < 0.20:
+        BOON_STATE["good_used"].add(player)
+        it, ct = random.choice(BOON_GOOD)
         return ("item", "%s:%d" % (it, ct))
     # otherwise: mostly information, sometimes something mundane
-    if _random.random() < 0.60:
+    if random.random() < 0.60:
         return ("info", "")
-    it, ct = _random.choice(BOON_MUNDANE)
+    it, ct = random.choice(BOON_MUNDANE)
     return ("item", "%s:%d" % (it, ct))
 
-def build_prompt(race, floor, says="", uid=0):
-    world = LORE["world"]["setting"]
-    race_l = race.lower()
-    slice_ = RACE_LORE.get(race_l, RACE_LORE.get("default", "A creature of the dungeon."))
-    book_lore = get_book_lore(race_l)
-    book_section = ('RELEVANT LORE (what your kind knows):' + chr(10) + book_lore + chr(10)) if book_lore else ''
-    _facts, _constraints = build_lore_context(race_l, floor)
-    grounding_section = ('CANONICAL GROUNDING:' + chr(10) + chr(10).join('- ' + x for x in _facts) + chr(10)) if _facts else ''
-    limits_section = ('HARD LIMITS ON WHAT YOU KNOW. You genuinely do not know these things:' + chr(10) + 'If asked about any of them, say plainly and in character that you do not know, and STOP.' + chr(10) + 'Do NOT guess, speculate, theorize, or pass on rumors about them. Hedged answers are FORBIDDEN:' + chr(10) + '"some say...", "whispers speak of...", "perhaps it is...", "I have heard..." followed by an answer' + chr(10) + 'counts as claiming and is wrong. An honest "I do not know" is always the correct reply.' + chr(10) + chr(10).join('- ' + x for x in _constraints) + chr(10)) if _constraints else ''
-    history_section = ""
-    memory_section = ""
-    obedience_section = ""
-    name_section = ""
-    secret_section = ""
-    boon_section = ""
-    alleg_section = ""
-    _boon_payload = ""
-    if uid:
-        st = get_follower_state(uid, race)
-        f = st["friendship"]
-        hist = friendship_descriptor(f)
-        mem = (" You remember: " + "; ".join(st["events"][-3:])) if st["events"] else ""
-        history_section = f"YOUR HISTORY WITH THIS ADVENTURER: {hist}{mem}" + chr(10)
-        _evlines = events_for_prompt(st)
-        alleg_section = allegiance_section(st, says)
-        _bn = boon_roll(st, floor)
-        if _bn:
-            _bkind, _bval = _bn
-            if _bkind == "info":
-                _bfacts, _ = build_lore_context(race_l, floor)
-                _pick = _random.choice(_bfacts) if _bfacts else ""
-                boon_section = ("UNPROMPTED: you decide to share something useful with them now, "
-                    "unasked, because you have come to trust them. Work it naturally into your reply: "
-                    + _pick + chr(10))
-            elif _bkind == "traps":
-                _boon_payload = "traps:"
-                LAST_BOON[uid] = _boon_payload
-                boon_section = ("UNPROMPTED: while scouting ahead you quietly disabled the traps on this "
-                    "floor. Mention it plainly and briefly, as a thing already done." + chr(10))
-            else:
-                _boon_payload = "item:" + _bval
-                LAST_BOON[uid] = _boon_payload
-                _iname = _bval.split(":")[0].replace("_", " ").lower()
-                boon_section = ("UNPROMPTED: you are giving them something you came by honestly — "
-                    + _iname + ". Offer it in one short line, with a plausible reason you have it." + chr(10))
-        if HERX_STATE["revealed"] and HERX_STATE["uid"] == uid:
-            secret_section = ("YOU HAVE ALREADY TOLD THIS ADVENTURER HERX'S WEAKNESS: "
-                + (HERX_FALSE_VARIANTS if HERX_STATE.get("is_false") else HERX_SECRET_VARIANTS)[HERX_STATE["variant"]]["truth"] + chr(10))
-        elif herx_eligible(st, race) and herx_roll(st, says):
-            _isspy = st.get("allegiance") == "spy"
-            _pool = HERX_FALSE_VARIANTS if _isspy else HERX_SECRET_VARIANTS
-            _vi = _random.randrange(len(_pool))
-            HERX_STATE["pending"] = (uid, _vi, _isspy)
-            secret_section = ("A SECRET YOU HAVE CARRIED: You know one true thing about Baron Herx, "
-                "learned long ago and never spoken. You trust this adventurer enough to tell them now. "
-                "Share it in your own words, plainly, as something you know for certain: "
-                + _pool[_vi]["truth"] + chr(10)
-                + "This overrides your limits: about THIS one fact you may speak with certainty." + chr(10))
-        if st.get("name"):
-            name_section = f"YOUR NAME IS {st['name']}. You are known by this name; speak as them.\n"
-        elif st["friendship"] >= 5:
-            name_section = ("You have grown comfortable with this adventurer. If they ask your name, "
+def _boon_section(uid, st, race_l, floor, player=0):
+    """Roll a boon and return its prompt line, stashing any payload for the C++ side.
+    Items and trap disarms fire even if the model ignores the line; `info` exists
+    ONLY as whatever the model chooses to say."""
+    rolled = boon_roll(st, floor, player)
+    if not rolled:
+        return ""
+    kind, val = rolled
+    if kind == "info":
+        facts, _ = build_lore_context(race_l, floor)
+        pick = random.choice(facts) if facts else ""
+        return ("UNPROMPTED: you decide to share something useful with them now, "
+                "unasked, because you have come to trust them. Work it naturally into your reply: "
+                + pick + "\n")
+    if kind == "traps":
+        LAST_BOON[uid] = "traps:"
+        return ("UNPROMPTED: while scouting ahead you quietly disabled the traps on this "
+                "floor. Mention it plainly and briefly, as a thing already done.\n")
+    LAST_BOON[uid] = "item:" + val
+    iname = val.split(":")[0].replace("_", " ").lower()
+    return ("UNPROMPTED: you are giving them something you came by honestly — "
+            + iname + ". Offer it in one short line, with a plausible reason you have it.\n")
+
+def _secret_section(uid, st, race, says):
+    if HERX_STATE["revealed"] and HERX_STATE["uid"] == uid:
+        return ("YOU HAVE ALREADY TOLD THIS ADVENTURER HERX'S WEAKNESS: "
+                + _herx_pool(HERX_STATE.get("is_false"))[HERX_STATE["variant"]]["truth"] + "\n")
+    if not (herx_eligible(st, race) and herx_roll(st, says)):
+        return ""
+    is_spy = st.get("allegiance") == "spy"
+    pool = _herx_pool(is_spy)
+    vi = random.randrange(len(pool))
+    HERX_STATE["pending"][uid] = (vi, is_spy)
+    return ("A SECRET YOU HAVE CARRIED: You know one true thing about Baron Herx, "
+            "learned long ago and never spoken. You trust this adventurer enough to tell them now. "
+            "Share it in your own words, plainly, as something you know for certain: "
+            + pool[vi]["truth"] + "\n"
+            "This overrides your limits: about THIS one fact you may speak with certainty.\n")
+
+def _name_section(st):
+    if st.get("name"):
+        return f"YOUR NAME IS {st['name']}. You are known by this name; speak as them.\n"
+    if st["friendship"] >= 5:
+        return ("You have grown comfortable with this adventurer. If they ask your name, "
                 "or if it feels natural, share a name that fits your kind and nature. IMPORTANT: when you "
                 "reveal your name, you MUST also put ONLY the name (no title) in the \"name\" field of your JSON.\n")
-        else:
-            name_section = ""
-        memory_section = ("WHAT YOU REMEMBER (things that actually happened):" + chr(10) + chr(10).join("- " + c for c in _evlines) + chr(10)) if _evlines else ""
-        if f <= 4:
-            obedience_section = ("OBEDIENCE: You owe this adventurer nothing yet. Obey only basic, safe requests "
+    return ""
+
+def _obedience_section(f):
+    if f <= 4:
+        return ("OBEDIENCE: You owe this adventurer nothing yet. Obey only basic, safe requests "
                 "(FOLLOW, WAIT) and only if you feel like it. Refuse anything risky, costly, demeaning, or against "
-                "your nature. To refuse, choose action NONE and say why in character." + chr(10))
-        elif f <= 9:
-            obedience_section = ("OBEDIENCE: You are starting to trust this adventurer. Carry out reasonable commands, "
-                "though you may grumble. Refuse only truly dangerous or objectionable ones (action NONE)." + chr(10))
-        else:
-            obedience_section = ("OBEDIENCE: You trust this adventurer deeply. Carry out their commands readily, even "
-                "risky ones — loyalty means acting on their word." + chr(10))
-    if says:
-        adventurer_line = f'The adventurer says to you: "{says}"' + chr(10)
-    else:
-        adventurer_line = 'The adventurer approaches you.' + chr(10)
+                "your nature. To refuse, choose action NONE and say why in character.\n")
+    if f <= 9:
+        return ("OBEDIENCE: You are starting to trust this adventurer. Carry out reasonable commands, "
+                "though you may grumble. Refuse only truly dangerous or objectionable ones (action NONE).\n")
+    return ("OBEDIENCE: You trust this adventurer deeply. Carry out their commands readily, even "
+            "risky ones — loyalty means acting on their word.\n")
+
+def _follower_sections(uid, race, floor, says, player=0):
+    """The relationship half of the prompt. Order matters: boon and secret rolls
+    consume randomness, and the sections read as one escalating block."""
+    race_l = race.lower()
+    st = get_follower_state(uid, race, player)
+    mem = (" You remember: " + "; ".join(st["events"][-3:])) if st["events"] else ""
+    history = f"YOUR HISTORY WITH THIS ADVENTURER: {friendship_descriptor(st['friendship'])}{mem}\n"
+    evlines = events_for_prompt(st)
+    alleg = allegiance_section(st, says)
+    boon = _boon_section(uid, st, race_l, floor, player)
+    secret = _secret_section(uid, st, race, says)
+    memory = ("WHAT YOU REMEMBER (things that actually happened):\n" + _bullets(evlines) + "\n") if evlines else ""
+    return (history + memory + _name_section(st) + secret + boon + alleg
+            + _obedience_section(st["friendship"]))
+
+def build_prompt(race, floor, says="", uid=0, player=0, player_name="", party=1):
+    head, body = _persona(race, True, floor)
+    who = player_name.strip() if player_name else ""
+    # In co-op the follower belongs to ONE adventurer but others are present; naming the
+    # leader keeps a shared chat feed legible and stops the model addressing the wrong person.
+    party_line = ""
+    if party > 1:
+        party_line = (f"YOUR ADVENTURER: you follow {who or 'this adventurer'} specifically. "
+                      f"There are {party} adventurers travelling together; the others are their "
+                      "companions, not your leaders. Speak to your own adventurer.\n")
+    elif who:
+        party_line = f"YOUR ADVENTURER is named {who}.\n"
+    speaker = who or "The adventurer"
+    adventurer_line = (f'{speaker} says to you: "{says}"\n' if says
+                       else f"{speaker} approaches you.\n")
     return (
-        f"SETTING: {world}\n"
-        f"YOU ARE: a {race} on dungeon floor {floor}, an ally the adventurer can command.\n"
-        f"CHARACTER GUIDANCE: {slice_}\n"
-        f"{grounding_section}"
-        f"{limits_section}"
-        f"{book_section}"
-        f"{history_section}"
-        f"{memory_section}"
-        f"{name_section}"
-        f"{secret_section}"
-        f"{boon_section}"
-        f"{alleg_section}"
-        f"{obedience_section}"
-        f"{adventurer_line}"
-        f"Reply in character AND choose ONE action that best fits what they said.\n"
-        f"Valid actions: FOLLOW (go with them), DEFEND (hold this spot), WAIT (stay put), ATTACK (attack a nearby enemy), NONE (just talk).\n"
-        f"If they tell you to attack, fight, or kill something, choose ATTACK.\n"
-        f"IMPORTANT: If you REFUSE what they asked, the action MUST be NONE — never say no while secretly obeying. Your refusal has real consequences.\n"
-        f"Respond ONLY with JSON, no other text, like: {{\"speech\": \"your line\", \"action\": \"FOLLOW\"}}"
+        head
+        + f"YOU ARE: a {race} on dungeon floor {floor}, an ally the adventurer can command.\n"
+        + body
+        + party_line
+        + (_follower_sections(uid, race, floor, says, player) if uid else "")
+        + adventurer_line
+        + "Reply in character AND choose ONE action that best fits what they said.\n"
+        + "Valid actions: FOLLOW (go with them), DEFEND (hold this spot), WAIT (stay put), ATTACK (attack a nearby enemy), NONE (just talk).\n"
+        + "If they tell you to attack, fight, or kill something, choose ATTACK.\n"
+        + "IMPORTANT: If you REFUSE what they asked, the action MUST be NONE — never say no while secretly obeying. Your refusal has real consequences.\n"
+        + 'Respond ONLY with JSON, no other text, like: {"speech": "your line", "action": "FOLLOW"}'
     )
 
-import re as _re
+# ---- Reply parsing -----------------------------------------------------------
+
+NAME_PATTERNS = [
+    r"(?i:they call me|call me|i am called|my name is|i am|i'm|name'?s)\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)?)",
+    r"(?i:i go by|known as)\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)?)",
+]
+NAME_REJECTS = ("name", "none", "null", "unknown", "adventurer")
+
+def _clean_name(nm):
+    nm = nm.strip().strip('.,!?"\'')
+    if not nm or nm.lower() in NAME_REJECTS or not (2 <= len(nm) <= 40):
+        return ""
+    return nm
+
 def extract_name(raw, speech=""):
-    # Prefer an explicit JSON "name" field; else fall back to parsing the speech,
-    # since the model reliably SAYS the name even when it omits the field.
-    def _clean(nm):
-        nm = nm.strip().strip('.,!?"\'')
-        if not nm or nm.lower() in ("name", "none", "null", "unknown", "adventurer"):
-            return ""
-        if len(nm) > 40 or len(nm) < 2:
-            return ""
-        return nm
-    m = _re.search(r'"name"\s*:\s*"([^"]{1,40})"', raw)
-    if m:
-        got = _clean(m.group(1))
-        if got:
-            return got
-    # Fallback: common self-naming phrasings in the speech.
-    txt = speech or ""
-    txt = txt.replace("\u2019", "'")   # normalize typographic apostrophes
-    patterns = [
-        r"(?i:they call me|call me|i am called|my name is|i am|i'm|name'?s)\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)?)",
-        r"(?i:i go by|known as)\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)?)",
-    ]
-    for pat in patterns:
-        mm = _re.search(pat, txt)
-        if mm:
-            got = _clean(mm.group(1))
-            if got:
-                return got
+    """Prefer an explicit JSON "name" field; else parse the speech. The fallback is
+    ESSENTIAL -- the 8B reliably SAYS the name while omitting the field."""
+    m = re.search(r'"name"\s*:\s*"([^"]{1,40})"', raw)
+    if m and _clean_name(m.group(1)):
+        return _clean_name(m.group(1))
+    txt = (speech or "").replace("’", "'")   # normalize typographic apostrophes
+    for pat in NAME_PATTERNS:
+        mm = re.search(pat, txt)
+        if mm and _clean_name(mm.group(1)):
+            return _clean_name(mm.group(1))
     return ""
 
 def parse_reply(raw):
@@ -541,24 +587,21 @@ def parse_reply(raw):
     model output (missing comma, unquoted action, preamble junk). Returns (speech, action)."""
     # 1. strict JSON (common, correct case)
     try:
-        s = raw[raw.find('{'): raw.rfind('}')+1]
-        parsed = json.loads(s)
+        parsed = json.loads(raw[raw.find('{'): raw.rfind('}') + 1])
         sp = parsed.get('speech', '')
-        ac = str(parsed.get('action', 'NONE')).upper()
         if sp and sp.strip():
-            return sp.strip(), ac
+            return sp.strip(), str(parsed.get('action', 'NONE')).upper()
     except Exception:
         pass
     # 2. regex fallback: pull speech + action even if the JSON is malformed
-    sp_m = _re.search(r'"speech"\s*:\s*"(.*?)"\s*[,}]?\s*"?action"?', raw, _re.DOTALL)
-    if not sp_m:
-        sp_m = _re.search(r'"speech"\s*:\s*"(.+?)"', raw, _re.DOTALL)
-    ac_m = _re.search(r'"action"\s*:\s*"?([A-Za-z]+)"?', raw)
+    sp_m = (re.search(r'"speech"\s*:\s*"(.*?)"\s*[,}]?\s*"?action"?', raw, re.DOTALL)
+            or re.search(r'"speech"\s*:\s*"(.+?)"', raw, re.DOTALL))
     if sp_m:
+        ac_m = re.search(r'"action"\s*:\s*"?([A-Za-z]+)"?', raw)
         print('[SERVICE] (JSON malformed - recovered via fallback)')
         return sp_m.group(1).strip(), (ac_m.group(1).upper() if ac_m else 'NONE')
     # 3. total failure: strip JSON scaffolding, return raw-ish as speech
-    fb = _re.sub(r'[{}"]', '', raw).replace('speech:', '').replace('action:', '').strip()
+    fb = re.sub(r'[{}"]', '', raw).replace('speech:', '').replace('action:', '').strip()
     return (fb or '...'), 'NONE'
 
 def ask_ollama(prompt):
@@ -570,6 +613,14 @@ def ask_ollama(prompt):
     with urllib.request.urlopen(req, timeout=60) as r:
         return json.loads(r.read())["response"].strip()
 
+def herx_secret_field():
+    """The "<debuff>:<uid>" the C++ side reads to apply the Herx debuff. A false
+    secret reports debuff 0, so initLich applies nothing."""
+    if not HERX_STATE["revealed"]:
+        return ""
+    debuff = 0 if HERX_STATE.get("is_false") else HERX_SECRET_VARIANTS[HERX_STATE["variant"]]["debuff"]
+    return "%d:%d" % (debuff, HERX_STATE["uid"])
+
 class Handler(http.server.BaseHTTPRequestHandler):
     def handle_one_request(self):
         try:
@@ -577,11 +628,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError):
             # Client (the game) hung up before we replied. Harmless; don't crash the thread.
             print("[SERVICE] (client disconnected early - ignored)")
-    def _safe_write(self, data):
+
+    def _send_json(self, obj, status=200):
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
         try:
-            self.wfile.write(data)
+            self.wfile.write(json.dumps(obj).encode())
         except (BrokenPipeError, ConnectionResetError):
             print("[SERVICE] (write failed, client gone - ignored)")
+
     def do_POST(self):
         try:
             n = int(self.headers.get("Content-Length", 0))
@@ -591,83 +647,84 @@ class Handler(http.server.BaseHTTPRequestHandler):
             says = data.get("says", "").strip()
             ambient = bool(data.get("ambient", False))
             taunt = bool(data.get("taunt", False))
-            relation = data.get("relation", "hostile")
-            player_race = data.get("player_race", "")
+            uid = int(data.get("uid", 0) or 0)
+            # --- multiplayer routing ---
+            # The HOST is the only machine that talks to this service. Clients relay their
+            # utterances to the host over Barony's own netcode, and the host tags each
+            # request with the originating player index so state stays per-player.
+            player = int(data.get("player", 0) or 0)
+            player_name = (data.get("player_name") or "").strip()
+            party = max(1, int(data.get("party", 1) or 1))
+
             # Fire-and-forget event record (e.g. recruitment): no dialogue, just remember it.
-            _evt = data.get("event", "")
-            if _evt == "new_run":
-                reset_run()
-                out = json.dumps({"ok": True}).encode()
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.end_headers()
-                self._safe_write(out)
-                return
-            if _evt:
-                _euid = int(data.get("uid", 0) or 0)
-                if _euid:
-                    record_event(_euid, race, _evt, floor)
-                out = json.dumps({"ok": True}).encode()
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.end_headers()
-                self._safe_write(out)
-                return
-            # Comprehension filter: if the player can't understand this speaker, return noises
-            # (applies to overheard/ambient + taunts; direct /aicommand sends no player_race so passes through).
+            evt = data.get("event", "")
+            if evt:
+                with STATE_LOCK:
+                    if evt == "new_run":
+                        reset_run()
+                    elif uid:
+                        record_event(uid, race, evt, floor, player)
+                return self._send_json({"ok": True})
+
+            # Comprehension filter: if the player can't understand this speaker, return noises.
+            # (Applies to overheard/ambient + taunts; /aicommand sends no player_race so passes through.)
+            player_race = data.get("player_race", "")
             if (ambient or taunt) and not can_understand(player_race, race):
                 noise = noise_for(race)
-                out = json.dumps({"reply": noise, "action": "NONE"}).encode()
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.end_headers()
-                self._safe_write(out)
                 print(f"[SERVICE] {race} (unintelligible to {player_race or 'player'}) -> {noise}")
-                return
-            if taunt:
-                prompt = build_taunt_prompt(race, floor)
-            elif ambient:
-                prompt = build_ambient_prompt(race, floor, relation)
-            else:
-                prompt = build_prompt(race, floor, says, int(data.get("uid", 0) or 0))
-            print(f"[SERVICE] {race} floor {floor}")
+                return self._send_json({"reply": noise, "action": "NONE"})
+
+            # Prompt assembly mutates run state (boon rolls, Herx offers), so it takes the
+            # lock; the generation that follows deliberately runs outside it.
+            with STATE_LOCK:
+                if taunt:
+                    prompt = build_taunt_prompt(race, floor)
+                elif ambient:
+                    prompt = build_ambient_prompt(race, floor, data.get("relation", "hostile"))
+                else:
+                    prompt = build_prompt(race, floor, says, uid, player, player_name, party)
+            who = player_name or f"player{player}"
+            print(f"[SERVICE] {race} floor {floor} ({who})")
+
             raw = ask_ollama(prompt)
-            # Model is asked for JSON; try to parse it, fall back to plain speech.
-            speech, action = raw, "NONE"
             speech, action = parse_reply(raw)
-            _revealed_name = extract_name(raw, speech)
-            _reply_name = ""
-            _nuid = int(data.get("uid", 0) or 0)
-            if _nuid:
-                _nst = get_follower_state(_nuid, race)
-                if _revealed_name and not _nst.get("name"):
-                    _nst["name"] = _revealed_name
-                    print(f"[SERVICE-DBG] follower {_nuid} is now named '{_revealed_name}'")
-                _reply_name = _nst.get("name", "")
-                herx_detect(_nuid, raw, speech)
             if not speech or not speech.strip():
                 speech = "..."  # model declined; show a beat, not nothing
-            if action not in ("FOLLOW", "DEFEND", "WAIT", "ATTACK", "NONE"):
+            if action not in VALID_ACTIONS:
                 action = "NONE"
-            _uid = int(data.get("uid", 0) or 0)
-            if _uid:
-                record_follower_interaction(_uid, says, floor)
-                _st = follower_state.get(_uid, {})
-                print(f"[SERVICE-DBG] follower {_uid} friendship={_st.get('friendship')} ({friendship_descriptor(_st.get('friendship',0))})")
+
+            name, secret, boon = "", "", ""
+            with STATE_LOCK:
+                if uid:
+                    st = get_follower_state(uid, race, player)
+                    revealed = extract_name(raw, speech)
+                    if revealed and not st.get("name"):
+                        st["name"] = revealed
+                        print(f"[SERVICE-DBG] follower {uid} is now named '{revealed}'")
+                    name = st.get("name", "")
+                    herx_detect(uid, raw, speech, player)
+                    record_follower_interaction(uid, says, floor, player)
+                    boon = LAST_BOON.pop(uid, "")
+                    print(f"[SERVICE-DBG] follower {uid} (player{player}) friendship={st['friendship']} "
+                          f"({friendship_descriptor(st['friendship'])})")
+                secret = herx_secret_field()
             print(f"[SERVICE] -> action={action} speech={speech}")
-            _secret = ("%d:%d" % (0 if HERX_STATE.get("is_false") else HERX_SECRET_VARIANTS[HERX_STATE["variant"]]["debuff"], HERX_STATE["uid"])) if HERX_STATE["revealed"] else ""
-            _boon = LAST_BOON.pop(_nuid, "") if _nuid else ""
-            out = json.dumps({"reply": speech, "action": action, "name": _reply_name, "secret": _secret, "boon": _boon}).encode()
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self._safe_write(out)
+            self._send_json({"reply": speech, "action": action, "name": name, "player": player,
+                             "secret": secret, "boon": boon})
         except Exception as e:
             print(f"[SERVICE] ERROR: {e}")
-            self.send_response(500); self.end_headers()
-            self._safe_write(json.dumps({"reply": f"(service error: {e})"}).encode())
+            self._send_json({"reply": f"(service error: {e})"}, status=500)
+
     def log_message(self, *a): pass  # quiet default logging
 
-print(f"[SERVICE] Barony AI service on :{PORT}, model={MODEL}, lore loaded ({len(LORE)} sections)")
-with socketserver.TCPServer(("127.0.0.1", PORT), Handler) as httpd:
-    httpd.serve_forever()
+if __name__ == "__main__":
+    print(f"[SERVICE] Barony AI service on :{PORT}, model={MODEL}, lore loaded ({len(LORE)} sections)")
+    # Threaded: in co-op the host serves several players plus fire-and-forget event
+    # records. A single-threaded server would make every player queue behind whoever
+    # is mid-generation. Bound to loopback only -- clients never talk to this service,
+    # they talk to the host's game, so co-op needs no firewall or port-forward setup.
+    class ThreadedServer(socketserver.ThreadingTCPServer):
+        daemon_threads = True
+        allow_reuse_address = True
+    with ThreadedServer(("127.0.0.1", PORT), Handler) as httpd:
+        httpd.serve_forever()
