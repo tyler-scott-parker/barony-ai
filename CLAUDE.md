@@ -124,6 +124,38 @@ Weighted roll at recruitment: **loyal 70 / self_interested 15 / fearful 8 / spy 
 
 **Verified:** all 3 spies deflected on family; both loyal controls gave rich specific histories. One spy dodged a family question and immediately asked about the player's rations and map — a genuine, unscripted tell.
 
+**The friendship-30 crack — FIXED, and the second big prompt finding.** A spy who has come to
+like the player must visibly strain. Measured, `human` spy at f=32, asked "do you trust me?":
+
+| Wording | Cracks |
+|---|---|
+| Atmospheric: *"it is eating at you, let a crack show: an unfinished sentence, an odd warning..."* | **0/8** |
+| Concrete required speech act + the smooth route forbidden by name | 3/8 |
+| ↑ plus the specific chosen server-side, and the block moved to LAST position | **20/20** |
+
+Three separate lessons, and the first is the same one the hard-limits block taught:
+
+1. **Describing a feeling does nothing; naming the required speech act works.** "Let a crack show"
+   scored 0/8 — the model answered warmly and ignored it. Listing the exact forbidden replies
+   (*"Of course I trust you", "I've got your back", "you've saved my skin"*) is what moved it.
+2. **One literal example gets parroted verbatim.** At 3/8 the hits copied *"don't take the east
+   stair on the next floor"* almost word for word — canned across a playthrough. So `spy_crack_section`
+   picks the concrete detail server-side from `SPY_CRACK_WARNINGS` / `SPY_CRACK_CONFESSIONS` and the
+   model only phrases it, the same division of labour boons already use. Rewordings came back varied
+   (one invented "the old ventilation shaft").
+3. **Position is a lever.** The block is appended LAST in `build_prompt`, after the obedience and
+   action rules — at 8B whatever follows an instruction competes with it. It was previously buried
+   inside `allegiance_section`, five blocks from the end.
+
+**Watch the examples for incriminating nouns.** An early confession example read *"If you knew why I
+was sent, you'd —"*; the model parroted the phrase and leaked the betrayal outright in 2/10. The model
+copies the incriminating noun, not just the shape. Fixed by scrubbing "sent"/"orders"/"report" from
+every example and requiring the sentence to stop *before it names anything* — breaking off and then
+explaining is called out as failure. 0/8 leaked after.
+
+Verified after the fix: warning branch 6/6, confession branch 8/8, `rat` (thinnest lore) 6/6.
+Gating is unit-tested: silent for loyal/self_interested/fearful at any friendship, and for a spy at 29.
+
 **Spies reveal FALSE weaknesses** from `HERX_FALSE_VARIANTS` (running water / silver / true name — all plausible undead lore, all wrong). Reported as `debuff 0`, so `initLich` applies nothing. Discovered through consequences, never announced — per the design doc's core rule.
 
 ### Boons
@@ -229,7 +261,6 @@ is unchanged from the single-player path that already works. Untested in an actu
 
 **Known gaps:**
 - The **false secret has never been observed firing** — all test rolls landed non-spy. It's the one branch where a bug would be invisible.
-- The **friendship-30 spy "crack"** doesn't land — reads as ordinary hedging. Needs a concrete behavioral instruction (an oblique warning, an almost-confession that stops) rather than an atmospheric one. Concrete has consistently beaten impressionistic here.
 - **Chat history stores only the player's side**, so followers contradict themselves across turns (observed: a rat claimed to love cheese, then to not eat cheese). Storing both sides would fix it.
 - Grounding is only in the main `build_prompt` and `build_taunt_prompt`; ambient babble has none.
 - Prompt sizes vary wildly by race (652 rat → 3100 human) because book-lore injection is uneven. Thin races are where fabrication would reappear first.

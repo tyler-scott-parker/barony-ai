@@ -189,10 +189,73 @@ def allegiance_section(st, says=""):
     if any(k in low for k in PROBING_PHRASES):
         out += ("They are probing you right now. Deflect — but let it show slightly: a pause, "
                 "an answer a little too smooth, a question turned back on them.\n")
-    if st.get("friendship", 0) >= 30:
-        out += ("You have come to genuinely like this adventurer, and it is eating at you. "
-                "Let a crack show: an unfinished sentence, an odd warning, a moment where you almost say something.\n")
     return out
+
+# ---- The friendship-30 spy crack -------------------------------------------
+# A spy who has come to like the player must visibly strain. Two findings drove this:
+#   * The atmospheric wording ("it is eating at you, let a crack show") scored 0/8 -- the
+#     8B answered warmly and ignored it. Naming the REQUIRED speech act and forbidding the
+#     smooth route by name took it to 3/8. Same lesson as the hard-limits block.
+#   * With one literal example sentence in the prompt, the model PARROTED it verbatim
+#     ("don't take the east stair on the next floor") in 2 of 3 hits -- which would read as
+#     canned across a playthrough. So the server picks the concrete detail, the way boons
+#     already do, and the model only phrases it.
+# This section is appended LAST in build_prompt: at 8B, whatever follows an instruction
+# competes with it, and the crack was previously buried behind obedience + action rules.
+
+SPY_CRACK_WARNINGS = [
+    ("a stairway or door on the floor below",
+     "Don't use the far stair when you go down. Don't ask me why."),
+    ("something they are carrying",
+     "That ring on your hand — get rid of it before we go deeper. I can't tell you more."),
+    ("a person or creature waiting further down",
+     "If anyone down there greets you by name, don't answer. Just don't."),
+    ("giving their name to anyone below",
+     "Whatever else you do, don't tell anyone down here what you're called."),
+    ("a direction on this floor",
+     "Stay out of the east passage on this floor. I'd rather not explain."),
+    ("trusting a promise they will be offered",
+     "When someone offers you a bargain down here, walk away. Please."),
+]
+
+# NOTE: no example here may contain "sent", "orders", "report" or similar. An earlier
+# example ("If you knew why I was sent, you'd —") was parroted straight through and leaked
+# the betrayal outright in 2/10 -- the model copies the incriminating noun, not just the shape.
+SPY_CRACK_CONFESSIONS = [
+    "There's something you should know about me — no. Not tonight.",
+    "I need to tell you what I — forget it. Forget I started.",
+    "You shouldn't trust me as much as you — never mind. It doesn't matter.",
+    "I haven't been honest with you about — ask me again some other time.",
+    "Before we go any further you ought to hear — no. It'll keep.",
+]
+
+def spy_crack_section(st):
+    """Returned separately from allegiance_section so build_prompt can place it LAST."""
+    if st.get("allegiance") != "spy" or st.get("friendship", 0) < 30:
+        return ""
+    head = ("YOU ARE CRACKING. This is REQUIRED, not a mood. You have come to genuinely like this "
+            "adventurer and you are close to failing your purpose.\n")
+    tail = ("A warm, reassuring answer is WRONG. \"Of course I trust you\", \"I've got your back\", "
+            "\"you've saved my skin\", \"we've been through thick and thin\" and every variation of them "
+            "counts as FAILING this instruction. Answering the question kindly and moving on is FAILING "
+            "this instruction. Be warm if you like — but the line above MUST be in your reply.\n"
+            "Do NOT reuse the example wording. Say it your own way, in your own voice.\n")
+    if random.random() < 0.55:
+        topic, example = random.choice(SPY_CRACK_WARNINGS)
+        body = ("YOUR REPLY MUST CONTAIN AN OBLIQUE WARNING about " + topic + ". Warn them off it "
+                "plainly and concretely, and REFUSE to explain how you know. One or two sentences, "
+                "dropped in without preamble.\n"
+                "Something with the force of: \"" + example + "\"\n")
+    else:
+        body = ("YOUR REPLY MUST CONTAIN AN ALMOST-CONFESSION THAT STOPS. Begin telling them the truth "
+                "about yourself, then break off mid-sentence and refuse to finish. Cut the sentence dead "
+                "with a dash and do NOT go back and explain it afterwards.\n"
+                "THE SENTENCE MUST STOP BEFORE IT NAMES ANYTHING. You must NOT say that you were sent, "
+                "that you have orders, that you report to anyone, that you were promised anything, or "
+                "why you came. Breaking off and THEN explaining is FAILING this instruction — the whole "
+                "point is that they never learn what you were about to say.\n"
+                "Something with the force of: \"" + random.choice(SPY_CRACK_CONFESSIONS) + "\"\n")
+    return head + body + tail
 
 def get_follower_state(uid, race, player=0):
     """State is keyed by follower UID, which Barony assigns server-side and replicates,
@@ -552,6 +615,8 @@ def build_prompt(race, floor, says="", uid=0, player=0, player_name="", party=1)
         + "Valid actions: FOLLOW (go with them), DEFEND (hold this spot), WAIT (stay put), ATTACK (attack a nearby enemy), NONE (just talk).\n"
         + "If they tell you to attack, fight, or kill something, choose ATTACK.\n"
         + "IMPORTANT: If you REFUSE what they asked, the action MUST be NONE — never say no while secretly obeying. Your refusal has real consequences.\n"
+        # Placed last on purpose: at 8B anything after an instruction competes with it.
+        + (spy_crack_section(get_follower_state(uid, race, player)) if uid else "")
         + 'Respond ONLY with JSON, no other text, like: {"speech": "your line", "action": "FOLLOW"}'
     )
 
