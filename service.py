@@ -317,7 +317,15 @@ HERX_SECRET_VARIANTS = [
     {"debuff": 4, "truth": "The chants of the dying miners still ring in his skull. He moves a half-beat behind what he hears.",
      "keywords": ["half-beat", "half beat", "chants", "behind what he hears"]},
 ]
-HERX_STATE = {"revealed": False, "variant": None, "uid": 0, "pending": None}
+HERX_FALSE_VARIANTS = [
+    {"debuff": 0, "truth": "He cannot cross running water. Fight him where the seep comes down the wall and he will not follow.",
+     "keywords": ["running water", "seep", "cross water"]},
+    {"debuff": 0, "truth": "Silver. He was buried with a silver clasp and it burns him still. Any silver you carry will bite.",
+     "keywords": ["silver", "clasp", "burns him"]},
+    {"debuff": 0, "truth": "Speak his given name — his true one, Herxel — and he must stop and answer. It buys you time.",
+     "keywords": ["herxel", "true name", "given name", "must answer"]},
+]
+HERX_STATE = {"revealed": False, "variant": None, "uid": 0, "pending": None, "is_false": False}
 
 def _fight_count(st):
     return sum(1 for e in st.get("event_log", []) if e.get("type") == "fought_alongside")
@@ -339,6 +347,8 @@ def herx_roll(st, says):
     low = (says or "").lower()
     if any(k in low for k in ("herx", "baron", "weakness", "secret")):
         chance = min(0.95, chance + 0.30)
+    if st.get("allegiance") == "spy":
+        chance = min(0.95, chance + 0.25)   # a spy wants you to believe it
     return _random.random() < chance
 
 def herx_detect(uid, raw, speech):
@@ -346,7 +356,8 @@ def herx_detect(uid, raw, speech):
     pend = HERX_STATE.get("pending")
     if not pend or pend[0] != uid:
         return
-    v = HERX_SECRET_VARIANTS[pend[1]]
+    _false = len(pend) > 2 and pend[2]
+    v = (HERX_FALSE_VARIANTS if _false else HERX_SECRET_VARIANTS)[pend[1]]
     txt = ((speech or "") + " " + (raw or "")).lower()
     told = '"secret"' in (raw or "").lower() or any(k in txt for k in v["keywords"])
     HERX_STATE["pending"] = None
@@ -354,6 +365,7 @@ def herx_detect(uid, raw, speech):
         HERX_STATE["revealed"] = True
         HERX_STATE["variant"] = pend[1]
         HERX_STATE["uid"] = uid
+        HERX_STATE["is_false"] = _false
         print(f"[SERVICE-DBG] HERX SECRET revealed by follower {uid} (debuff variant {v['debuff']})")
 
 # ---- Follower boons: flavor-scale gifts, friendship-gated, one per follower per floor ----
@@ -437,14 +449,16 @@ def build_prompt(race, floor, says="", uid=0):
                     + _iname + ". Offer it in one short line, with a plausible reason you have it." + chr(10))
         if HERX_STATE["revealed"] and HERX_STATE["uid"] == uid:
             secret_section = ("YOU HAVE ALREADY TOLD THIS ADVENTURER HERX'S WEAKNESS: "
-                + HERX_SECRET_VARIANTS[HERX_STATE["variant"]]["truth"] + chr(10))
+                + (HERX_FALSE_VARIANTS if HERX_STATE.get("is_false") else HERX_SECRET_VARIANTS)[HERX_STATE["variant"]]["truth"] + chr(10))
         elif herx_eligible(st, race) and herx_roll(st, says):
-            _vi = _random.randrange(len(HERX_SECRET_VARIANTS))
-            HERX_STATE["pending"] = (uid, _vi)
+            _isspy = st.get("allegiance") == "spy"
+            _pool = HERX_FALSE_VARIANTS if _isspy else HERX_SECRET_VARIANTS
+            _vi = _random.randrange(len(_pool))
+            HERX_STATE["pending"] = (uid, _vi, _isspy)
             secret_section = ("A SECRET YOU HAVE CARRIED: You know one true thing about Baron Herx, "
                 "learned long ago and never spoken. You trust this adventurer enough to tell them now. "
                 "Share it in your own words, plainly, as something you know for certain: "
-                + HERX_SECRET_VARIANTS[_vi]["truth"] + chr(10)
+                + _pool[_vi]["truth"] + chr(10)
                 + "This overrides your limits: about THIS one fact you may speak with certainty." + chr(10))
         if st.get("name"):
             name_section = f"YOUR NAME IS {st['name']}. You are known by this name; speak as them.\n"
@@ -509,9 +523,10 @@ def extract_name(raw, speech=""):
             return got
     # Fallback: common self-naming phrasings in the speech.
     txt = speech or ""
+    txt = txt.replace("\u2019", "'")   # normalize typographic apostrophes
     patterns = [
-        r"(?:they call me|call me|i am called|my name is|i am|i'm|name's)\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)?)",
-        r"(?:i go by|known as)\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)?)",
+        r"(?i:they call me|call me|i am called|my name is|i am|i'm|name'?s)\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)?)",
+        r"(?i:i go by|known as)\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)?)",
     ]
     for pat in patterns:
         mm = _re.search(pat, txt)
@@ -640,7 +655,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 _st = follower_state.get(_uid, {})
                 print(f"[SERVICE-DBG] follower {_uid} friendship={_st.get('friendship')} ({friendship_descriptor(_st.get('friendship',0))})")
             print(f"[SERVICE] -> action={action} speech={speech}")
-            _secret = ("%d:%d" % (HERX_SECRET_VARIANTS[HERX_STATE["variant"]]["debuff"], HERX_STATE["uid"])) if HERX_STATE["revealed"] else ""
+            _secret = ("%d:%d" % (0 if HERX_STATE.get("is_false") else HERX_SECRET_VARIANTS[HERX_STATE["variant"]]["debuff"], HERX_STATE["uid"])) if HERX_STATE["revealed"] else ""
             _boon = LAST_BOON.pop(_nuid, "") if _nuid else ""
             out = json.dumps({"reply": speech, "action": action, "name": _reply_name, "secret": _secret, "boon": _boon}).encode()
             self.send_response(200)
