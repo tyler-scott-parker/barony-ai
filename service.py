@@ -257,23 +257,173 @@ def spy_crack_section(st):
                 "Something with the force of: \"" + random.choice(SPY_CRACK_CONFESSIONS) + "\"\n")
     return head + body + tail
 
+# ---- The relationship vector (design spec 4.1) --------------------------------
+# One friendship scalar cannot express "likes you but does not trust you", which the spec
+# calls out as the point. Seven dimensions, none ever shown to the player as a number --
+# they surface only as tone, willingness to disclose, and refusal.
+#
+# friendship  general warmth
+# trust       belief the player is honest and will not abandon them
+# respect     admiration for competence, courage, discipline
+# fear        expectation the player could harm or discard them
+# resentment  accumulated grievance
+# dependence  how much they rely on the player to survive or to have a purpose
+# curiosity   desire to understand the player
+DIMENSIONS = ("friendship", "trust", "respect", "fear", "resentment", "dependence", "curiosity")
+
+# A new companion starts mildly curious about the stranger they have thrown in with; every
+# other dimension has to be earned or provoked.
+DIMENSION_START = {"curiosity": 15}
+
+def dims_init(st):
+    for d in DIMENSIONS:
+        st.setdefault(d, DIMENSION_START.get(d, 0))
+    return st
+
+def adjust(st, **deltas):
+    """Move relationship dimensions, clamped to 0..100. The only way any of them change."""
+    for d, v in deltas.items():
+        if d not in DIMENSIONS:
+            raise KeyError("unknown relationship dimension: %s" % d)
+        st[d] = max(0, min(100, st.get(d, 0) + v))
+    return st
+
 def get_follower_state(uid, race, player=0):
     """State is keyed by follower UID, which Barony assigns server-side and replicates,
     so it is already unique across every player in a multiplayer run. `player` is the
     owning player index (0 = host); it scopes per-player latches like boons."""
     if uid not in follower_state:
         al = roll_allegiance()
-        follower_state[uid] = {"friendship": 0, "events": [], "event_log": [], "name": "", "race": race,
+        follower_state[uid] = dims_init({"events": [], "event_log": [], "name": "", "race": race,
                                "allegiance": al, "owner": player,
-                               "motive": random.choice(SPY_MOTIVES) if al == "spy" else ""}
+                               "motive": random.choice(SPY_MOTIVES) if al == "spy" else ""})
         print(f"[SERVICE-DBG] follower {uid} allegiance={al} owner=player{player}")
-    return follower_state[uid]
+    return dims_init(follower_state[uid])
 
 def friendship_descriptor(f):
     if f <= 1:  return "You barely know this adventurer."
     if f <= 4:  return "You have spoken a few times; you are still taking their measure."
     if f <= 9:  return "You are warming to this adventurer; they keep you close and speak with you often."
     return "You have come to genuinely trust and value this adventurer."
+
+# Every line below says what to DO, never what to feel. Naming a feeling produced nothing
+# measurable in earlier work here (the spy crack scored 0/8 on atmosphere); naming the
+# behaviour is what lands. Checked high-to-low, first match per dimension wins.
+DIMENSION_BEHAVIOR = {
+    "friendship": ((70, "You are genuinely fond of them. Use their name, joke with them, and notice "
+                        "when something is wrong with them."),
+                   (40, "You like them. You speak easily and volunteer small things unasked."),
+                   (15, "You are warming to them, but you still choose your words.")),
+    "trust":      ((70, "You believe what they tell you and act on it without checking."),
+                   (40, "You take them at their word on most things.")),
+    "respect":    ((70, "You defer to their judgment when a decision is dangerous, even when you "
+                        "would choose differently."),
+                   (40, "You think they know what they are doing, and you say so plainly.")),
+    "fear":       ((60, "You avoid contradicting them outright. You agree faster than you mean it, "
+                        "and you choose safe words when they are angry."),
+                   (30, "You are careful around them. You soften your disagreements.")),
+    "resentment": ((60, "You bring up an old grievance unprompted, even though this is not the "
+                        "moment for it."),
+                   (30, "Something they did still sits badly with you. Let it leak out as a short "
+                        "answer or a pointed remark.")),
+    "dependence": ((60, "You need them to get out of here alive and you both know it. Being left "
+                        "behind frightens you and it shows in what you ask for."),
+                   (30, "You rely on them for safety and supplies more than you like to admit.")),
+    "curiosity":  ((50, "Ask them a question about themselves in this reply, unprompted."),
+                   (25, "You are curious about them; let it show once.")),
+}
+
+# The whole point of a vector instead of a scalar: a person can hold two of these at once.
+# The 8B will happily flatten that into plain friendliness, so each pair names the
+# smoothing route and forbids it -- the same technique as the hard-limits and spy-crack blocks.
+DIMENSION_TENSIONS = (
+    (lambda s: s["friendship"] >= 40 and s["trust"] <= 15,
+     "YOU LIKE THEM AND YOU DO NOT TRUST THEM. Both, at the same time. Be warm and still keep "
+     "something back — an answer that stops a little short, a thing you do not quite say."),
+    (lambda s: s["respect"] >= 40 and s["friendship"] <= 15,
+     "YOU ADMIRE THEM WITHOUT LIKING THEM. Give them competent, useful, direct answers and no "
+     "personal warmth at all. Do not soften into friendliness."),
+    (lambda s: s["friendship"] >= 40 and s["resentment"] >= 40,
+     "YOU CARE ABOUT THEM AND YOU ARE STILL ANGRY WITH THEM. Do not forgive it in this reply."),
+    (lambda s: s["dependence"] >= 50 and s["resentment"] >= 40,
+     "YOU NEED THEM AND YOU RESENT NEEDING THEM. It comes out as prickliness that you then "
+     "half walk back."),
+    (lambda s: s["fear"] >= 40 and s["friendship"] >= 40,
+     "YOU ARE FOND OF THEM AND FRIGHTENED OF THEM. You are agreeable in a way that is not "
+     "quite honest."),
+    (lambda s: s["trust"] <= 10 and s["dependence"] >= 50,
+     "YOU DO NOT TRUST THEM AND YOU CANNOT AFFORD TO LEAVE. You stay, and you watch them."),
+)
+
+MAX_DIMENSION_LINES = 4
+MAX_TENSION_LINES   = 2
+
+def relationship_block(st):
+    """The relationship half of the prompt, rendered from the vector. Never emits a number:
+    the player is meant to learn the relationship by living through it (spec 4.1)."""
+    lines = []
+    scored = []
+    for d, bands in DIMENSION_BEHAVIOR.items():
+        v = st.get(d, 0)
+        for threshold, text in bands:
+            if v >= threshold:
+                scored.append((v, text))
+                break
+    # strongest feelings first, and only a few -- seven lines every turn would flatten into noise
+    scored.sort(key=lambda p: p[0], reverse=True)
+    lines = [t for _, t in scored[:MAX_DIMENSION_LINES]]
+
+    out = ""
+    if lines:
+        out += "HOW YOU ACT TOWARD THIS ADVENTURER:\n" + _bullets(lines) + "\n"
+
+    tensions = [text for cond, text in DIMENSION_TENSIONS if cond(st)][:MAX_TENSION_LINES]
+    if tensions:
+        # Placed after the plain dimension lines on purpose: this is the instruction most
+        # likely to be ignored, and position is a lever at 8B.
+        out += ("CONTRADICTIONS YOU ARE HOLDING. Do NOT resolve these into one simple feeling. "
+                "Smoothing them into ordinary friendliness is WRONG — hold both at once:\n"
+                + _bullets(tensions) + "\n")
+    return out
+
+# Coarse read of how the player is speaking to them. Keyword matching is crude and will miss
+# plenty -- it is deliberately conservative, and the effects are small, because the bulk of the
+# relationship is supposed to come from deeds. Metered per floor so repeating "thank you"
+# twenty times cannot buy respect.
+PLAYER_TONE = (
+    ("praise",   ("thank you", "thanks", "well done", "good work", "you were right",
+                  "i trust you", "you saved", "well fought", "proud of you"),
+     {"respect": 2, "friendship": 1}),
+    ("threat",   ("or else", "i'll kill you", "do as i say", "obey me", "expendable",
+                  "don't make me", "i own you", "you belong to me"),
+     {"fear": 5, "resentment": 3, "trust": -2}),
+    ("apology",  ("i'm sorry", "im sorry", "i am sorry", "forgive me", "my fault", "i was wrong"),
+     {"resentment": -4, "trust": 1}),
+    ("personal", ("your family", "where are you from", "who are you really", "your past",
+                  "tell me about yourself"),
+     {"curiosity": 2}),
+)
+TONE_CAP_PER_FLOOR = 3
+
+def apply_player_tone(st, says, floor):
+    """Nudge the vector based on how the player spoke. Returns the tone name, or ''."""
+    if not says:
+        return ""
+    low = says.lower()
+    used = st.setdefault("tone_by_floor", {})
+    fkey = str(floor)
+    if used.get(fkey, 0) >= TONE_CAP_PER_FLOOR:
+        return ""
+    for name, phrases, deltas in PLAYER_TONE:
+        if any(p in low for p in phrases):
+            adjust(st, **deltas)
+            used[fkey] = used.get(fkey, 0) + 1
+            return name
+    return ""
+
+def dims_summary(st):
+    """Compact debug line. Never shown to the player -- these numbers are internal."""
+    return " ".join(f"{d[:4]}={st.get(d, 0)}" for d in DIMENSIONS)
 
 # Per-floor cap: chatting can only add a small, fixed amount of friendship per floor.
 # This keeps friendship 100 a whole-playthrough milestone — talk is cheap; the bulk of
@@ -289,8 +439,13 @@ def record_follower_interaction(uid, says, floor=0, player=0):
         st["interaction_count"] = st.get("interaction_count", 0) + 1
         # within the cap, still meter it: +1 friendship per 3 exchanges, up to the floor cap
         if st["interaction_count"] % 3 == 0:
-            st["friendship"] = min(100, st["friendship"] + 1)
+            # Talk builds warmth and lets them get to know you; it does not build trust or
+            # respect, which have to be earned by what you actually do.
+            adjust(st, friendship=1, curiosity=1)
             gained[fkey] = got_here + 1
+    tone = apply_player_tone(st, says, floor)
+    if tone:
+        print(f"[SERVICE-DBG] player tone '{tone}' -> {dims_summary(st)}")
     if says:
         st["events"].append('they said to you: "' + says[:60] + '"')
         st["events"] = st["events"][-6:]
@@ -437,6 +592,13 @@ def build_lore_context(race, floor, budget=16, map_name=""):
 # ---- Event memory ------------------------------------------------------------
 
 IMPORTANCE_WEIGHT = {"routine": 0, "notable": 3, "major": 8, "world_changing": 20}
+
+# Importance still drives friendship; these say what ELSE an event does. Surviving a fight
+# together builds trust and respect, not just warmth -- and it deepens how much they need you.
+EVENT_DIMENSIONS = {
+    "recruitment":      {"curiosity": 12, "dependence": 8},
+    "fought_alongside": {"trust": 4, "respect": 5, "dependence": 3},
+}
 IMPORTANCE_ORDER = {"world_changing": 3, "major": 2, "notable": 1, "routine": 0}
 
 def _event_claim(etype, floor, race):
@@ -468,8 +630,8 @@ def record_event(uid, race, etype, floor, player=0):
         "type": etype, "floor": floor, "claim": _event_claim(etype, floor, race),
         "importance": importance, "provenance": "participated",
     })
-    st["friendship"] = min(100, st["friendship"] + IMPORTANCE_WEIGHT.get(importance, 0))
-    print(f"[SERVICE-DBG] event '{etype}' recorded for follower {uid}; friendship now {st['friendship']}")
+    adjust(st, friendship=IMPORTANCE_WEIGHT.get(importance, 0), **EVENT_DIMENSIONS.get(etype, {}))
+    print(f"[SERVICE-DBG] event '{etype}' recorded for follower {uid}; {dims_summary(st)}")
 
 def events_for_prompt(st, budget=6):
     ranked = sorted(st.get("event_log", []),
@@ -635,16 +797,28 @@ def _name_section(st):
                 "reveal your name, you MUST also put ONLY the name (no title) in the \"name\" field of your JSON.\n")
     return ""
 
-def _obedience_section(f):
-    if f <= 4:
-        return ("OBEDIENCE: You owe this adventurer nothing yet. Obey only basic, safe requests "
-                "(FOLLOW, WAIT) and only if you feel like it. Refuse anything risky, costly, demeaning, or against "
-                "your nature. To refuse, choose action NONE and say why in character.\n")
-    if f <= 9:
-        return ("OBEDIENCE: You are starting to trust this adventurer. Carry out reasonable commands, "
-                "though you may grumble. Refuse only truly dangerous or objectionable ones (action NONE).\n")
-    return ("OBEDIENCE: You trust this adventurer deeply. Carry out their commands readily, even "
-            "risky ones — loyalty means acting on their word.\n")
+def _obedience_section(st):
+    """Willingness to act on an order. Friendship alone was never the right input: someone can
+    obey out of respect without warmth, or out of fear without loyalty, and resentment eats
+    compliance built by any of the others."""
+    standing  = 0.4 * st["friendship"] + 0.3 * st["trust"] + 0.3 * st["respect"]
+    compliant = standing + 0.25 * st["fear"] - 0.35 * st["resentment"]
+    # Fear-driven compliance is its own thing: they do it, and it costs them something.
+    coerced = st["fear"] >= 40 and st["fear"] > st["friendship"]
+    if compliant <= 8:
+        base = ("OBEDIENCE: You owe this adventurer nothing yet. Obey only basic, safe requests "
+                "(FOLLOW, WAIT) and only if you feel like it. Refuse anything risky, costly, demeaning, "
+                "or against your nature. To refuse, choose action NONE and say why in character.\n")
+    elif compliant <= 22:
+        base = ("OBEDIENCE: You are starting to go along with this adventurer. Carry out reasonable "
+                "commands, though you may grumble. Refuse only truly dangerous or objectionable "
+                "ones (action NONE).\n")
+    else:
+        base = ("OBEDIENCE: You act on this adventurer's word readily, even when it is risky.\n")
+    if coerced:
+        base += ("YOU OBEY BECAUSE YOU ARE AFRAID, NOT BECAUSE YOU ARE LOYAL. Do as they say — and "
+                 "let the reply be a little too quick, a little too flat. Do NOT sound warm about it.\n")
+    return base
 
 def _follower_sections(uid, race, floor, says, player=0):
     """The relationship half of the prompt. Order matters: boon and secret rolls
@@ -653,13 +827,14 @@ def _follower_sections(uid, race, floor, says, player=0):
     st = get_follower_state(uid, race, player)
     mem = (" You remember: " + "; ".join(st["events"][-3:])) if st["events"] else ""
     history = f"YOUR HISTORY WITH THIS ADVENTURER: {friendship_descriptor(st['friendship'])}{mem}\n"
+    relations = relationship_block(st)
     evlines = events_for_prompt(st)
     alleg = allegiance_section(st, says)
     boon = _boon_section(uid, st, race_l, floor, player)
     secret = _secret_section(uid, st, race, says)
     memory = ("WHAT YOU REMEMBER (things that actually happened):\n" + _bullets(evlines) + "\n") if evlines else ""
-    return (history + memory + _name_section(st) + secret + boon + alleg
-            + _obedience_section(st["friendship"]))
+    return (history + memory + relations + _name_section(st) + secret + boon + alleg
+            + _obedience_section(st))
 
 def build_prompt(race, floor, says="", uid=0, player=0, player_name="", party=1, map_name=""):
     head, body = _persona(race, True, floor, map_name)
@@ -975,8 +1150,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     herx_detect(uid, raw, speech, player)
                     record_follower_interaction(uid, says, floor, player)
                     boon = LAST_BOON.pop(uid, "")
-                    print(f"[SERVICE-DBG] follower {uid} (player{player}) friendship={st['friendship']} "
-                          f"({friendship_descriptor(st['friendship'])})")
+                    print(f"[SERVICE-DBG] follower {uid} (player{player}) {dims_summary(st)}")
                 secret = herx_secret_field()
             print(f"[SERVICE] -> action={action} speech={speech}")
             self._send_json({"reply": speech, "action": action, "name": name, "player": player,

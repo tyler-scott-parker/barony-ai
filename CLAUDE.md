@@ -88,6 +88,52 @@ Verified: 5.9 GB, **100% GPU**, CONTEXT 16384, warm replies ~2-4s. Prompts run *
 ### Foundation
 Async via detached `std::thread` + shared globals + `mymod_pollAI()` per frame (no freeze). Two-way command loop: `/aicommand` finds the player's follower via `Stat->leader_uid`, service returns `{speech, action}` ∈ FOLLOW/DEFEND/WAIT/ATTACK/NONE. **ATTACK is diegetic only** — Barony's combat AI handles fighting. Push-to-talk voice (hold V → faster-whisper small.en, cuda/float16). Speech bubbles via `createDialogueTooltip(uid, DIALOGUE_NPC, "%s", reply)` — **the `"%s"` guard is required**. Polymorph-as-comprehension. 34 canonical books injected per race. `/aiserver <url>` for BYO-model.
 
+### Relationships — the vector (design spec §4.1)
+
+`friendship` alone could not express *"likes you but does not trust you"*, which the spec calls the
+whole point. Seven dimensions now, **none ever shown to the player as a number**:
+`friendship, trust, respect, fear, resentment, dependence, curiosity` (0–100, curiosity starts at 15).
+`adjust(st, **deltas)` is the only way any of them move, and it raises on an unknown dimension name
+so a typo can't silently create a dimension that nothing reads.
+
+**What moves them**
+- **Events** — importance still drives friendship; `EVENT_DIMENSIONS` says what else happens.
+  Surviving a fight together builds trust and respect, not just warmth, and deepens dependence.
+- **Talk** — friendship + curiosity only, still metered by `CHAT_CAP_PER_FLOOR`. Trust and respect
+  are deliberately *not* buyable by talking; they have to be earned by deeds.
+- **How the player speaks** — `PLAYER_TONE` does a coarse keyword read (praise / threat / apology /
+  personal question). Crude and it misses plenty; effects are small and capped at
+  `TONE_CAP_PER_FLOOR = 3` so twenty "thank you"s can't buy respect.
+
+**Rendering: behaviour, never feeling.** `DIMENSION_BEHAVIOR` gives each band a line saying what to
+*do* ("Ask them a question about themselves, unprompted"), never what to feel. Capped at the 4
+strongest — seven lines every turn flattens into noise.
+
+**`DIMENSION_TENSIONS` is the part that earns the vector.** A pair like high friendship + low trust
+is exactly what the 8B smooths into plain friendliness, so each tension names the smoothing route
+and forbids it — the same technique as the hard-limits and spy-crack blocks, and it is placed after
+the plain lines because position is a lever.
+
+Measured, same question to the same character:
+
+| Condition | Result |
+|---|---|
+| friendship 60 + **trust 60** (control), *"anything you haven't told me?"* | **0/5** held anything back |
+| friendship 60 + **trust 5** (tension) | **4/5** held back — *"better left unsaid for now"*, *"Could be nothing, but…"* |
+| **respect 70 + friendship 5** | 5/5 purely tactical, no warmth |
+| respect 70 + friendship 70 (control) | 3/4 opened *"Well, Ada"*, volunteered personal detail |
+| **fear 70 + resentment 45**, *"wait here"* | 5/5 clipped — *"Alright... I'll wait here."* |
+| trust 70 + fear 0 (control), same order | 4/4 warm, protective, pushed back |
+
+**Obedience now comes from the vector, not friendship.** `compliant = 0.4·friendship + 0.3·trust +
+0.3·respect + 0.25·fear − 0.35·resentment`. Someone can obey out of respect without warmth, or out
+of fear without loyalty, and resentment eats compliance built by any of the others. When fear
+dominates friendship an extra line fires — obey, but *"a little too quick, a little too flat"* — and
+that produced the sharpest behavioural separation of anything tested so far.
+
+⚠ All existing friendship gates (naming ≥5, boons ≥10, spy crack ≥30, Herx ≥50) still key off the
+`friendship` dimension and are unchanged.
+
 ### Relationships
 `follower_state[uid] = {friendship, events, event_log, name, race, allegiance, motive, last_boon_floor}` in service RAM, within-run. Friendship hidden from the player. Chat capped per floor; **deeds are meant to drive the climb to 100**. Obedience scales with friendship (f≤4 refuse risky with action NONE; f≤9 grumble; f≥10 obey).
 
