@@ -319,16 +319,16 @@ DIMENSION_BEHAVIOR = {
     "respect":    ((70, "You defer to their judgment when a decision is dangerous, even when you "
                         "would choose differently."),
                    (40, "You think they know what they are doing, and you say so plainly.")),
-    "fear":       ((60, "You avoid contradicting them outright. You agree faster than you mean it, "
+    "fear":       ((55, "You avoid contradicting them outright. You agree faster than you mean it, "
                         "and you choose safe words when they are angry."),
-                   (30, "You are careful around them. You soften your disagreements.")),
-    "resentment": ((60, "You bring up an old grievance unprompted, even though this is not the "
+                   (22, "You are careful around them. You soften your disagreements.")),
+    "resentment": ((55, "You bring up an old grievance unprompted, even though this is not the "
                         "moment for it."),
-                   (30, "Something they did still sits badly with you. Let it leak out as a short "
+                   (22, "Something they did still sits badly with you. Let it leak out as a short "
                         "answer or a pointed remark.")),
-    "dependence": ((60, "You need them to get out of here alive and you both know it. Being left "
+    "dependence": ((55, "You need them to get out of here alive and you both know it. Being left "
                         "behind frightens you and it shows in what you ask for."),
-                   (30, "You rely on them for safety and supplies more than you like to admit.")),
+                   (25, "You rely on them for safety and supplies more than you like to admit.")),
     "curiosity":  ((50, "Ask them a question about themselves in this reply, unprompted."),
                    (25, "You are curious about them; let it show once.")),
 }
@@ -336,22 +336,30 @@ DIMENSION_BEHAVIOR = {
 # The whole point of a vector instead of a scalar: a person can hold two of these at once.
 # The 8B will happily flatten that into plain friendliness, so each pair names the
 # smoothing route and forbids it -- the same technique as the hard-limits and spy-crack blocks.
+# Conditions are RELATIVE, not absolute. The dimensions grow at very different rates --
+# friendship is deliberately slow (100 is a whole-playthrough milestone) while fear and
+# resentment jump in single events -- so absolute thresholds like "friendship >= 40 AND
+# trust <= 15" were unreachable in an actual run and fired on nothing.
+#
+# Calibrated so a clean run fires NONE of these and a troubled one fires one or two.
+# Restraint is the point (spec 36): a character holding three contradictions at once reads
+# as noise, not depth.
 DIMENSION_TENSIONS = (
-    (lambda s: s["friendship"] >= 40 and s["trust"] <= 15,
+    (lambda s: s["friendship"] >= 20 and s["friendship"] - s["trust"] >= 15,
      "YOU LIKE THEM AND YOU DO NOT TRUST THEM. Both, at the same time. Be warm and still keep "
      "something back — an answer that stops a little short, a thing you do not quite say."),
-    (lambda s: s["respect"] >= 40 and s["friendship"] <= 15,
+    (lambda s: s["respect"] >= 25 and s["respect"] - s["friendship"] >= 20,
      "YOU ADMIRE THEM WITHOUT LIKING THEM. Give them competent, useful, direct answers and no "
      "personal warmth at all. Do not soften into friendliness."),
-    (lambda s: s["friendship"] >= 40 and s["resentment"] >= 40,
+    (lambda s: s["friendship"] >= 20 and s["resentment"] >= 20,
      "YOU CARE ABOUT THEM AND YOU ARE STILL ANGRY WITH THEM. Do not forgive it in this reply."),
-    (lambda s: s["dependence"] >= 50 and s["resentment"] >= 40,
+    (lambda s: s["dependence"] >= 25 and s["resentment"] >= 20,
      "YOU NEED THEM AND YOU RESENT NEEDING THEM. It comes out as prickliness that you then "
      "half walk back."),
-    (lambda s: s["fear"] >= 40 and s["friendship"] >= 40,
+    (lambda s: s["friendship"] >= 20 and s["fear"] >= 25,
      "YOU ARE FOND OF THEM AND FRIGHTENED OF THEM. You are agreeable in a way that is not "
      "quite honest."),
-    (lambda s: s["trust"] <= 10 and s["dependence"] >= 50,
+    (lambda s: s["trust"] <= 10 and s["dependence"] >= 25,
      "YOU DO NOT TRUST THEM AND YOU CANNOT AFFORD TO LEAVE. You stay, and you watch them."),
 )
 
@@ -593,19 +601,54 @@ def build_lore_context(race, floor, budget=16, map_name=""):
 
 IMPORTANCE_WEIGHT = {"routine": 0, "notable": 3, "major": 8, "world_changing": 20}
 
-# Importance still drives friendship; these say what ELSE an event does. Surviving a fight
-# together builds trust and respect, not just warmth -- and it deepens how much they need you.
+# What each event does to the relationship vector. Listed explicitly rather than derived from
+# importance, because importance ranks a memory while these say what it COST or BUILT -- and
+# the negative events must not hand out friendship just for being memorable.
+#
+# Until these existed, nothing in a real run could raise fear or resentment except the player
+# literally typing a threat, so the more interesting tensions (fear+friendship,
+# dependence+resentment) were unreachable in play.
 EVENT_DIMENSIONS = {
-    "recruitment":      {"curiosity": 12, "dependence": 8},
-    "fought_alongside": {"trust": 4, "respect": 5, "dependence": 3},
+    # --- earned ---
+    "recruitment":      {"friendship": 3, "curiosity": 12, "dependence": 8},
+    "fought_alongside": {"friendship": 3, "trust": 4, "respect": 5, "dependence": 3},
+    "healed_by_player": {"friendship": 4, "trust": 6, "dependence": 5, "resentment": -4},
+    # --- costly ---
+    # You hit them yourself. The single largest source of resentment in the system, and the
+    # only event that takes friendship away.
+    "hurt_by_player":   {"friendship": -5, "trust": -10, "fear": 12, "resentment": 15},
+    # Nearly died in a fight: frightening, and it drives home that they need you to survive.
+    "wounded":          {"fear": 8, "dependence": 8},
+    # Alive, but you went on without them and left them somewhere behind.
+    "left_behind":      {"trust": -6, "fear": 5, "resentment": 10},
+    # Watched one of your OTHER followers die. Fired for the survivors, not the casualty.
+    "ally_died":        {"trust": -3, "fear": 10, "resentment": 4},
+}
+
+# How strongly an event is remembered (ranking + what gets replayed into the prompt).
+# Deliberately separate from the dimension deltas above: being hit by the player is very
+# memorable AND costly, while a routine scrape is neither.
+EVENT_IMPORTANCE = {
+    "recruitment": "notable", "fought_alongside": "notable", "healed_by_player": "notable",
+    "hurt_by_player": "major", "wounded": "notable", "left_behind": "major",
+    "ally_died": "major",
 }
 IMPORTANCE_ORDER = {"world_changing": 3, "major": 2, "notable": 1, "routine": 0}
 
+EVENT_CLAIMS = {
+    "recruitment":      "This adventurer recruited you on floor {floor}; you chose to follow them.",
+    "fought_alongside": "You fought beside this adventurer on floor {floor} and made it through together.",
+    "healed_by_player": "You were badly hurt on floor {floor} and this adventurer healed you.",
+    "hurt_by_player":   "On floor {floor} this adventurer struck you themselves. You felt it, and you have not forgotten.",
+    "wounded":          "You were nearly killed on floor {floor} and barely came through it.",
+    "left_behind":      "On floor {floor} this adventurer went on and left you behind.",
+    "ally_died":        "On floor {floor} you watched another of this adventurer's companions die.",
+}
+
 def _event_claim(etype, floor, race):
-    if etype == "recruitment":
-        return f"This adventurer recruited you on floor {floor}; you chose to follow them."
-    if etype == "fought_alongside":
-        return f"You fought beside this adventurer on floor {floor} and made it through together."
+    tpl = EVENT_CLAIMS.get(etype)
+    if tpl:
+        return tpl.format(floor=floor)
     return f"Something notable happened on floor {floor} ({etype})."
 
 def reset_run():
@@ -625,12 +668,17 @@ def record_event(uid, race, etype, floor, player=0):
     # dedup: a follower can only be recruited once
     if etype == "recruitment" and any(e["type"] == "recruitment" for e in st["event_log"]):
         return
-    importance = "notable"
+    importance = EVENT_IMPORTANCE.get(etype, "notable")
     st["event_log"].append({
         "type": etype, "floor": floor, "claim": _event_claim(etype, floor, race),
         "importance": importance, "provenance": "participated",
     })
-    adjust(st, friendship=IMPORTANCE_WEIGHT.get(importance, 0), **EVENT_DIMENSIONS.get(etype, {}))
+    # Known events carry their own explicit deltas (including friendship); anything unknown
+    # falls back to the old importance-driven friendship bump.
+    deltas = EVENT_DIMENSIONS.get(etype)
+    if deltas is None:
+        deltas = {"friendship": IMPORTANCE_WEIGHT.get(importance, 0)}
+    adjust(st, **deltas)
     print(f"[SERVICE-DBG] event '{etype}' recorded for follower {uid}; {dims_summary(st)}")
 
 def events_for_prompt(st, budget=6):

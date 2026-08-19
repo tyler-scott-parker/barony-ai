@@ -97,8 +97,24 @@ whole point. Seven dimensions now, **none ever shown to the player as a number**
 so a typo can't silently create a dimension that nothing reads.
 
 **What moves them**
-- **Events** — importance still drives friendship; `EVENT_DIMENSIONS` says what else happens.
-  Surviving a fight together builds trust and respect, not just warmth, and deepens dependence.
+- **Events** — `EVENT_DIMENSIONS` gives each event type its own explicit deltas (friendship
+  included), because importance ranks a *memory* while the deltas say what it **cost or built**.
+  Seven types now, and the negative half is what makes the vector work at all:
+
+  | Event | Detected by | Effect |
+  |---|---|---|
+  | `recruitment` | interact-recruit hook | curiosity, dependence |
+  | `fought_alongside` | combat→calm edge | trust, respect, dependence |
+  | `healed_by_player` | HP jumps ≥15% max near their leader | trust, friendship, −resentment |
+  | `wounded` | HP crosses **down** through 35% max | fear, dependence |
+  | `hurt_by_player` | `updateEntityOnHit` — their own leader struck them | **−friendship, −trust, +fear, +resentment** |
+  | `left_behind` | >25 tiles adrift for 25s | −trust, fear, resentment |
+  | `ally_died` | a watched follower vanishes; fired for the **survivors** | −trust, fear, resentment |
+
+  Only friendly fire needed a new upstream hook. Everything else rides the follower scan
+  `mymod_ambientTick` already runs each frame (`mymod_watch`). Two traps handled there:
+  a **level change also empties the map**, so the watch is keyed per floor or every staircase
+  reads as a massacre; and *wounded* fires on **crossing** the threshold, not on sitting below it.
 - **Talk** — friendship + curiosity only, still metered by `CHAT_CAP_PER_FLOOR`. Trust and respect
   are deliberately *not* buyable by talking; they have to be earned by deeds.
 - **How the player speaks** — `PLAYER_TONE` does a coarse keyword read (praise / threat / apology /
@@ -108,6 +124,13 @@ so a typo can't silently create a dimension that nothing reads.
 **Rendering: behaviour, never feeling.** `DIMENSION_BEHAVIOR` gives each band a line saying what to
 *do* ("Ask them a question about themselves, unprompted"), never what to feel. Capped at the 4
 strongest — seven lines every turn flattens into noise.
+
+⚠ **Tension conditions are RELATIVE, not absolute — this was got wrong first.** The dimensions
+grow at wildly different rates: friendship is deliberately slow (100 = a whole playthrough) while
+fear and resentment jump in a single event. Absolute thresholds like *"friendship ≥ 40 AND
+trust ≤ 15"* were unreachable in an actual run — a full troubled playthrough fired **zero**
+tensions. Now phrased as gaps (`friendship - trust >= 15`) and calibrated so a **clean run fires
+none, a troubled run 1–2, an abusive run 3**. Restraint is the point (spec §36).
 
 **`DIMENSION_TENSIONS` is the part that earns the vector.** A pair like high friendship + low trust
 is exactly what the 8B smooths into plain friendliness, so each tension names the smoothing route
@@ -124,6 +147,12 @@ Measured, same question to the same character:
 | respect 70 + friendship 70 (control) | 3/4 opened *"Well, Ada"*, volunteered personal detail |
 | **fear 70 + resentment 45**, *"wait here"* | 5/5 clipped — *"Alright... I'll wait here."* |
 | trust 70 + fear 0 (control), same order | 4/4 warm, protective, pushed back |
+
+Verified end-to-end from real event histories, same order (*"I need you to go in first"*):
+clean run 5/5 cheerful — *"Aye, boss! I'll go first."*; troubled run 5/5 **obeyed resentfully** —
+*"Fine, you want me to go first? I'm not getting killed again because of your recklessness."*
+One reply cited *"the last time you left me behind. Floor 7"* unprompted, so the structured event
+log is being recalled specifically rather than as general mood.
 
 **Obedience now comes from the vector, not friendship.** `compliant = 0.4·friendship + 0.3·trust +
 0.3·respect + 0.25·fear − 0.35·resentment`. Someone can obey out of respect without warmth, or out
