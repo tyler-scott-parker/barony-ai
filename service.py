@@ -4,7 +4,7 @@ The game (thin C++ hooks) POSTs here; we build a prompt, ask a local Ollama mode
 and reply with {reply, action, name, secret, boon}. All state is per-playthrough
 and lives in RAM -- `new_run` clears it.
 """
-import io, traceback
+import io, itertools, traceback
 import json, http.server, socketserver, urllib.request, os, random, re, threading, time
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -55,6 +55,57 @@ try:
     os.makedirs(LOG_DIR, exist_ok=True)
 except Exception:
     pass
+# ---- Optional TTS spool (OFF by default) -------------------------------------
+# Voice output is a separate, optional process -- exactly like voice_bridge.py.
+# This service NEVER synthesises or plays audio. When BARONY_AI_TTS is on it drops
+# one small JSON file per spoken line into a spool directory and forgets about it;
+# `tts_bridge.py` is what loads a voice and makes noise. Consequences of that split:
+#   * with the flag off, TTS costs one boolean test per reply and nothing else
+#   * with the flag on but no bridge running, lines spool and get pruned -- the
+#     game is never blocked or slowed by audio, and never waits on it
+#   * the spool is written HOST-side, so in co-op only the machine running the
+#     bridge hears anything; a client bridge would need a relay first
+TTS_ENABLED = os.environ.get("BARONY_AI_TTS", "0").strip().lower() in ("1", "true", "on", "yes")
+TTS_SPOOL   = os.environ.get("BARONY_AI_TTSDIR", "/tmp/mymod_tts")
+# If the bridge is dead or has fallen behind, drop the OLDEST pending lines. A line
+# arriving forty seconds after the conversation moved on is worse than silence.
+TTS_MAX_PENDING = int(os.environ.get("BARONY_AI_TTSQUEUE", "6"))
+
+_TTS_SEQ = itertools.count(1)
+
+def tts_emit(text, race="", uid=0, kind="reply", name="", player=0):
+    """Queue one line for the optional voice bridge. Never raises, never blocks."""
+    if not TTS_ENABLED or not text or not text.strip():
+        return
+    try:
+        pending = sorted(f for f in os.listdir(TTS_SPOOL) if f.endswith(".json"))
+        for stale in pending[:max(0, len(pending) - (TTS_MAX_PENDING - 1))]:
+            try:
+                os.remove(os.path.join(TTS_SPOOL, stale))
+            except OSError:
+                pass
+        rec = {"text": text, "race": race or "", "uid": int(uid or 0), "kind": kind,
+               "name": name or "", "player": int(player or 0), "ts": time.time()}
+        base = os.path.join(TTS_SPOOL, "%012d" % next(_TTS_SEQ))
+        # write-then-rename: the bridge polls this directory and must never read a
+        # half-written file.
+        with io.open(base + ".tmp", "w", encoding="utf-8") as fh:
+            json.dump(rec, fh, ensure_ascii=False)
+        os.replace(base + ".tmp", base + ".json")
+    except Exception:
+        pass   # audio must never break the game
+
+if TTS_ENABLED:
+    # Clear anything left over from a previous session -- the sequence counter restarts
+    # at 1, so stale files would sort ahead of live ones and play out of order.
+    try:
+        os.makedirs(TTS_SPOOL, exist_ok=True)
+        for _f in os.listdir(TTS_SPOOL):
+            if _f.endswith((".json", ".tmp")):
+                os.remove(os.path.join(TTS_SPOOL, _f))
+    except Exception:
+        pass
+
 VALID_ACTIONS = ("FOLLOW", "DEFEND", "WAIT", "ATTACK", "NONE")
 
 # ---- Cross-race comprehension: you only understand your own kind's tongue ----
@@ -1401,6 +1452,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if (ambient or taunt) and not can_understand(player_race, race):
                 noise = noise_for(race)
                 print(f"[SERVICE] {race} (unintelligible to {player_race or 'player'}) -> {noise}")
+                tts_emit(noise, race, uid, "noise", player=player)
                 return self._send_json({"reply": noise, "action": "NONE"})
 
             # Prompt assembly mutates run state (boon rolls, Herx offers), so it takes the
@@ -1458,6 +1510,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                         else:
                             record_npc_exchange(st, player_name, "(walked up to you)", speech)
                 print(f"[SERVICE] -> npc speech={speech}")
+                tts_emit(speech, race, uid, "npc", npc_name, player)
                 logrec("npc", uid=uid, race=race, npc_name=npc_name, role=npc_role,
                        shop=(npc_shop if npc_shop >= 0 else None), floor=floor, map=map_name,
                        player=player, greeting=greeting or None, says=says[:160],
@@ -1482,6 +1535,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             print(f"[SERVICE] -> action={action} speech={speech}")
             _st = follower_state.get(uid, {}) if uid else {}
             _kind = "taunt" if taunt else ("ambient" if ambient else "reply")
+            tts_emit(speech, race, uid, _kind, name, player)
             _open = [n for n, g, _ in DISCLOSURE_TIERS if _st and g(_st)]
             _tens = len([1 for c, _x in DIMENSION_TENSIONS if _st and c(_st)])
             logrec(_kind, uid=uid, race=race, floor=floor, map=map_name, player=player,

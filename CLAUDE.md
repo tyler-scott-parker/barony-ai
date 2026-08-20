@@ -25,7 +25,7 @@ Fetch upstream with `git fetch origin`; push your work with `git push mine mymod
 
 - All mod C++ now lives in **`src/mymod/mymod.cpp`** + `mymod.hpp` (extracted so upstream merges stay clean)
 - Listed in `src/CMakeLists.txt` under `GAME_SOURCES` — **not** in `EDITOR_SOURCES`
-- Service: `~/barony-ai/service.py` (port 5001), plus `barony_lore_full.json` (449KB, 45 sections), `barony_lore.json` (**only** source of `world.setting` — its wording differs from the full file's, so they are not interchangeable), `race_lore.json`, `race_books.json`, `comprehension.json`, `voice_bridge.py`
+- Service: `~/barony-ai/service.py` (port 5001), plus `barony_lore_full.json` (449KB, 45 sections), `barony_lore.json` (**only** source of `world.setting` — its wording differs from the full file's, so they are not interchangeable), `race_lore.json`, `race_books.json`, `comprehension.json`, `voice_bridge.py`, `tts_bridge.py` (optional voice output, off by default; its `.venv-tts/` and `voices/` are gitignored)
 - Data files are resolved relative to `service.py`, so the repo can live anywhere
 - Dev binary: `~/.local/share/Steam/steamapps/common/Barony/barony-modded`
 - IPC via `/tmp/mymod_*.json` (Linux-specific; needs a portability pass before release)
@@ -59,12 +59,22 @@ cmake .. -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DOPENAL_ENABLED=OFF -DFMOD_ENABLED=
 Service + voice in separate terminals:
 ```bash
 python3 ~/barony-ai/service.py
-python3 ~/barony-ai/voice_bridge.py
+python3 ~/barony-ai/voice_bridge.py          # optional: push-to-talk INPUT
 ```
+
+Voice OUTPUT (TTS) is off unless both halves are turned on — this machine deliberately runs
+without it:
+```bash
+python3 ~/barony-ai/tts_bridge.py --setup    # one time: venv + piper + 77MB voice model
+BARONY_AI_TTS=1 python3 ~/barony-ai/service.py
+python3 ~/barony-ai/tts_bridge.py            # optional: spoken OUTPUT
+```
+`.venv-tts/` and `voices/` are gitignored — the ONNX model must never be committed.
 
 Service config is env-overridable, so a released build needs no file edits:
 `BARONY_AI_OLLAMA`, `BARONY_AI_MODEL`, `BARONY_AI_PORT`, `BARONY_AI_BOOKS` (the books dir still
-defaults to the hardcoded Steam path — that default is the remaining portability blocker).
+defaults to the hardcoded Steam path — that default is the remaining portability blocker),
+`BARONY_AI_TTS` (**default `0`**), `BARONY_AI_TTSDIR`, `BARONY_AI_TTSQUEUE`.
 
 In-game test harness: `/enablecheats` → `/summonall` → `/friendly`, then interact-recruit.
 
@@ -626,9 +636,130 @@ answered Bram by name without being told to.
 *if* that player chooses to run `voice_bridge.py` (Python + faster-whisper) — transcribed text goes
 out over the same `MYAI` path. Optional extra, never a requirement.
 
+### Text-to-speech (optional, OFF by default)
+
+Voices for followers, townsfolk, merchants and monsters. **Off unless explicitly turned on**, and
+structured so that "off" genuinely costs nothing — this dev machine runs without it.
+
+**Two halves, and both must be on.** Same split as push-to-talk, for the same reason: the game must
+never wait on audio.
+
+| Half | What it does | If missing |
+|---|---|---|
+| `BARONY_AI_TTS=1` on the service | appends one small JSON file per spoken line to a spool dir | `tts_emit` returns on a boolean; the spool dir is never even created |
+| `python3 tts_bridge.py` | polls the spool, synthesises, plays | lines spool and are pruned; game unaffected |
+
+The service **never synthesises or plays anything** — it writes `{text, race, uid, kind, name,
+player, ts}` and forgets. Write-then-`os.replace` so the bridge can't read a half-written file.
+Everything in `tts_emit` is wrapped in a bare `except: pass`: audio must never break the game.
+
+⚠ **A late line is worse than no line.** Two independent drops, because a synth queue that just
+grows will replay a conversation you left three rooms ago:
+- service side, `TTS_MAX_PENDING = 6` — a new emit prunes the **oldest** pending files
+- bridge side, `MAX_AGE = 20s` — anything older is discarded unspoken
+
+The bridge also `os.remove`s a line **before** speaking it, so a crash mid-playback can't put the
+same line on an infinite loop.
+
+#### Quality tier: piper + VCTK
+
+`python3 tts_bridge.py --setup` builds `.venv-tts/`, installs `piper-tts`, and downloads **one**
+model. Both are gitignored — the model is 77 MB.
+
+**`en_GB-vctk-medium` is the whole trick: 109 distinct real human voices in a single file**,
+selectable by `-s <speaker_id>`. Casting a dungeon full of NPCs therefore costs one 73 MB download
+rather than dozens of models, and the accents suit Barony. `en_US-libritts_r-medium` has *904*
+speakers if more is ever wanted; `--setup --full` adds three single-speaker extras.
+
+**Measured: RTF 0.034 on CPU** — 121 seconds of audio synthesised in 4.1s, model load 0.9s paid
+once at startup. Deliberately CPU, never `--cuda`: the GPU is already holding the 8B at ~6.1 of
+8 GB, and this is the feature that must not compete with generation.
+
+⚠ **Piper's speaker ids carry no usable voice metadata** — the VCTK `speaker-info.txt` URL is dead,
+and the model config is just `p239 → 0`. So voice character is **measured, not looked up**:
+`--profile` synthesises one sentence with all 109 speakers and estimates each one's median F0 by
+autocorrelation, then prints a `BANDS` block to paste back in. The bands are that measurement:
+
+| band | measured | cast as |
+|---|---|---|
+| `deep` (17) | 80–98 Hz | trolls, liches, demons, skeletons, dwarves |
+| `low` (27) | 100–130 Hz | goblins, vampires, slimes |
+| `mid` (7) | 143–168 Hz | humans, shopkeepers, constructs |
+| `high` (40) | 172–204 Hz | humans, succubi, shadows |
+| `shrill` (18) | 206–251 Hz | gnomes, kobolds, imps, rats |
+
+`mid` is thin because the corpus clusters male 100–130 and female 172–204; `human` therefore draws
+from `low`+`mid`+`high` so a town sounds like a town.
+
+**Character still comes from the sox chain, but a gentler one.** Each race carries two effect
+chains: `fx` for piper and `efx` for espeak. Over-processing an already-natural voice is exactly
+what makes cheap TTS sound cheap, so the piper chains are consistently milder — troll `pitch -260`
+against espeak's `-320`, rat `380` against `420`. The construct races are the one place a robotic
+result is *correct*, and they get a bandpass on top.
+
+**Voice choice is deterministic in uid** via `hashlib.md5` — **not** Python's `hash()`, which is
+salted per process and would recast every creature on each bridge restart. Length-scale and
+espeak speed/pitch get a small per-uid jitter so two goblins cast from the same speaker still differ.
+
+**Named characters get a FIXED speaker id** (`NAMED`) — Merlin is always spk93, Herx spk76 under
+heavy reverb. Note this is the `npc_name` path only, so a *follower* who names itself "Merlin" does
+not inherit the voice — the same scoping rule the lore lookup uses.
+
+#### Fallback tier: espeak-ng
+
+Kept, and still tuned, so the bridge works on a machine with nothing installed. It sounds like a
+1987 answering machine, which is why the bridge prints a one-line nudge toward `--setup` when it
+lands there. Voice character comes from espeak *variants*
+(`/usr/share/espeak-ng-data/voices/!v` — `croak`, `whisper`, `Demonic`, `robosoft*`, `Tweaky`,
+`grandpa`) plus the `efx` chain. Without sox at all, fx are skipped and voices go flat but still work.
+
+⚠ **`.venv-tts/bin/python` is a SYMLINK to the system interpreter.** The bridge re-execs itself into
+the venv so the documented `python3 tts_bridge.py` just works, and the loop guard originally compared
+`realpath(sys.executable)` — which *matches*, so the hand-off silently never happened and it ran on
+robotic espeak with no indication why. Compare **`sys.prefix`** against the venv dir instead. The
+re-exec also passes `-u`, or a redirected bridge log looks empty.
+
+⚠ **All 43 casts are validated by rendering**, both tiers: every speaker id, length-scale and sox
+chain is actually synthesised and pushed through sox. A typo in one chain would otherwise fail
+silently for exactly one race — and only the race nobody tested.
+
+⚠ **`_norm()` must match the service's `_lore_key()` normalisation.** The game hands back display
+names with spaces (`crystal golem`, `revenant skull`); a mismatch is a *silent* fallthrough to the
+default voice, which is how the lore-lookup bug hid for so long.
+
+**Text is cleaned before synthesis**, since model output is written to be read: strip
+`*`/markdown, normalise typographic quotes and em-dashes, drop bare `...`, truncate at 320 chars on
+a sentence boundary. Truncation matters — the queue is serial, so one rambling reply otherwise
+holds the audio for a minute.
+
+**All three speech paths are voiced**: followers/taunts/ambient, non-follower NPCs and merchants,
+and the untranslated `*Squeak!*` comprehension noises.
+
+**Testing without launching the game:**
+```bash
+python3 tts_bridge.py --setup                         # one time, ~80 MB
+python3 tts_bridge.py --list                          # the casting table
+python3 tts_bridge.py --say "Stay behind me." --race troll
+python3 tts_bridge.py --say "Well met." --name Merlin
+python3 tts_bridge.py --demo                          # one line in every race's voice
+python3 tts_bridge.py --profile                       # re-measure the VCTK bands
+```
+
+**Not done:** no in-game toggle — there is no `/aitts` console command, so switching it on means
+restarting the service with the env var. **No C++ changed at all, so this needs no rebuild.** Piper
+mispronounces invented names (a follower who calls itself "Zx'thal") and there is no lexicon pass.
+In co-op only the machine running the bridge hears anything; a client could run its own bridge, but
+the spool is written host-side, so that needs a relay first.
+
 ## Decisions on record
 
-- **TTS: no**, for now. Text-first protects reply quality and flexibility (any length/style, no mispronounced generated names, no extra VRAM atop 8B + Whisper, fits the text-native shared feed and the BYO/publishing design). Parked as a possible later optional toggle — if voice ever comes, it adapts to the text, not vice versa.
+- **TTS: optional, off by default, and text stays authoritative.** The original "no" was about not
+  letting speech constrain replies. That still holds and is *why* the build is additive: nothing
+  about prompt, reply length, or the shared feed changed, the synth reads whatever the model already
+  wrote, and with the flag off the cost is one boolean test per reply. Runs **piper on CPU at RTF
+  0.034**, so the "no extra VRAM atop 8B + Whisper" objection is answered rather than accepted —
+  the GPU keeps all 8 GB for the 8B. Mispronounced generated names remain a real, unfixed cost —
+  the reason it is opt-in rather than default.
 - **Obedience is earned, not gated in C++** — prompt-driven, so it stays probabilistic and characterful. A hard C++ friendship gate is a possible later layer.
 - **ATTACK stays diegetic** — target-based attack needs cursor-aim, parked.
 - **The event log is structured records, not flat strings** — so new event types slot in with just a type + importance.
