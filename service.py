@@ -680,8 +680,14 @@ def build_lore_context(race, floor, budget=16, map_name=""):
             plain.append(item)
         if plain:
             constraints.append(f"You do NOT know: {', '.join(plain)}")
+    # npc_rules describe what a creature of this kind plausibly knows HERE. They are grounding,
+    # not ignorance, so they belong with the facts -- under LIMITS_HEADER ("you genuinely do not
+    # know these things") they were actively mislabelled, and several of them GRANT knowledge
+    # ("Gnome residents should have strong colony knowledge") which read as a flat contradiction.
+    # Rules addressed to the lore author rather than to a character now live in
+    # profile["authoring_notes"] and are deliberately not rendered at all.
     for nr in loc.get("npc_rules", [])[:2]:
-        constraints.append(nr.strip())
+        facts.append(f"HOW YOUR KIND FITS IN HERE: {nr.strip()}")
 
     return facts[:budget], constraints
 

@@ -3657,7 +3657,7 @@
         "safe_inferences": [
           "Smell, food, hiding places, predators, routes and immediate danger."
         ],
-        "knowledge_boundary": "No human-level abstract history unless a special individual is elevated.",
+        "knowledge_boundary": "No human-level abstract history.",
         "individualization_rule": "Lightweight sensory personality only.",
         "sources": [
           "Surviving the Mines",
@@ -3671,7 +3671,8 @@
           "location",
           "relationships",
           "relevant_books"
-        ]
+        ],
+        "knowledge_boundary_lift": "No human-level abstract history unless a special individual is elevated."
       },
       "spider": {
         "evidence_quality": "strong",
@@ -3934,7 +3935,7 @@
           "Pack leadership, unusual intelligence and food/resource awareness.",
           "Pack leadership, food scarcity and opportunistic abundance are safe character anchors."
         ],
-        "knowledge_boundary": "Do not turn Algernon into a human philosopher unless specifically generated as a special intelligence case.",
+        "knowledge_boundary": "Do not turn Algernon into a human philosopher.",
         "individualization_rule": "He can be notably intelligent among rats while retaining rat priorities.",
         "sources": [
           "Algernon page",
@@ -3949,7 +3950,8 @@
           "location",
           "relationships",
           "relevant_books"
-        ]
+        ],
+        "knowledge_boundary_lift": "Do not turn Algernon into a human philosopher unless specifically generated as a special intelligence case."
       },
       "thumpus": {
         "evidence_quality": "strong",
@@ -4381,7 +4383,7 @@
         "safe_inferences": [
           "Very narrow identity centered on summoner/target and immediate task."
         ],
-        "knowledge_boundary": "No independent mortal biography unless deliberately elevated.",
+        "knowledge_boundary": "No independent mortal biography.",
         "individualization_rule": "Simple, functional, task-focused communication.",
         "sources": [
           "Leadership"
@@ -4394,7 +4396,8 @@
           "location",
           "relationships",
           "relevant_books"
-        ]
+        ],
+        "knowledge_boundary_lift": "No independent mortal biography unless deliberately elevated."
       },
       "funny_bones": {
         "evidence_quality": "strong",
@@ -4640,7 +4643,7 @@
         "safe_inferences": [
           "Petty ambition, service to stronger demons, mischief and survival."
         ],
-        "knowledge_boundary": "No broad infernal hierarchy unless source-supported.",
+        "knowledge_boundary": "No broad infernal hierarchy.",
         "individualization_rule": "Short, opportunistic personalities; elevate only exceptional individuals.",
         "sources": [
           "Denizens",
@@ -4655,7 +4658,8 @@
           "location",
           "relationships",
           "relevant_books"
-        ]
+        ],
+        "knowledge_boundary_lift": "No broad infernal hierarchy unless source-supported."
       },
       "demon": {
         "evidence_quality": "strong",
@@ -4816,7 +4820,7 @@
           "Patrol, threat detection, orders and restricted routines.",
           "Speech should be functional unless a particular builder or accumulated history justifies learned personality."
         ],
-        "knowledge_boundary": "No biography unless individually constructed.",
+        "knowledge_boundary": "No biography.",
         "individualization_rule": "Treat as a security machine first.",
         "sources": [
           "Denizens",
@@ -4831,7 +4835,8 @@
           "location",
           "relationships",
           "relevant_books"
-        ]
+        ],
+        "knowledge_boundary_lift": "No biography unless individually constructed."
       },
       "spellbot": {
         "evidence_quality": "strong_mechanical",
@@ -4845,7 +4850,7 @@
           "Spell protocols, target identification, programmed duty.",
           "Prioritize spell protocols and builder relationship over invented biography."
         ],
-        "knowledge_boundary": "No biography unless individually constructed or elevated.",
+        "knowledge_boundary": "No biography.",
         "individualization_rule": "Functional speech.",
         "sources": [
           "Denizens",
@@ -4860,7 +4865,8 @@
           "location",
           "relationships",
           "relevant_books"
-        ]
+        ],
+        "knowledge_boundary_lift": "No biography unless individually constructed or elevated."
       },
       "dummybot": {
         "evidence_quality": "strong_mechanical",
@@ -8620,9 +8626,7 @@
           "secret boss mechanics"
         ],
         "npc_rules": [
-          "A Minetown merchant is a strong candidate for broad practical rumors because of customer traffic, but knowledge remains individual.",
-          "Do not make every resident a direct descendant of a specific survivor or an anti-Herx zealot.",
-          "Minetown knowledge should feel communal but not omniscient."
+          "A Minetown merchant is a strong candidate for broad practical rumors because of customer traffic, but knowledge remains individual."
         ],
         "sources": [
           "Dungeon Progression",
@@ -8638,7 +8642,11 @@
           "Crystal Cave operations": "You have never worked the Crystal Caves and nobody explained them to you. How they run is a blank to you.",
           "deep Magician Guild secrets": "You have never been inside the Magician Guild's confidence. Their deeper business is unknown to you.",
           "secret boss mechanics": "You have never faced what guards the hidden places, and you do not know how such a fight goes."
-        }
+        },
+        "authoring_notes": [
+          "Do not make every resident a direct descendant of a specific survivor or an anti-Herx zealot.",
+          "Minetown knowledge should feel communal but not omniscient."
+        ]
       },
       "swamp": {
         "status": "primary_progression_region",
@@ -8709,7 +8717,6 @@
           "its exact layout"
         ],
         "npc_rules": [
-          "Do not treat the Temple as a major religious institution merely because it is called a temple.",
           "NPCs can describe it as an abandoned/hostile set-piece if that is what they personally experienced."
         ],
         "sources": [
@@ -8722,7 +8729,10 @@
         "restricted_knowledge_never": {
           "its exact layout": "You have never explored this place. You could not describe its plan to anyone.",
           "Temple existence before discovery": "You could not have told anyone this place was here before it was found."
-        }
+        },
+        "authoring_notes": [
+          "Do not treat the Temple as a major religious institution merely because it is called a temple."
+        ]
       },
       "haunted_castle": {
         "status": "secret_side_area",
@@ -8748,7 +8758,6 @@
           "full late-game undead politics"
         ],
         "npc_rules": [
-          "Do not collapse Haunted Castle and Bram's Castle into one place.",
           "A low-ranking undead can know its duty and rooms without knowing the castle's entire history."
         ],
         "sources": [
@@ -8763,7 +8772,10 @@
           "Bram Kindly's true identity": "Nobody has ever told you who Bram Kindly really is. You genuinely do not know.",
           "Bram's Castle history": "You have never learned the history of Bram's Castle. Its past is unknown to you.",
           "full late-game undead politics": "You have never been party to how the undead powers arrange themselves. Their politics are beyond you."
-        }
+        },
+        "authoring_notes": [
+          "Do not collapse Haunted Castle and Bram's Castle into one place."
+        ]
       },
       "sand_labyrinth": {
         "status": "primary_progression_region",
@@ -8792,8 +8804,7 @@
         ],
         "npc_rules": [
           "Scholars may discuss Xaz'Cetian theories, but should identify them as theories.",
-          "A common monster should not speak like an archaeologist.",
-          "Minotaur-specific knowledge should be separated from general Labyrinth knowledge."
+          "A common monster should not speak like an archaeologist."
         ],
         "sources": [
           "Dungeon Progression",
@@ -8808,7 +8819,10 @@
           "the exact maze solution": "You have never solved this maze. You could not give anyone the way through.",
           "confirmed Xaz'Cetian history": "No one has ever given you a settled account of the Xaz'Cetians. Their history is unknown to you.",
           "unseen ancient settlements": "You have never travelled out to the old settlements. What became of them, you do not know."
-        }
+        },
+        "authoring_notes": [
+          "Minotaur-specific knowledge should be separated from general Labyrinth knowledge."
+        ]
       },
       "sokoban": {
         "status": "secret_side_area",
@@ -8827,16 +8841,17 @@
           "existence before discovery",
           "solution paths without experience"
         ],
-        "npc_rules": [
-          "A puzzle-solving NPC may have learned habits, but do not grant universal knowledge of the puzzle solution."
-        ],
+        "npc_rules": [],
         "sources": [
           "Dungeon Progression"
         ],
         "restricted_knowledge_never": {
           "existence before discovery": "You could not have told anyone this place existed before you stumbled into it.",
           "solution paths without experience": "You have never worked out the way through here. The solution is not something you hold."
-        }
+        },
+        "authoring_notes": [
+          "A puzzle-solving NPC may have learned habits, but do not grant universal knowledge of the puzzle solution."
+        ]
       },
       "minotaur_maze": {
         "status": "secret_boss_area",
@@ -8990,9 +9005,7 @@
           "facts about Artemisia",
           "details about Baphomet"
         ],
-        "npc_rules": [
-          "Because the Underworld is non-linear and can be entered from multiple points, location knowledge should record which Underworld segment an NPC actually experienced."
-        ],
+        "npc_rules": [],
         "sources": [
           "Dungeon Progression",
           "Artemisia",
@@ -9007,7 +9020,10 @@
           "facts about Artemisia": "You have never met Artemisia and nobody has told you about her. She is a name to you and nothing more.",
           "details about Baphomet": "You have never had a reliable account of Baphomet from anyone. What is true of it, you do not know.",
           "Hell route before discovering it": "You have never found the way down into Hell. Where that route lies, you do not know."
-        }
+        },
+        "authoring_notes": [
+          "Because the Underworld is non-linear and can be entered from multiple points, location knowledge should record which Underworld segment an NPC actually experienced."
+        ]
       },
       "hell": {
         "status": "endgame_region",
@@ -9067,9 +9083,7 @@
           "exact arena mechanics before encounter",
           "Herx's private motives beyond established canon"
         ],
-        "npc_rules": [
-          "Do not make ordinary dungeon NPCs know the Bastion layout merely because Herx is famous."
-        ],
+        "npc_rules": [],
         "sources": [
           "Dungeon Progression",
           "Baron Herx"
@@ -9077,7 +9091,10 @@
         "restricted_knowledge_never": {
           "exact arena mechanics before encounter": "You have never watched what happens in that chamber. How a fight there goes, you do not know.",
           "Herx's private motives beyond established canon": "Herx never confided in you. What he truly wants, beyond what everyone says, you do not know."
-        }
+        },
+        "authoring_notes": [
+          "Do not make ordinary dungeon NPCs know the Bastion layout merely because Herx is famous."
+        ]
       },
       "hamlet": {
         "status": "late_game_hub",
@@ -9150,8 +9167,7 @@
         ],
         "npc_rules": [
           "A Kobold resident may know more about local caves than a Guild mage.",
-          "A Guild mage may know institutional history but not every tunnel.",
-          "Xyggi should not be treated as a universal spokesperson for Scarabs."
+          "A Guild mage may know institutional history but not every tunnel."
         ],
         "sources": [
           "Dungeon Progression",
@@ -9163,7 +9179,10 @@
         "restricted_knowledge_never": {
           "Archmagister secret plans before exposure": "No Archmagister has ever exposed their plans to you. What they are working toward, you do not know.",
           "exact cave secrets without direct experience": "You have been only where your own feet have carried you here. The deeper secrets of these caves are unknown to you."
-        }
+        },
+        "authoring_notes": [
+          "Xyggi should not be treated as a universal spokesperson for Scarabs."
+        ]
       },
       "cockatrice_lair": {
         "status": "secret_setpiece",
@@ -9184,9 +9203,7 @@
           "existence/layout before discovery",
           "universal Kobold religion"
         ],
-        "npc_rules": [
-          "Treat Lair inhabitants as locally specialized, not as representatives of all Cockatrices or all Kobolds."
-        ],
+        "npc_rules": [],
         "sources": [
           "Cockatrice (lair)",
           "Monster & NPC Guide",
@@ -9195,7 +9212,10 @@
         "restricted_knowledge_never": {
           "existence/layout before discovery": "You could not have told anyone this place was here before it was found, and you do not know its full extent.",
           "universal Kobold religion": "You have never been shown any one faith that all kobolds share. Whether such a thing exists, you do not know."
-        }
+        },
+        "authoring_notes": [
+          "Treat Lair inhabitants as locally specialized, not as representatives of all Cockatrices or all Kobolds."
+        ]
       },
       "brams_castle": {
         "status": "secret_endgame_side_area",
@@ -9223,7 +9243,6 @@
           "private motives of individual Consorts"
         ],
         "npc_rules": [
-          "Separate Bram's Castle from the Haunted Castle.",
           "A castle servant can know duties and rooms without knowing Bram's entire history."
         ],
         "sources": [
@@ -9238,7 +9257,10 @@
         "restricted_knowledge_never": {
           "private motives of individual Consorts": "No Consort has ever confided in you. Their private reasons are a blank to you.",
           "Bram transformation details not established by canon": "You have never been told how Bram was turned. The particulars of it are a blank to you."
-        }
+        },
+        "authoring_notes": [
+          "Separate Bram's Castle from the Haunted Castle."
+        ]
       },
       "citadel": {
         "status": "final_endgame_region",

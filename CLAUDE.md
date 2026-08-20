@@ -168,10 +168,30 @@ weight; all profiles currently have ≤3.
 ⚠ **When testing anti-fabrication, probe BOTH kinds.** An abstract topic will score 10/10 and tell
 you nothing; a concrete, nameable place is where the mechanism actually strains.
 
-⚠ **Still prohibition-only elsewhere:** `individual_denizen_research/*/knowledge_boundary` and
-location `npc_rules` also feed the constraints list, and are phrased as instructions to the
-*author* ("Do not invent…", "Automatons may know X only if…") rather than as facts about the
-character. They are a different and probably weaker class, and have not been measured.
+**`npc_rules` are grounding, not ignorance — they no longer render as limits.** They describe what
+a creature of this kind plausibly knows *here*, and several of them **grant** knowledge ("Gnome
+residents should have strong colony/resource knowledge"), so rendering them under
+`LIMITS_HEADER` ("you genuinely do not know these things") was a flat mislabel. They now render
+in the facts as `HOW YOUR KIND FITS IN HERE:`.
+
+**11 rules were addressed to the lore author, not to a character** — *"Separate Bram's Castle from
+the Haunted Castle"*, *"Do not make every resident a direct descendant of a survivor"*. They cost
+prompt tokens and say nothing a character can act on. Moved to a `authoring_notes` key per profile:
+kept in the file, never rendered.
+
+**`knowledge_boundary` was left almost entirely alone, on purpose.** 53 of 75 are author-phrased
+("Do not import Hindu theology as Barony world history"), but unlike `npc_rules` those are directly
+actionable by the model — it *is* the author of the character's speech — and they measured working.
+Only the 6 with conditions the runtime cannot resolve were made absolute (*"No human-level abstract
+history ~~unless a special individual is elevated~~"*), with the original preserved in
+`knowledge_boundary_lift`. Four conditionals about canon/sources (`merlin`, `shelob`, `bram_kindly`,
+`succubus_consort`) read correctly as written and were left.
+
+⚠ **Measure before rewriting a limit class.** Three probes — authoring-instruction leakage at the
+Temple, a permission-under-prohibition Swamp goblin, and a class restriction on a Mine rat — all
+scored **6/6 correct** *before* any of this. Neither class was behaviourally broken; the changes
+above are correctness and prompt-cost tidy-ups, not bug fixes, and were kept narrow for that
+reason. Temple probe after: **7/8**, no regression.
 
 ⚠ **Spec §26 (information provenance) was tried here and REMOVED — do not re-add it as a prompt
 instruction.** *"When you pass on something you did not witness, say how you came by it"* reads
