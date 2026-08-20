@@ -39,7 +39,7 @@ Fetch upstream with `git fetch origin`; push your work with `git push mine mymod
 | `files.cpp` | `new_run` event in `physfsLoadMapFile` at `levelToLoad <= 1`; plus a `__attribute__((weak))` `mymod_recordEvent` stub | The weak stub exists because the **editor** target compiles `files.cpp` without the mod and would otherwise fail to link |
 | `monster_lich.cpp` | Herx debuff block after `my->setHardcoreStats(*myStats)` | inside the `!MONSTER_INIT` guard, so it can't double-apply |
 | `consolecommand.cpp` | `/aicommand`, `/aiserver`, `/aitest` + `#include "../mymod/mymod.hpp"` | commands legitimately belong here |
-| `net.cpp` | `{'MYAI', ...}` in `serverPacketHandlers`; `{'MYNM', ...}` and `{'MYSH', ...}` in `clientPacketHandlers` + `#include "mymod/mymod.hpp"` | the three mod packets. The tables are file-`static`, so registration cannot happen from `mymod.cpp` |
+| `net.cpp` | `{'MYAI'}`, `{'MYID'}` in `serverPacketHandlers`; `{'MYNM'}`, `{'MYSH'}`, `{'MYIV'}` in `clientPacketHandlers` + `#include "mymod/mymod.hpp"` | the five mod packets. The tables are file-`static`, so registration cannot happen from `mymod.cpp` |
 | `actmonster.cpp` | `mymod_npcEngage()` at the top of `handleMonsterChatter` (~12216) | clicking a talking NPC. **Falls through to the vanilla canned line when it returns false**, so an NPC is never mute if the service is down |
 | `shops.cpp` | `mymod_npcEngage()` at the end of `startTradingServer` | merchant greets on shop open. At the END of the function on purpose — the local-player and remote-client branches both flow through it |
 
@@ -509,9 +509,16 @@ on purpose, so it *stole the turn* from identification — measured, the claim n
 reply invented an entirely different object. Boon offers and the spy crack are now both suppressed
 when an identify request is in flight. Spec §35/§36: scarcity, chaos without noise.
 
-Host-only for now: a remote client owns its own inventory display and vanilla pointedly refuses to
-touch a client's items server-side (`items.cpp:3867`), so routing this needs item info in `MYAI`
-and a verdict packet back.
+**Works in multiplayer.** A remote client owns its own inventory display and vanilla pointedly
+refuses to touch a client's items server-side (`items.cpp:3867`), so the client resolves the item
+from its OWN inventory and ships the description to the host (`MYID`), and the host sends the
+verdict back (`MYIV`) for the client to apply. The client describes its own item, so a dishonest
+client could only mislead itself.
+
+The packet pack/parse (NUL-separated variable-length strings, the classic place for an off-by-one)
+is unit-tested standalone in `src/mymod/packtest.cpp` — build it with `g++ -o packtest packtest.cpp`.
+It is **not** in the build: `src/CMakeLists.txt` lists `mymod/mymod.cpp` explicitly rather than
+globbing, so a second `main()` there is inert. Worst realistic packet is 141 bytes of 512.
 
 ### Session logging (for the playthrough)
 
