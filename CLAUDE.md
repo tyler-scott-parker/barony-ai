@@ -484,6 +484,57 @@ these mines my whole life"* — picking up "the Mines" from the SETTING line. `p
 for NPCs and followers alike. Verified: 4/4 said Hamlet after, and a follower on floor 20 named
 Herx's stronghold unprompted.
 
+### Item identification (design spec §9)
+
+`/aiidentify [n]` — ask your follower what your nth unidentified item is. **The engine stays
+authoritative about what the item IS; the service decides only what the character CLAIMS**, which
+is what makes the spec's three-way split real: *actual identity / what they know / whether they are
+honest*. Only a claim that is **both correct and honest** sets `item->identified`, so a lie leaves
+you carrying something that is not what you were told.
+
+The claim is chosen server-side from **decoy names the engine supplies** (real item names from the
+same category) — never invented by the model, same division of labour as boons and the spy crack.
+
+Measured distribution, and observed in dialogue:
+
+| Who | Outcome |
+|---|---|
+| stranger (trust <15 and friendship <20) | refuses, 100% |
+| trusted **expert** for that category | 85% correct |
+| trusted non-expert | ~30% correct, rest honest mistakes |
+| trusted **spy** | ~52% deliberate lie |
+
+⚠ **Two mandatory unprompted behaviours must not stack in one reply.** The spy crack is placed last
+on purpose, so it *stole the turn* from identification — measured, the claim never got made and one
+reply invented an entirely different object. Boon offers and the spy crack are now both suppressed
+when an identify request is in flight. Spec §35/§36: scarcity, chaos without noise.
+
+Host-only for now: a remote client owns its own inventory display and vanilla pointedly refuses to
+touch a client's items server-side (`items.cpp:3867`), so routing this needs item info in `MYAI`
+and a verdict packet back.
+
+### Session logging (for the playthrough)
+
+One append-only JSONL timeline per run at `logs/session-<stamp>.jsonl`. **The C++ side pushes into
+the same file** (`POST {"log":...}` → `mymod_log()`), which is the point — correlating *"the bubble
+never appeared"* with what the service actually returned needs one ordered timeline. Engine-only
+facts are logged there because they are invisible service-side: boons landing, an item actually
+being identified, `MYAI` arriving, friendly fire, deaths, NPC engagement.
+
+- **`/ailog <what went wrong>`** — a player note straight into the timeline. The single most useful
+  line in a playtest log is the human saying where to look; `logreview.py` prints these first.
+- **`/aistatus`** — live state (partner, busy flags, follower watch, Herx debuff).
+- **`python3 logreview.py`** — summarises the newest session: errors, malformed-JSON recoveries,
+  player notes, latency percentiles, prompt size, events with volume warnings, per-follower
+  relationship trajectories, boons/secrets/identifications, NPC conversations.
+
+⚠ **`logreview` reports peaks, not just first→last.** First-vs-last hides a round trip: trust built
+by fighting together and then destroyed by friendly fire ends where it started and reads as "no
+change", when it is the most interesting thing that happened. Shown as `trus 0->0 peak 16`.
+
+⚠ **Prompt size is now ~3.5k tokens** and `logreview` warns above that. Context was never the limit
+here — attention is — so this is worth watching as more sections are added.
+
 ### Follower-watch false positives (found by audit, not by play)
 
 The detection added for fear/resentment has never run in a live game, and its failure modes are

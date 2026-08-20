@@ -4,7 +4,8 @@ The game (thin C++ hooks) POSTs here; we build a prompt, ask a local Ollama mode
 and reply with {reply, action, name, secret, boon}. All state is per-playthrough
 and lives in RAM -- `new_run` clears it.
 """
-import json, http.server, socketserver, urllib.request, os, random, re, threading
+import io, traceback
+import json, http.server, socketserver, urllib.request, os, random, re, threading, time
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -26,6 +27,34 @@ COMPREHENSION = _load_json("comprehension.json")
 FULL          = _load_json("barony_lore_full.json")   # researched lore (v19), 45 sections
 
 WORLD = LORE["world"]["setting"]
+
+# ---- Session logging ---------------------------------------------------------
+# One append-only JSONL timeline per run, so a playthrough can be reviewed afterwards instead
+# of relying on whatever scrolled past in the terminal. The C++ side pushes its own events into
+# the SAME file (POST {"log": ...}), which is the point -- correlating "the speech bubble never
+# appeared" with what the service actually returned needs a single ordered timeline.
+# Summarise a session with:  python3 logreview.py [logs/session-*.jsonl]
+LOG_DIR = os.environ.get("BARONY_AI_LOGDIR", os.path.join(BASE_DIR, "logs"))
+SESSION_ID = time.strftime("%Y%m%d-%H%M%S")
+LOG_PATH = os.path.join(LOG_DIR, "session-%s.jsonl" % SESSION_ID)
+_LOG_LOCK = threading.Lock()
+_LOG_T0 = time.time()
+
+def logrec(kind, **fields):
+    """Append one record. Logging must never break the game, so failures are swallowed."""
+    rec = {"t": round(time.time() - _LOG_T0, 3), "kind": kind}
+    rec.update({k: v for k, v in fields.items() if v not in (None, "")})
+    try:
+        with _LOG_LOCK:
+            with io.open(LOG_PATH, "a", encoding="utf-8") as fh:
+                fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+try:
+    os.makedirs(LOG_DIR, exist_ok=True)
+except Exception:
+    pass
 VALID_ACTIONS = ("FOLLOW", "DEFEND", "WAIT", "ATTACK", "NONE")
 
 # ---- Cross-race comprehension: you only understand your own kind's tongue ----
@@ -977,7 +1006,7 @@ def _obedience_section(st):
                  "let the reply be a little too quick, a little too flat. Do NOT sound warm about it.\n")
     return base
 
-def _follower_sections(uid, race, floor, says, player=0):
+def _follower_sections(uid, race, floor, says, player=0, ident=None):
     """The relationship half of the prompt. Order matters: boon and secret rolls
     consume randomness, and the sections read as one escalating block."""
     race_l = race.lower()
@@ -990,10 +1019,17 @@ def _follower_sections(uid, race, floor, says, player=0):
     boon = _boon_section(uid, st, race_l, floor, player)
     secret = _secret_section(uid, st, race, says)
     memory = ("WHAT YOU REMEMBER (things that actually happened):\n" + _bullets(evlines) + "\n") if evlines else ""
-    return (history + memory + relations + _name_section(st) + secret + boon + alleg
+    identify = ident or ""
+    # One special behaviour per reply. The player asked a direct question about an item; a boon
+    # offer on top of it produces a reply doing two unprompted things at once, and the later
+    # instruction simply wins. Spec 35/36: scarcity, and chaos without noise.
+    if identify:
+        boon = ""
+    return (history + memory + relations + _name_section(st) + secret + boon + identify + alleg
             + _obedience_section(st))
 
-def build_prompt(race, floor, says="", uid=0, player=0, player_name="", party=1, map_name=""):
+def build_prompt(race, floor, says="", uid=0, player=0, player_name="", party=1, map_name="",
+                 ident=None):
     head, body, limits = _persona(race, True, floor, map_name)
     who = player_name.strip() if player_name else ""
     # In co-op the follower belongs to ONE adventurer but others are present; naming the
@@ -1016,7 +1052,7 @@ def build_prompt(race, floor, says="", uid=0, player=0, player_name="", party=1,
            f"YOU ARE: a {race} on dungeon floor {floor}, an ally the adventurer can command.\n")
         + body
         + party_line
-        + (_follower_sections(uid, race, floor, says, player) if uid else "")
+        + (_follower_sections(uid, race, floor, says, player, ident) if uid else "")
         # HARD LIMITS LAND HERE, AFTER the disclosure block inside _follower_sections.
         # Disclosure says "do not claim ignorance"; the limits say "say you do not know and
         # STOP". Whichever comes later wins, and it must be this one.
@@ -1026,10 +1062,79 @@ def build_prompt(race, floor, says="", uid=0, player=0, player_name="", party=1,
         + "Valid actions: FOLLOW (go with them), DEFEND (hold this spot), WAIT (stay put), ATTACK (attack a nearby enemy), NONE (just talk).\n"
         + "If they tell you to attack, fight, or kill something, choose ATTACK.\n"
         + "IMPORTANT: If you REFUSE what they asked, the action MUST be NONE — never say no while secretly obeying. Your refusal has real consequences.\n"
-        # Placed last on purpose: at 8B anything after an instruction competes with it.
-        + (spy_crack_section(get_follower_state(uid, race, player)) if uid else "")
+        # Placed last on purpose: at 8B anything after an instruction competes with it. Which
+        # is exactly why it must stand down when the player has asked a direct question about an
+        # item -- measured, the crack took the turn and the identification never got made, once
+        # inventing an entirely different object.
+        + (spy_crack_section(get_follower_state(uid, race, player)) if (uid and not ident) else "")
         + 'Respond ONLY with JSON, no other text, like: {"speech": "your line", "action": "FOLLOW"}'
     )
+
+# ---- Item identification as a social reward (design spec 9) -------------------
+# The engine stays authoritative about what an item actually IS. This decides only what the
+# character CLAIMS, which is what makes the three-way split the spec asks for real:
+#   actual item identity  /  what the character knows  /  whether they are being honest
+# A competent friend tells you the truth. An ignorant one guesses wrong in good faith. A spy
+# lies on purpose. Only a truthful identification sets item->identified engine-side, so a lie
+# leaves you carrying something that is not what you were told.
+#
+# The claim is chosen HERE, from decoy names the engine supplied, never invented by the model
+# -- same division of labour as boons and the spy crack.
+
+IDENTIFY_MIN_TRUST = 15
+IDENTIFY_MIN_FRIENDSHIP = 20
+
+# Who plausibly knows what. Anyone can try; these are who is usually RIGHT.
+IDENT_EXPERTISE = {
+    "weapon":     ("human", "skeleton", "goblin", "troll", "minotaur", "automaton", "kobold"),
+    "armor":      ("human", "automaton", "gnome", "skeleton"),
+    "ring":       ("gnome", "succubus", "incubus", "vampire", "shopkeeper"),
+    "amulet":     ("gnome", "succubus", "incubus", "vampire", "shopkeeper"),
+    "potion":     ("gnome", "kobold", "succubus", "shopkeeper", "ghoul"),
+    "scroll":     ("human", "shopkeeper", "automaton"),
+    "spellbook":  ("human", "shopkeeper", "succubus", "incubus"),
+    "magicstaff": ("human", "gnome", "shopkeeper", "succubus"),
+    "gem":        ("gnome", "kobold", "scarab", "shopkeeper"),
+    "tool":       ("gnome", "automaton", "kobold", "goblin"),
+    "book":       ("human", "automaton", "shopkeeper"),
+    "food":       ("rat", "goblin", "troll", "ghoul", "human"),
+    "thrown":     ("goblin", "kobold", "human"),
+}
+IDENT_EXPERT_ACCURACY = 0.85
+IDENT_LAY_ACCURACY    = 0.30
+IDENT_SPY_LIE_CHANCE  = 0.55
+
+def identify_attempt(st, race, category, real_name, decoys):
+    """Returns (kind, claim, truthful). kind in refuse|correct|mistaken|lie."""
+    race_l = (race or "").lower()
+    if st.get("trust", 0) < IDENTIFY_MIN_TRUST and st.get("friendship", 0) < IDENTIFY_MIN_FRIENDSHIP:
+        return ("refuse", "", False)
+    wrong = random.choice(decoys) if decoys else ""
+    # A spy will take a free opportunity to mislead -- but only if it has somewhere to point.
+    if st.get("allegiance") == "spy" and wrong and random.random() < IDENT_SPY_LIE_CHANCE:
+        return ("lie", wrong, False)
+    expert = race_l in IDENT_EXPERTISE.get(category, ())
+    if random.random() < (IDENT_EXPERT_ACCURACY if expert else IDENT_LAY_ACCURACY):
+        return ("correct", real_name, True)
+    return ("mistaken", wrong or real_name, wrong == "")
+
+def _identify_section(kind, claim, unid_name):
+    if kind == "refuse":
+        return ("THEY ARE ASKING YOU TO IDENTIFY SOMETHING: a " + unid_name + ". You do not know "
+                "them well enough to want to handle their belongings. Decline — briefly, without "
+                "being cruel about it.\n")
+    if kind == "correct":
+        return ("THEY ARE ASKING YOU TO IDENTIFY SOMETHING: a " + unid_name + ". You recognise it. "
+                "Tell them plainly that it is a " + claim + ", and say in one short clause how you "
+                "come to know it. Do NOT hedge — you are certain.\n")
+    if kind == "lie":
+        return ("THEY ARE ASKING YOU TO IDENTIFY SOMETHING: a " + unid_name + ". You know perfectly "
+                "well what it is, and you are going to tell them it is a " + claim + " instead. "
+                "Say it calmly and confidently, as simple fact. Do NOT hint that you are lying, do "
+                "NOT hedge, and do NOT let any guilt show.\n")
+    return ("THEY ARE ASKING YOU TO IDENTIFY SOMETHING: a " + unid_name + ". You are fairly sure it "
+            "is a " + claim + " — and you are wrong, though you have no idea you are. Say it the way "
+            "someone says a thing they genuinely believe.\n")
 
 # ---- Non-follower NPCs: townsfolk, merchants, named characters ----------------
 # These are NOT followers. They take no orders, have no friendship ladder, earn no boons
@@ -1220,8 +1325,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def do_POST(self):
         try:
+            _t_start = time.time()
             n = int(self.headers.get("Content-Length", 0))
             data = json.loads(self.rfile.read(n) or "{}")
+
+            # Mod-side / player-authored note straight into the timeline. The C++ hooks and
+            # /ailog both come through here, so everything lands in one ordered file.
+            note = data.get("log")
+            if note:
+                logrec(data.get("src") or "mod", msg=str(note)[:400],
+                       player=data.get("player"), uid=data.get("uid"),
+                       floor=data.get("floor"), map=data.get("map"))
+                print(f"[{(data.get('src') or 'mod').upper()}] {str(note)[:200]}")
+                return self._send_json({"ok": True})
             race = data.get("race", "monster")
             floor = data.get("floor", 0)
             says = data.get("says", "").strip()
@@ -1243,6 +1359,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             npc_name = (data.get("npc_name") or "").strip()
             npc_role = (data.get("npc_role") or "townsfolk").strip()
             npc_shop = int(data.get("shop", -1) or -1)
+            # Item identification (spec 9). The engine supplies the real name and a few decoys
+            # from the same category; the service picks which one is claimed.
+            ident_req = data.get("identify") or None
 
             # Fire-and-forget event record (e.g. recruitment): no dialogue, just remember it.
             evt = data.get("event", "")
@@ -1250,8 +1369,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 with STATE_LOCK:
                     if evt == "new_run":
                         reset_run()
+                        logrec("new_run")
                     elif uid:
                         record_event(uid, race, evt, floor, player)
+                        st_e = follower_state.get(uid, {})
+                        logrec("event", event=evt, uid=uid, race=race, floor=floor,
+                               player=player,
+                               dims={d: st_e.get(d, 0) for d in DIMENSIONS} if st_e else None)
                 return self._send_json({"ok": True})
 
             # Comprehension filter: if the player can't understand this speaker, return noises.
@@ -1275,13 +1399,29 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     prompt = build_npc_prompt(race, floor, says, uid, player, player_name,
                                               npc_name, npc_role, npc_shop, map_name, greeting)
                 else:
-                    prompt = build_prompt(race, floor, says, uid, player, player_name, party, map_name)
+                    ident_line, ident_truthful, ident_kind = None, False, ""
+                    if ident_req and uid:
+                        st_i = get_follower_state(uid, race, player)
+                        ident_kind, claim, ident_truthful = identify_attempt(
+                            st_i, race, (ident_req.get("category") or "").lower(),
+                            ident_req.get("real") or "", ident_req.get("decoys") or [])
+                        ident_line = _identify_section(ident_kind, claim,
+                                                       ident_req.get("unid") or "thing")
+                        if ident_kind == "correct":
+                            adjust(st_i, respect=2)   # they proved they know their business
+                        print(f"[SERVICE-DBG] identify {ident_req.get('real')!r} -> "
+                              f"{ident_kind} claim={claim!r} truthful={ident_truthful}")
+                    prompt = build_prompt(race, floor, says, uid, player, player_name, party,
+                                          map_name, ident_line)
             who = player_name or f"player{player}"
             kind = "NPC" if npc else "follower"
             print(f"[SERVICE] {race} floor {floor} [{kind}] ({who})")
 
+            _t_prompt = time.time()
             raw = ask_ollama(prompt)
+            _gen_ms = int((time.time() - _t_prompt) * 1000)
             speech, action = parse_reply(raw)
+            _recovered = (speech and raw and not raw.strip().startswith("{"))
             if not speech or not speech.strip():
                 speech = "..."  # model declined; show a beat, not nothing
             if action not in VALID_ACTIONS:
@@ -1297,6 +1437,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                         else:
                             record_npc_exchange(st, player_name, "(walked up to you)", speech)
                 print(f"[SERVICE] -> npc speech={speech}")
+                logrec("npc", uid=uid, race=race, npc_name=npc_name, role=npc_role,
+                       shop=(npc_shop if npc_shop >= 0 else None), floor=floor, map=map_name,
+                       player=player, greeting=greeting or None, says=says[:160],
+                       reply=speech[:400], gen_ms=_gen_ms, prompt_chars=len(prompt))
                 return self._send_json({"reply": speech, "action": "NONE", "name": npc_name,
                                         "player": player, "secret": "", "boon": ""})
 
@@ -1315,16 +1459,30 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     print(f"[SERVICE-DBG] follower {uid} (player{player}) {dims_summary(st)}")
                 secret = herx_secret_field()
             print(f"[SERVICE] -> action={action} speech={speech}")
+            _st = follower_state.get(uid, {}) if uid else {}
+            logrec("reply", uid=uid, race=race, floor=floor, map=map_name, player=player,
+                   says=says[:160], reply=speech[:400], action=action, name=name,
+                   gen_ms=_gen_ms, prompt_chars=len(prompt),
+                   secret=(secret or None), boon=(boon or None),
+                   identify=(ident_kind or None) if ident_req else None,
+                   recovered=(True if _recovered else None),
+                   dims={d: _st.get(d, 0) for d in DIMENSIONS} if _st else None)
             self._send_json({"reply": speech, "action": action, "name": name, "player": player,
-                             "secret": secret, "boon": boon})
+                             "secret": secret, "boon": boon,
+                             # "1" ONLY when the claim was both correct and honest -- this is what
+                             # actually sets item->identified engine-side.
+                             "identify": ("1" if (ident_req and ident_truthful) else "0")})
         except Exception as e:
             print(f"[SERVICE] ERROR: {e}")
+            logrec("error", err=str(e)[:300], where=traceback.format_exc(limit=3)[-400:])
             self._send_json({"reply": f"(service error: {e})"}, status=500)
 
     def log_message(self, *a): pass  # quiet default logging
 
 if __name__ == "__main__":
     print(f"[SERVICE] Barony AI service on :{PORT}, model={MODEL}, lore loaded ({len(LORE)} sections)")
+    print(f"[SERVICE] session log -> {LOG_PATH}")
+    logrec("start", model=MODEL, port=PORT, session=SESSION_ID)
     # Threaded: in co-op the host serves several players plus fire-and-forget event
     # records. A single-threaded server would make every player queue behind whoever
     # is mid-generation. Bound to loopback only -- clients never talk to this service,
