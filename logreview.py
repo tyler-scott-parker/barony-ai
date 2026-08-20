@@ -82,6 +82,26 @@ def main():
             warn = "   <-- large; instructions start competing" if max_tok > 3500 else ""
             print(f"PROMPT SIZE         median ~{med_tok} tok  max ~{max_tok} tok{warn}")
 
+        # --- who was secretly what, and the Herx arc ---
+        alleg = [r for r in recs if r["kind"] == "allegiance"]
+        if alleg:
+            print("\nHIDDEN ALLEGIANCES (never shown to the player in game)")
+            for r in alleg:
+                spy = "  <-- SPY" if r.get("allegiance") == "spy" else ""
+                mot = f"  motive: {r['motive']}" if r.get("motive") else ""
+                print(f"   uid {r.get('uid')} ({r.get('race','?')}) {r.get('allegiance')}{spy}{mot}")
+        herx = [r for r in recs if r["kind"] == "herx"]
+        if herx:
+            print("\nHERX ARC")
+            for r in herx:
+                bits = [f"stage={r.get('stage')}", f"uid={r.get('uid')}"]
+                if r.get("is_false"): bits.append("FALSE SECRET (spy)")
+                if r.get("debuff") is not None: bits.append(f"debuff={r['debuff']}")
+                print(f"   t={r['t']:>8.1f}  " + "  ".join(bits))
+                if r.get("truth"): print(f"                 \"{r['truth']}\"")
+            if not any(r.get("stage") == "revealed" for r in herx):
+                print("   (offered but never actually told -- the branch that is otherwise invisible)")
+
         # --- events, with a noise check ---
         evs = collections.Counter(r["event"] for r in recs if r["kind"] == "event")
         if evs:
@@ -128,6 +148,22 @@ def main():
                 print(f"\n{label} ({len(hits)})")
                 for r in hits[:12]:
                     print(f"   t={r['t']:>8.1f} uid={r.get('uid')} {key}={r.get(key)}")
+
+        boons = [r for r in recs if r["kind"] == "boon"]
+        if boons:
+            print(f"\nBOONS ROLLED ({len(boons)})")
+            for r in boons:
+                what = r.get("item") or (r.get("fact", "")[:60])
+                print(f"   t={r['t']:>8.1f} uid={r.get('uid')} {r.get('boon_kind','?'):<6} {what}")
+
+        amb = [r for r in recs if r["kind"] in ("ambient", "taunt")]
+        if amb:
+            c = collections.Counter(r["kind"] for r in amb)
+            print(f"\nWORLD CHANNEL   " + "  ".join(f"{k}={v}" for k, v in c.items()))
+
+        tones = collections.Counter(r.get("tone") for r in recs if r["kind"] == "tone")
+        if tones:
+            print("\nHOW THE PLAYER SPOKE  " + "  ".join(f"{k}={v}" for k, v in tones.most_common()))
 
         npcs = [r for r in recs if r["kind"] == "npc"]
         if npcs:

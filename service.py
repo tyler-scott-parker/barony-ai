@@ -341,6 +341,10 @@ def get_follower_state(uid, race, player=0):
                                "allegiance": al, "owner": player,
                                "motive": random.choice(SPY_MOTIVES) if al == "spy" else ""})
         print(f"[SERVICE-DBG] follower {uid} allegiance={al} owner=player{player}")
+        # The single most important line for reading a playthrough back: everything a follower
+        # does is uninterpretable without knowing whether they were a spy.
+        logrec("allegiance", uid=uid, race=race, player=player, allegiance=al,
+               motive=follower_state[uid].get("motive") or None)
     return dims_init(follower_state[uid])
 
 def friendship_descriptor(f):
@@ -553,6 +557,7 @@ def record_follower_interaction(uid, says, floor=0, player=0):
     tone = apply_player_tone(st, says, floor)
     if tone:
         print(f"[SERVICE-DBG] player tone '{tone}' -> {dims_summary(st)}")
+        logrec("tone", uid=uid, tone=tone, player=player, floor=floor)
     if says:
         st["events"].append('they said to you: "' + says[:60] + '"')
         st["events"] = st["events"][-6:]
@@ -892,12 +897,18 @@ def herx_detect(uid, raw, speech, player=0):
     if told and HERX_STATE["revealed"]:
         # Another player's follower got there first this run; one reveal only.
         print(f"[SERVICE-DBG] follower {uid} told the secret too, but it is already revealed")
+        logrec("herx", stage="duplicate", uid=uid, player=player)
         return
+    if not told:
+        # Offered and then talked around. This branch is otherwise completely invisible.
+        logrec("herx", stage="dropped", uid=uid, player=player, is_false=is_false)
     if told:
         HERX_STATE.update({"revealed": True, "variant": vi, "uid": uid,
                            "is_false": is_false, "player": player})
         print(f"[SERVICE-DBG] HERX SECRET revealed by follower {uid} to player{player} "
               f"(debuff variant {v['debuff']})")
+        logrec("herx", stage="revealed", uid=uid, player=player, is_false=is_false,
+               debuff=v["debuff"], truth=v["truth"][:120])
 
 # ---- Follower boons: flavor-scale gifts, friendship-gated, one per follower per floor ----
 
@@ -946,14 +957,17 @@ def _boon_section(uid, st, race_l, floor, player=0):
     if kind == "info":
         facts, _ = build_lore_context(race_l, floor)
         pick = random.choice(facts) if facts else ""
+        logrec("boon", uid=uid, boon_kind="info", fact=pick[:120])
         return ("UNPROMPTED: you decide to share something useful with them now, "
                 "unasked, because you have come to trust them. Work it naturally into your reply: "
                 + pick + "\n")
     if kind == "traps":
         LAST_BOON[uid] = "traps:"
+        logrec("boon", uid=uid, boon_kind="traps")
         return ("UNPROMPTED: while scouting ahead you quietly disabled the traps on this "
                 "floor. Mention it plainly and briefly, as a thing already done.\n")
     LAST_BOON[uid] = "item:" + val
+    logrec("boon", uid=uid, boon_kind="item", item=val)
     iname = val.split(":")[0].replace("_", " ").lower()
     return ("UNPROMPTED: you are giving them something you came by honestly — "
             + iname + ". Offer it in one short line, with a plausible reason you have it.\n")
@@ -968,6 +982,7 @@ def _secret_section(uid, st, race, says):
     pool = _herx_pool(is_spy)
     vi = random.randrange(len(pool))
     HERX_STATE["pending"][uid] = (vi, is_spy)
+    logrec("herx", stage="offered", uid=uid, is_false=is_spy)
     return ("A SECRET YOU HAVE CARRIED: You know one true thing about Baron Herx, "
             "learned long ago and never spoken. You trust this adventurer enough to tell them now. "
             "Share it in your own words, plainly, as something you know for certain: "
@@ -1166,6 +1181,8 @@ def get_npc_state(uid, race, name="", role="townsfolk", shop=-1, floor=0):
         npc_state[uid] = st
         print(f"[SERVICE-DBG] new NPC {uid}: {name or race} ({role}"
               + (f", sells {SHOP_TYPES.get(shop, 'goods')}" if role == "shopkeeper" else "") + ")")
+        logrec("npc_new", uid=uid, race=race, npc_name=name or None, role=role,
+               shop=(shop if shop >= 0 else None), floor=floor)
     else:
         # keep whatever the game now knows; it may have learned the name since
         if name and not st.get("name"):
@@ -1421,7 +1438,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
             raw = ask_ollama(prompt)
             _gen_ms = int((time.time() - _t_prompt) * 1000)
             speech, action = parse_reply(raw)
-            _recovered = (speech and raw and not raw.strip().startswith("{"))
+            # Only the JSON-shaped paths can be "malformed". Taunts and ambient babble are
+            # asked for as a bare spoken line, so flagging them here produced a fake
+            # malformed-JSON warning on every single one.
+            _recovered = (not taunt and not ambient
+                          and speech and raw and not raw.strip().startswith("{"))
             if not speech or not speech.strip():
                 speech = "..."  # model declined; show a beat, not nothing
             if action not in VALID_ACTIONS:
@@ -1460,8 +1481,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 secret = herx_secret_field()
             print(f"[SERVICE] -> action={action} speech={speech}")
             _st = follower_state.get(uid, {}) if uid else {}
-            logrec("reply", uid=uid, race=race, floor=floor, map=map_name, player=player,
+            _kind = "taunt" if taunt else ("ambient" if ambient else "reply")
+            _open = [n for n, g, _ in DISCLOSURE_TIERS if _st and g(_st)]
+            _tens = len([1 for c, _x in DIMENSION_TENSIONS if _st and c(_st)])
+            logrec(_kind, uid=uid, race=race, floor=floor, map=map_name, player=player,
                    says=says[:160], reply=speech[:400], action=action, name=name,
+                   allegiance=(_st.get("allegiance") if _st else None),
+                   open_tiers=(len(_open) if _st else None),
+                   tensions=(_tens or None) if _st else None,
                    gen_ms=_gen_ms, prompt_chars=len(prompt),
                    secret=(secret or None), boon=(boon or None),
                    identify=(ident_kind or None) if ident_req else None,
