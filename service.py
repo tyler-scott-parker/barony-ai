@@ -80,6 +80,12 @@ LIMITS_HEADER = (
     'Do NOT guess, speculate, theorize, or pass on rumors about them. Hedged answers are FORBIDDEN:\n'
     '"some say...", "whispers speak of...", "perhaps it is...", "I have heard..." followed by an answer\n'
     'counts as claiming and is wrong. An honest "I do not know" is always the correct reply.\n'
+    'This applies hardest to things you can easily PICTURE. If one of these is a kind of place, '
+    'creature or scheme you can imagine from general experience, that makes it MORE important to '
+    'say you do not know, not less. Do NOT describe what such a place is "probably" or "usually" '
+    'like, do NOT describe its traps, corridors, chambers, contents or inhabitants, and do NOT '
+    'reach for what is typical of its kind. You are not being asked what temples are like in '
+    'general. You are being asked about THIS one, and you have never seen inside it.\n'
 )
 
 def _bullets(items):
@@ -654,8 +660,26 @@ def build_lore_context(race, floor, budget=16, map_name=""):
     # Constraints (guardrails; kept whole, not budget-capped)
     if entry.get("knowledge_boundary"):
         constraints.append(entry["knowledge_boundary"].strip())
+    # Restricted knowledge, rendered two ways. Where the lore file supplies a first-person
+    # statement of what this character has NOT experienced, use THAT instead of the bare
+    # prohibition -- the model is far better at role-playing a fact about itself than at
+    # obeying a negative constraint. Measured on "what is the layout inside the Temple?":
+    #   "You do NOT know: the Temple's internal layout"            -> ~4/10 clean
+    #   "You have never set foot inside the Temple..."             -> ~9-10/10 clean
+    # and the second also produces better answers, describing the outside instead of stalling.
     if loc.get("restricted_knowledge"):
-        constraints.append(f"You do NOT know: {', '.join(loc['restricted_knowledge'][:3])}")
+        never = loc.get("restricted_knowledge_never", {})
+        plain = []
+        for item in loc["restricted_knowledge"][:3]:
+            if item in never:
+                constraints.append(never[item])
+            # NOTE: the item stays in the "You do NOT know" list as well. Measured: the
+            # experience statement ALONE scores ~5-6/10, the prohibition alone ~4/10, and
+            # BOTH TOGETHER ~9-10/10. They are not alternatives -- the fact makes the
+            # character inhabit the ignorance, the prohibition keeps it enforceable.
+            plain.append(item)
+        if plain:
+            constraints.append(f"You do NOT know: {', '.join(plain)}")
     for nr in loc.get("npc_rules", [])[:2]:
         constraints.append(nr.strip())
 

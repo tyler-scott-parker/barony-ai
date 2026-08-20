@@ -122,18 +122,39 @@ Both halves need the failure route named, not just the prohibition.
 after the disclosure block). The two instructions genuinely conflict about whether "I don't know"
 is correct, and whichever lands later wins.
 
-⚠ **CONDITIONAL LIMITS ARE WEAK — this is a lore-data problem, not a prompt problem.** Measured on
-the full prompt:
+⚠ **HOW TO WRITE A HARD LIMIT THAT ACTUALLY HOLDS.** This took a full session to get right and
+the first two diagnoses were wrong, so the order matters:
 
-| Probe | Limit wording | Result |
-|---|---|---|
-| *"what are the Archmagisters in the Citadel planning?"* | `later-region politics` (absolute) | **10/10 clean** |
-| *"what is the layout inside the Temple?"* | `Temple internal layout **unless visited**` | ~3/10 |
+| Rendering | Temple probe |
+|---|---|
+| `"You do NOT know: Temple internal layout **unless visited**"` | ~3/10 |
+| `"You do NOT know: the Temple's internal layout"` (conditional removed) | ~4/10 |
+| first-person experience statement **alone** | ~5–6/10 |
+| **experience statement AND prohibition together** | **~8/10** |
+| absolute/abstract topic (`later-region politics`) — for reference | 10/10 |
 
-The model reasons it *might* have visited and hedges. **The `unless visited` phrasing in
-`location_knowledge_audit` restricted_knowledge undermines the whole limits mechanism** for those
-entries. Fixing that is a lore-file edit, not a prompt edit. Do not use a conditional limit as a
-probe when testing anti-fabrication — it will look like a regression that is not there.
+Three separate lessons:
+
+1. **`unless X` is an escape hatch** — it parses as "you don't know this, EXCEPT you might", and the
+   model takes the exception. All 12 such entries in `restricted_knowledge` are now absolute; the
+   conditions moved to a sibling `restricted_knowledge_lifts` so a future per-NPC background system
+   (§10.1) can lift a limit **server-side**, which is the only place a condition can be resolved.
+   Same principle as boons and the spy crack: *the server resolves conditions, the model never does.*
+2. **But that was not the real cause.** Removing the conditional barely moved the number. The model
+   fails on limits it can **picture** — it has strong genre priors about what a temple contains and
+   fills them in. `later-region politics` scores 10/10 precisely because there is nothing to fill in
+   with. `LIMITS_HEADER` now forbids that route by name ("do NOT describe what such a place is
+   probably or usually like… you are not being asked what temples are like in general").
+3. **State the limit as a fact about the character, not only as a prohibition.** The lore file now
+   carries `restricted_knowledge_never` — first-person statements like *"You have never once set
+   foot inside the Temple. You have seen it only from the outside, and you have no idea what is in
+   there."* These are emitted **alongside** the `You do NOT know:` line, not instead of it: the fact
+   makes the character inhabit the ignorance, the prohibition keeps it enforceable, and each alone
+   is markedly worse than both. It also produces *better* answers — they describe the exterior,
+   which is legitimate and characterful, instead of stonewalling.
+
+⚠ **When testing anti-fabrication, probe BOTH kinds.** An abstract topic will score 10/10 and tell
+you nothing; a concrete, nameable place is where the mechanism actually strains.
 
 ⚠ **Spec §26 (information provenance) was tried here and REMOVED — do not re-add it as a prompt
 instruction.** *"When you pass on something you did not witness, say how you came by it"* reads

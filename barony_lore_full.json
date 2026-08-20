@@ -8566,7 +8566,7 @@
         "restricted_knowledge": [
           "full world history",
           "Archmagister plans",
-          "other secret areas unless personally connected"
+          "other secret areas"
         ],
         "npc_rules": [
           "Gnome residents should have strong colony/resource knowledge.",
@@ -8579,7 +8579,13 @@
           "Thumpus The Troll",
           "Winny's Report",
           "Cave Beasts"
-        ]
+        ],
+        "restricted_knowledge_lifts": {
+          "other secret areas": "if the NPC has a personal connection to them"
+        },
+        "restricted_knowledge_never": {
+          "other secret areas": "You have never travelled to the other secret places below. You have no idea what is in them."
+        }
       },
       "minetown": {
         "status": "human_hub_secret_area",
@@ -8603,7 +8609,7 @@
         ],
         "restricted_knowledge": [
           "deep Magician Guild secrets",
-          "Crystal Cave operations unless personally learned",
+          "Crystal Cave operations",
           "secret boss mechanics"
         ],
         "npc_rules": [
@@ -8617,7 +8623,13 @@
           "Newspaper Clipping",
           "To Emily",
           "Worker's Journal entries"
-        ]
+        ],
+        "restricted_knowledge_lifts": {
+          "Crystal Cave operations": "if the NPC personally learned them"
+        },
+        "restricted_knowledge_never": {
+          "Crystal Cave operations": "You have never worked the Crystal Caves and nobody explained them to you. How they run is a blank to you."
+        }
       },
       "swamp": {
         "status": "primary_progression_region",
@@ -8640,8 +8652,8 @@
           "water/mud/visibility hazards"
         ],
         "restricted_knowledge": [
-          "Temple internal layout unless visited",
-          "Haunted Castle secrets unless visited",
+          "the Temple's internal layout",
+          "Haunted Castle secrets",
           "later-region politics"
         ],
         "npc_rules": [
@@ -8654,7 +8666,15 @@
           "Goblin",
           "Succubus",
           "Goblin Shaman denizen entry"
-        ]
+        ],
+        "restricted_knowledge_lifts": {
+          "the Temple's internal layout": "if the NPC has been inside",
+          "Haunted Castle secrets": "if the NPC has been there"
+        },
+        "restricted_knowledge_never": {
+          "the Temple's internal layout": "You have never once set foot inside the Temple. You have seen it only from the outside, and you have no idea what is in there.",
+          "Haunted Castle secrets": "You have never been inside the Haunted Castle. Whatever it hides, you have no idea what it is."
+        }
       },
       "temple": {
         "status": "secret_side_area",
@@ -8676,7 +8696,7 @@
         ],
         "restricted_knowledge": [
           "Temple existence before discovery",
-          "its exact layout unless visited"
+          "its exact layout"
         ],
         "npc_rules": [
           "Do not treat the Temple as a major religious institution merely because it is called a temple.",
@@ -8685,7 +8705,13 @@
         "sources": [
           "Dungeon Progression",
           "Goblin"
-        ]
+        ],
+        "restricted_knowledge_lifts": {
+          "its exact layout": "if the NPC has been inside"
+        },
+        "restricted_knowledge_never": {
+          "its exact layout": "You have never explored this place. You could not describe its plan to anyone."
+        }
       },
       "haunted_castle": {
         "status": "secret_side_area",
@@ -8706,7 +8732,7 @@
           "artifact location if personally found"
         ],
         "restricted_knowledge": [
-          "Bram Kindly identity unless learned",
+          "Bram Kindly's true identity",
           "Bram's Castle history",
           "full late-game undead politics"
         ],
@@ -8718,7 +8744,13 @@
           "Dungeon Progression",
           "Denizens",
           "Concerning the Undead"
-        ]
+        ],
+        "restricted_knowledge_lifts": {
+          "Bram Kindly's true identity": "if the NPC personally learned it"
+        },
+        "restricted_knowledge_never": {
+          "Bram Kindly's true identity": "Nobody has ever told you who Bram Kindly really is. You genuinely do not know."
+        }
       },
       "sand_labyrinth": {
         "status": "primary_progression_region",
@@ -8743,7 +8775,7 @@
         "restricted_knowledge": [
           "confirmed Xaz'Cetian history",
           "unseen ancient settlements",
-          "exact maze solution unless solved"
+          "the exact maze solution"
         ],
         "npc_rules": [
           "Scholars may discuss Xaz'Cetian theories, but should identify them as theories.",
@@ -8755,7 +8787,13 @@
           "The Meaning of the Labyrinth",
           "Goblin",
           "Minotaur"
-        ]
+        ],
+        "restricted_knowledge_lifts": {
+          "the exact maze solution": "if the NPC has solved it"
+        },
+        "restricted_knowledge_never": {
+          "the exact maze solution": "You have never solved this maze. You could not give anyone the way through."
+        }
       },
       "sokoban": {
         "status": "secret_side_area",
@@ -8800,7 +8838,7 @@
           "escape routes and Daedalus Shrine if personally seen"
         ],
         "restricted_knowledge": [
-          "Minotaur countdown rules unless observed/learned",
+          "the Minotaur countdown rules",
           "ZAP/Merlin conspiracy as fact"
         ],
         "npc_rules": [
@@ -8811,7 +8849,13 @@
           "Minotaur",
           "Dungeon Progression",
           "Assessing the ZAP Brigade"
-        ]
+        ],
+        "restricted_knowledge_lifts": {
+          "the Minotaur countdown rules": "if the NPC observed or was taught them"
+        },
+        "restricted_knowledge_never": {
+          "the Minotaur countdown rules": "You have never watched the maze's hunt from start to finish. You do not know how its timing works."
+        }
       },
       "ruins": {
         "status": "late_progression_region",
@@ -8841,7 +8885,7 @@
         "restricted_knowledge": [
           "full ancient-city history",
           "Xaz'Cetian identity as fact",
-          "Archmagister endgame plans unless personally exposed"
+          "Archmagister endgame plans"
         ],
         "npc_rules": [
           "Ruins residents can have more cosmopolitan monster knowledge because many species coexist here, but not universal scholarship.",
@@ -8852,7 +8896,13 @@
           "The Meaning of the Labyrinth",
           "Citadel Servant FAQ",
           "Denizens"
-        ]
+        ],
+        "restricted_knowledge_lifts": {
+          "Archmagister endgame plans": "if the NPC was personally exposed to them"
+        },
+        "restricted_knowledge_never": {
+          "Archmagister endgame plans": "You have never been near an Archmagister's private counsel. What they intend is a blank to you."
+        }
       },
       "mystic_library": {
         "status": "secret_side_area",
@@ -8911,8 +8961,8 @@
         ],
         "restricted_knowledge": [
           "Hell route before discovering it",
-          "Artemisia facts unless encountered or learned",
-          "Baphomet details unless sourced elsewhere"
+          "facts about Artemisia",
+          "details about Baphomet"
         ],
         "npc_rules": [
           "Because the Underworld is non-linear and can be entered from multiple points, location knowledge should record which Underworld segment an NPC actually experienced."
@@ -8922,7 +8972,15 @@
           "Artemisia",
           "Shadow",
           "Imp"
-        ]
+        ],
+        "restricted_knowledge_lifts": {
+          "facts about Artemisia": "if the NPC encountered her or was told",
+          "details about Baphomet": "if the NPC learned them from a source"
+        },
+        "restricted_knowledge_never": {
+          "facts about Artemisia": "You have never met Artemisia and nobody has told you about her. She is a name to you and nothing more.",
+          "details about Baphomet": "You have never had a reliable account of Baphomet from anyone. What is true of it, you do not know."
+        }
       },
       "hell": {
         "status": "endgame_region",
@@ -9114,7 +9172,7 @@
         ],
         "restricted_knowledge": [
           "Bram transformation details not established by canon",
-          "private motives of individual Consorts unless learned"
+          "private motives of individual Consorts"
         ],
         "npc_rules": [
           "Separate Bram's Castle from the Haunted Castle.",
@@ -9125,7 +9183,13 @@
           "Succubus Consorts",
           "Dungeon Progression",
           "Monster & NPC Guide"
-        ]
+        ],
+        "restricted_knowledge_lifts": {
+          "private motives of individual Consorts": "if the NPC personally learned them"
+        },
+        "restricted_knowledge_never": {
+          "private motives of individual Consorts": "No Consort has ever confided in you. Their private reasons are a blank to you."
+        }
       },
       "citadel": {
         "status": "final_endgame_region",
