@@ -484,6 +484,34 @@ these mines my whole life"* — picking up "the Mines" from the SETTING line. `p
 for NPCs and followers alike. Verified: 4/4 said Hamlet after, and a follower on floor 20 named
 Herx's stronghold unprompted.
 
+### Follower-watch false positives (found by audit, not by play)
+
+The detection added for fear/resentment has never run in a live game, and its failure modes are
+**silent** — a follower quietly resenting you is very hard to attribute mid-playtest. Reading it
+back found four real bugs:
+
+1. **`left_behind` fired for OBEYING.** A follower told to hold position is exactly where it was
+   ordered to be — and the mod's own DEFEND/WAIT action issues `ALLY_CMD_DEFEND`, so the player
+   would be resented for being obeyed. Now gated on `monsterAllyState == ALLY_STATE_DEFAULT`.
+2. **`healed_by_player` fired on LEVEL-UP.** Levelling raises MAXHP and restores HP, which read as
+   a big heal, so the follower thanked the player for something they did not do. Guarded by
+   comparing MAXHP against the previous frame.
+3. **`w.maxHP` was written but never read** — it was assigned before the comparison that needed the
+   old value, so the level-up guard could not have worked even if it had existed. `wounded` also now
+   uses the *same* max on both sides, so a changed MAXHP cannot fake a threshold crossing.
+4. **The death sweep could not tell a death from a DISMISSAL.** Dropping out of the scan only means
+   "no longer anyone's follower"; a dismissed follower is still standing there. `ally_died` now
+   fires only when `uidToEntity()` confirms the body is really gone from the world.
+
+**`/aistatus`** dumps what the mod currently believes — map name as the service sees it, each
+player's partner and busy flag, the follower watch with HP and adrift state, any Herx debuff. The
+point is to make a playtest diagnosable instead of guesswork, since almost none of the C++ added
+recently has been exercised in a real run.
+
+**`/aicommand` with no text** turns away from an engaged NPC and hands the conversation back to
+your own follower. Previously the only exits were walking 8 tiles off or clicking someone else,
+neither of which is discoverable.
+
 ### Multiplayer (host-authoritative)
 
 **The host is the only machine that touches Python, Ollama, or the model.** Clients install the
