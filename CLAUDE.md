@@ -153,8 +153,25 @@ Three separate lessons:
    is markedly worse than both. It also produces *better* answers — they describe the exterior,
    which is legitimate and characterful, instead of stonewalling.
 
+**All 47 rendered `restricted_knowledge` items now carry a `restricted_knowledge_never`
+statement** — there are no prohibition-only limits left. Confirmed to generalize beyond the
+Temple: *"what does Hell look like further in, past where we've been?"* scored **~1/8 without**
+the statements and **~5/8 with** them. That probe is harder than the Temple's, because the
+character *has* been in Hell and the limit is about the boundary of their own travel.
+
+**Writing new ones:** first person, state what they have NOT experienced, and END by naming the
+ignorance outright (*"…and you have no idea what is in there"*). Keep the item in
+`restricted_knowledge` as well — the pair is what works. `build_lore_context` slices
+`restricted_knowledge[:3]`, so a fourth entry would never render and its statement would be dead
+weight; all profiles currently have ≤3.
+
 ⚠ **When testing anti-fabrication, probe BOTH kinds.** An abstract topic will score 10/10 and tell
 you nothing; a concrete, nameable place is where the mechanism actually strains.
+
+⚠ **Still prohibition-only elsewhere:** `individual_denizen_research/*/knowledge_boundary` and
+location `npc_rules` also feed the constraints list, and are phrased as instructions to the
+*author* ("Do not invent…", "Automatons may know X only if…") rather than as facts about the
+character. They are a different and probably weaker class, and have not been measured.
 
 ⚠ **Spec §26 (information provenance) was tried here and REMOVED — do not re-add it as a prompt
 instruction.** *"When you pass on something you did not witness, say how you came by it"* reads

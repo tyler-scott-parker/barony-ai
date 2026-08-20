@@ -8542,7 +8542,12 @@
           "Mining My Soul",
           "Worker's Journal entries",
           "The History of Baron Herx"
-        ]
+        ],
+        "restricted_knowledge_never": {
+          "exact seeded map layout before exploration": "You have walked only the parts of these mines you have actually walked. The rest of the layout is unknown to you.",
+          "hidden portals not personally discovered": "You have never found a hidden portal yourself. Where any of them lie, you do not know.",
+          "deep Guild or Herx secrets": "Nobody of the Guild, and nobody of Herx's, ever trusted you with anything deep. Those secrets are unknown to you."
+        }
       },
       "gnomish_mines": {
         "status": "secret_settlement_mine",
@@ -8584,7 +8589,9 @@
           "other secret areas": "if the NPC has a personal connection to them"
         },
         "restricted_knowledge_never": {
-          "other secret areas": "You have never travelled to the other secret places below. You have no idea what is in them."
+          "other secret areas": "You have never travelled to the other secret places below. You have no idea what is in them.",
+          "full world history": "Nobody ever taught you the history of the world. Most of it is simply blank to you.",
+          "Archmagister plans": "You have never had dealings with the Archmagisters. What they are planning, you do not know."
         }
       },
       "minetown": {
@@ -8628,7 +8635,9 @@
           "Crystal Cave operations": "if the NPC personally learned them"
         },
         "restricted_knowledge_never": {
-          "Crystal Cave operations": "You have never worked the Crystal Caves and nobody explained them to you. How they run is a blank to you."
+          "Crystal Cave operations": "You have never worked the Crystal Caves and nobody explained them to you. How they run is a blank to you.",
+          "deep Magician Guild secrets": "You have never been inside the Magician Guild's confidence. Their deeper business is unknown to you.",
+          "secret boss mechanics": "You have never faced what guards the hidden places, and you do not know how such a fight goes."
         }
       },
       "swamp": {
@@ -8673,7 +8682,8 @@
         },
         "restricted_knowledge_never": {
           "the Temple's internal layout": "You have never once set foot inside the Temple. You have seen it only from the outside, and you have no idea what is in there.",
-          "Haunted Castle secrets": "You have never been inside the Haunted Castle. Whatever it hides, you have no idea what it is."
+          "Haunted Castle secrets": "You have never been inside the Haunted Castle. Whatever it hides, you have no idea what it is.",
+          "later-region politics": "You have never been deep enough to learn how power is arranged further down. Those politics are unknown to you."
         }
       },
       "temple": {
@@ -8710,7 +8720,8 @@
           "its exact layout": "if the NPC has been inside"
         },
         "restricted_knowledge_never": {
-          "its exact layout": "You have never explored this place. You could not describe its plan to anyone."
+          "its exact layout": "You have never explored this place. You could not describe its plan to anyone.",
+          "Temple existence before discovery": "You could not have told anyone this place was here before it was found."
         }
       },
       "haunted_castle": {
@@ -8749,7 +8760,9 @@
           "Bram Kindly's true identity": "if the NPC personally learned it"
         },
         "restricted_knowledge_never": {
-          "Bram Kindly's true identity": "Nobody has ever told you who Bram Kindly really is. You genuinely do not know."
+          "Bram Kindly's true identity": "Nobody has ever told you who Bram Kindly really is. You genuinely do not know.",
+          "Bram's Castle history": "You have never learned the history of Bram's Castle. Its past is unknown to you.",
+          "full late-game undead politics": "You have never been party to how the undead powers arrange themselves. Their politics are beyond you."
         }
       },
       "sand_labyrinth": {
@@ -8792,7 +8805,9 @@
           "the exact maze solution": "if the NPC has solved it"
         },
         "restricted_knowledge_never": {
-          "the exact maze solution": "You have never solved this maze. You could not give anyone the way through."
+          "the exact maze solution": "You have never solved this maze. You could not give anyone the way through.",
+          "confirmed Xaz'Cetian history": "No one has ever given you a settled account of the Xaz'Cetians. Their history is unknown to you.",
+          "unseen ancient settlements": "You have never travelled out to the old settlements. What became of them, you do not know."
         }
       },
       "sokoban": {
@@ -8817,7 +8832,11 @@
         ],
         "sources": [
           "Dungeon Progression"
-        ]
+        ],
+        "restricted_knowledge_never": {
+          "existence before discovery": "You could not have told anyone this place existed before you stumbled into it.",
+          "solution paths without experience": "You have never worked out the way through here. The solution is not something you hold."
+        }
       },
       "minotaur_maze": {
         "status": "secret_boss_area",
@@ -8854,7 +8873,8 @@
           "the Minotaur countdown rules": "if the NPC observed or was taught them"
         },
         "restricted_knowledge_never": {
-          "the Minotaur countdown rules": "You have never watched the maze's hunt from start to finish. You do not know how its timing works."
+          "the Minotaur countdown rules": "You have never watched the maze's hunt from start to finish. You do not know how its timing works.",
+          "ZAP/Merlin conspiracy as fact": "You have never seen anything that proves a dealing between ZAP and Merlin. Whether it is real, you do not know."
         }
       },
       "ruins": {
@@ -8901,7 +8921,9 @@
           "Archmagister endgame plans": "if the NPC was personally exposed to them"
         },
         "restricted_knowledge_never": {
-          "Archmagister endgame plans": "You have never been near an Archmagister's private counsel. What they intend is a blank to you."
+          "Archmagister endgame plans": "You have never been near an Archmagister's private counsel. What they intend is a blank to you.",
+          "full ancient-city history": "Nobody ever taught you what this city was. Its history is largely blank to you.",
+          "Xaz'Cetian identity as fact": "You have never seen anything that settles who or what the Xaz'Cetians were. You do not know."
         }
       },
       "mystic_library": {
@@ -8932,7 +8954,11 @@
           "Dungeon Progression",
           "Spellbooks",
           "Scrolls"
-        ]
+        ],
+        "restricted_knowledge_never": {
+          "specific books or contents not actually read": "You have read only the books you have actually read. What is written in the rest is unknown to you.",
+          "full Citadel/Archmagister secrets merely because the library exists": "Standing among these books has taught you nothing of the Citadel's secrets. You do not know them."
+        }
       },
       "underworld": {
         "status": "transitional_secret_region",
@@ -8979,7 +9005,8 @@
         },
         "restricted_knowledge_never": {
           "facts about Artemisia": "You have never met Artemisia and nobody has told you about her. She is a name to you and nothing more.",
-          "details about Baphomet": "You have never had a reliable account of Baphomet from anyone. What is true of it, you do not know."
+          "details about Baphomet": "You have never had a reliable account of Baphomet from anyone. What is true of it, you do not know.",
+          "Hell route before discovering it": "You have never found the way down into Hell. Where that route lies, you do not know."
         }
       },
       "hell": {
@@ -9016,7 +9043,12 @@
           "Imp",
           "Demon",
           "The Adventurer Who Went To Hell"
-        ]
+        ],
+        "restricted_knowledge_never": {
+          "precise pact mechanics": "You have never seen a pact struck, and nobody has explained one to you. How they truly work, you do not know.",
+          "Baphomet motives": "Baphomet has never confided anything to you. What drives it, you do not know.",
+          "Hell geography beyond actual travel": "You know only the ground you have actually walked here. Beyond that, the shape of Hell is unknown to you."
+        }
       },
       "lich_bastion": {
         "status": "boss_arena",
@@ -9041,7 +9073,11 @@
         "sources": [
           "Dungeon Progression",
           "Baron Herx"
-        ]
+        ],
+        "restricted_knowledge_never": {
+          "exact arena mechanics before encounter": "You have never watched what happens in that chamber. How a fight there goes, you do not know.",
+          "Herx's private motives beyond established canon": "Herx never confided in you. What he truly wants, beyond what everyone says, you do not know."
+        }
       },
       "hamlet": {
         "status": "late_game_hub",
@@ -9077,7 +9113,11 @@
           "Books",
           "Dethroning Herx",
           "Assessing the ZAP Brigade"
-        ]
+        ],
+        "restricted_knowledge_never": {
+          "Archmagister secret plans before disclosure": "Nobody has disclosed the Archmagisters' plans to you. What they intend, you do not know.",
+          "Baphomet details beyond public rumor": "Everything you have heard about Baphomet is common talk in the street. Beyond that you know nothing."
+        }
       },
       "crystal_caves": {
         "status": "endgame_progression_region",
@@ -9119,7 +9159,11 @@
           "Erudyce",
           "Kobold",
           "Xyggi"
-        ]
+        ],
+        "restricted_knowledge_never": {
+          "Archmagister secret plans before exposure": "No Archmagister has ever exposed their plans to you. What they are working toward, you do not know.",
+          "exact cave secrets without direct experience": "You have been only where your own feet have carried you here. The deeper secrets of these caves are unknown to you."
+        }
       },
       "cockatrice_lair": {
         "status": "secret_setpiece",
@@ -9147,7 +9191,11 @@
           "Cockatrice (lair)",
           "Monster & NPC Guide",
           "Dungeon Progression"
-        ]
+        ],
+        "restricted_knowledge_never": {
+          "existence/layout before discovery": "You could not have told anyone this place was here before it was found, and you do not know its full extent.",
+          "universal Kobold religion": "You have never been shown any one faith that all kobolds share. Whether such a thing exists, you do not know."
+        }
       },
       "brams_castle": {
         "status": "secret_endgame_side_area",
@@ -9188,7 +9236,8 @@
           "private motives of individual Consorts": "if the NPC personally learned them"
         },
         "restricted_knowledge_never": {
-          "private motives of individual Consorts": "No Consort has ever confided in you. Their private reasons are a blank to you."
+          "private motives of individual Consorts": "No Consort has ever confided in you. Their private reasons are a blank to you.",
+          "Bram transformation details not established by canon": "You have never been told how Bram was turned. The particulars of it are a blank to you."
         }
       },
       "citadel": {
@@ -9221,7 +9270,11 @@
           "Dungeon Progression",
           "Citadel Servant FAQ",
           "Denizens"
-        ]
+        ],
+        "restricted_knowledge_never": {
+          "private Archmagister plans before direct discovery": "You have never been let near the Archmagisters' private plans. What they intend, you do not know.",
+          "full Citadel history for ordinary dungeon creatures": "Nobody ever taught you the Citadel's full history. You know only what any ordinary creature down here would."
+        }
       }
     },
     "corrections_to_v11": [
