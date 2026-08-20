@@ -96,19 +96,27 @@ def _book_block(race_l):
     return ("RELEVANT LORE (what your kind knows):\n" + lore + "\n") if lore else ""
 
 def _persona(race, grounded, floor, map_name=""):
-    """The opening every prompt shares: setting, character guidance, and
-    (except for ambient babble) canonical grounding + hard limits."""
+    """The opening every prompt shares: setting, character guidance and canonical grounding.
+
+    Returns (head, body, limits). The HARD LIMITS come back SEPARATELY so callers can place
+    them LAST in the prompt, after the disclosure block. They have to be last: disclosure
+    says "do NOT claim you don't know, visibly decline instead" while the limits say "say you
+    do not know and STOP", and whichever lands later wins. With limits early and disclosure
+    after them, anti-fabrication fell from 9-10/10 to ~4/10 -- the model split the difference
+    and produced exactly the hedged answer the limits block was written to kill."""
     race_l = race.lower()
     slice_ = RACE_LORE.get(race_l, RACE_LORE.get("default", "A creature of the dungeon."))
     head = f"SETTING: {WORLD}\n"
     tail = f"CHARACTER GUIDANCE: {slice_}\n"
+    limits = ""
     if grounded:
         facts, constraints = build_lore_context(race_l, floor, map_name=map_name)
-        tail += _grounding_block(facts) + _limits_block(constraints)
-    return head, tail + _book_block(race_l)
+        tail += _grounding_block(facts)
+        limits = _limits_block(constraints)
+    return head, tail + _book_block(race_l), limits
 
 def build_taunt_prompt(race, floor):
-    head, body = _persona(race, True, floor)
+    head, body, limits = _persona(race, True, floor)
     return (
         head
         + f"YOU ARE: a {race} on dungeon floor {floor}, locked in COMBAT right now.\n"
@@ -119,7 +127,7 @@ def build_taunt_prompt(race, floor):
 
 def build_ambient_prompt(race, floor, relation="hostile"):
     # NOTE: ambient babble is deliberately ungrounded (no canon, no hard limits).
-    head, body = _persona(race, False, floor)
+    head, body, limits = _persona(race, False, floor)
     if relation == "follower":
         situation = ("You are the adventurer's companion, wandering the dungeon together. "
                      "Mutter a short idle remark to yourself or your companion.")
@@ -362,6 +370,62 @@ DIMENSION_TENSIONS = (
     (lambda s: s["trust"] <= 10 and s["dependence"] >= 25,
      "YOU DO NOT TRUST THEM AND YOU CANNOT AFFORD TO LEAVE. You stay, and you watch them."),
 )
+
+# ---- Relationship-based disclosure (design spec 32) ---------------------------
+# What a character is WILLING to tell you, as distinct from what they know. Gated on the
+# whole vector, not friendship: someone can give accurate professional advice while
+# refusing anything personal, or be warm and still not touch what could get them killed.
+#
+# The crucial distinction, and the reason this is not just another limits block:
+#   HARD LIMITS  = "I genuinely do not know"    -> say so plainly and stop
+#   DISCLOSURE   = "I know and will not say"    -> visibly decline, so the player can TELL
+#                                                  there is something there
+# Collapsing the second into the first destroys the signal, and claiming ignorance is
+# exactly the route the 8B takes if you don't forbid it by name.
+DISCLOSURE_TIERS = (
+    ("what is around you",
+     lambda s: True,
+     "this floor, what you have seen, what lives here, immediate danger"),
+    ("practical knowledge",
+     lambda s: s["respect"] >= 15 or s["trust"] >= 15 or s["friendship"] >= 15,
+     "routes, tactics, how to handle what lives down here, what an item might be"),
+    ("your own history",
+     lambda s: s["friendship"] >= 20 and s["trust"] >= 18 and s["fear"] < 45,
+     "your family, your past, why you came down here, what frightens you"),
+    ("dangerous knowledge",
+     lambda s: s["trust"] >= 45 and s["fear"] < 40 and s["resentment"] < 35,
+     "who serves whom, what powerful people are doing, things you could be killed for repeating"),
+)
+
+def disclosure_block(st):
+    open_t, closed_t = [], []
+    for name, gate, detail in DISCLOSURE_TIERS:
+        (open_t if gate(st) else closed_t).append(f"{name} — {detail}")
+    out = ("WHAT YOU ARE WILLING TO TALK ABOUT WITH THEM:\n" + _bullets(open_t) + "\n"
+           "If they ask about anything on THIS list, answer it properly and with real, specific "
+           "detail. Brushing off, deflecting, or 'maybe another time' about something you ARE "
+           "willing to discuss is WRONG — you save that for the second list, not this one.\n")
+    if closed_t:
+        out += ("WHAT YOU ARE NOT WILLING TO DISCUSS WITH THEM YET:\n" + _bullets(closed_t) + "\n"
+                "This is NOT the same as the hard limits above. Those are things you genuinely do "
+                "not know. THESE ARE THINGS YOU DO KNOW AND ARE CHOOSING NOT TO SHARE.\n"
+                "So do NOT say you do not know, and do NOT invent an ignorant answer — that is "
+                "WRONG and it hides the fact that there is anything there. Instead let them SEE "
+                "you decline: change the subject, tell them plainly it is not something you will "
+                "talk about, or say maybe another time. They should come away certain you are "
+                "holding something back.\n")
+    # ⚠ SPEC 26 (information provenance) WAS TRIED HERE AND REMOVED. DO NOT RE-ADD IT.
+    # The instruction -- "when you pass on something you did not witness, say how you came by
+    # it" -- reads harmless, but it LICENSES the exact hedged-hearsay route the hard-limits
+    # block exists to close. Anti-fabrication fell from the documented 9-10/10 to 1/6, with the
+    # model inventing Temple interiors it had just been told it knows nothing about
+    # ("I've heard it's got a big ol' entrance hall... the Nexus of Reflections").
+    # Fencing it with an explicit "this never applies to your hard limits" carve-out only
+    # recovered it to ~3/8: the phrase primes "I've heard..." merely by being present.
+    # Natural provenance is a nice-to-have; not fabricating is the whole system. If provenance
+    # is wanted later it has to come from structured event data (event_log already carries a
+    # "provenance" field), NOT from a free-text instruction to the model.
+    return out
 
 MAX_DIMENSION_LINES = 4
 MAX_TENSION_LINES   = 2
@@ -875,7 +939,7 @@ def _follower_sections(uid, race, floor, says, player=0):
     st = get_follower_state(uid, race, player)
     mem = (" You remember: " + "; ".join(st["events"][-3:])) if st["events"] else ""
     history = f"YOUR HISTORY WITH THIS ADVENTURER: {friendship_descriptor(st['friendship'])}{mem}\n"
-    relations = relationship_block(st)
+    relations = relationship_block(st) + disclosure_block(st)
     evlines = events_for_prompt(st)
     alleg = allegiance_section(st, says)
     boon = _boon_section(uid, st, race_l, floor, player)
@@ -885,7 +949,7 @@ def _follower_sections(uid, race, floor, says, player=0):
             + _obedience_section(st))
 
 def build_prompt(race, floor, says="", uid=0, player=0, player_name="", party=1, map_name=""):
-    head, body = _persona(race, True, floor, map_name)
+    head, body, limits = _persona(race, True, floor, map_name)
     who = player_name.strip() if player_name else ""
     # In co-op the follower belongs to ONE adventurer but others are present; naming the
     # leader keeps a shared chat feed legible and stops the model addressing the wrong person.
@@ -908,6 +972,10 @@ def build_prompt(race, floor, says="", uid=0, player=0, player_name="", party=1,
         + body
         + party_line
         + (_follower_sections(uid, race, floor, says, player) if uid else "")
+        # HARD LIMITS LAND HERE, AFTER the disclosure block inside _follower_sections.
+        # Disclosure says "do not claim ignorance"; the limits say "say you do not know and
+        # STOP". Whichever comes later wins, and it must be this one.
+        + limits
         + adventurer_line
         + "Reply in character AND choose ONE action that best fits what they said.\n"
         + "Valid actions: FOLLOW (go with them), DEFEND (hold this spot), WAIT (stay put), ATTACK (attack a nearby enemy), NONE (just talk).\n"
@@ -1002,7 +1070,7 @@ def build_npc_prompt(race, floor, says="", uid=0, player=0, player_name="",
                      name="", role="townsfolk", shop=-1, map_name="", greeting=False):
     st = get_npc_state(uid, race, name, role, shop, floor) if uid else {
         "name": name, "role": role, "shop": shop, "exchanges": []}
-    head, body = _persona(race, True, floor, map_name)
+    head, body, limits = _persona(race, True, floor, map_name)
     who = player_name.strip() or "The adventurer"
     if greeting:
         closing = (f"{who} has just walked up to you. Greet them, or say whatever you would "
@@ -1018,6 +1086,7 @@ def build_npc_prompt(race, floor, says="", uid=0, player=0, player_name="",
             + body
             + NPC_STANDING
             + _npc_memory_block(st)
+            + limits
             + closing
             + 'Respond ONLY with JSON, no other text, like: {"speech": "your line"}')
 

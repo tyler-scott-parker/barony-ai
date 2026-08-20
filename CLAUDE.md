@@ -88,6 +88,61 @@ Verified: 5.9 GB, **100% GPU**, CONTEXT 16384, warm replies ~2-4s. Prompts run *
 ### Foundation
 Async via detached `std::thread` + shared globals + `mymod_pollAI()` per frame (no freeze). Two-way command loop: `/aicommand` finds the player's follower via `Stat->leader_uid`, service returns `{speech, action}` ∈ FOLLOW/DEFEND/WAIT/ATTACK/NONE. **ATTACK is diegetic only** — Barony's combat AI handles fighting. Push-to-talk voice (hold V → faster-whisper small.en, cuda/float16). Speech bubbles via `createDialogueTooltip(uid, DIALOGUE_NPC, "%s", reply)` — **the `"%s"` guard is required**. Polymorph-as-comprehension. 34 canonical books injected per race. `/aiserver <url>` for BYO-model.
 
+### Relationship-based disclosure (design spec §32)
+
+What a character is **willing** to tell you, as distinct from what they know. Four tiers, each
+gated on the whole vector rather than friendship:
+
+| Tier | Opens when |
+|---|---|
+| what is around you | always |
+| practical knowledge | `respect ≥15 or trust ≥15 or friendship ≥15` |
+| your own history | `friendship ≥20 and trust ≥18 and fear <45` |
+| dangerous knowledge | `trust ≥45 and fear <40 and resentment <35` |
+
+Reproduces §32's worked examples: *respected but not liked* → practical open, personal closed;
+*friendly but afraid* → low-risk only; *deeply trusted* → everything.
+
+**The distinction that makes this more than another limits block:**
+- HARD LIMITS = *"I genuinely do not know"* → say so plainly and stop
+- DISCLOSURE = *"I know and will not say"* → **visibly decline**, so the player can tell there is
+  something there
+
+Collapsing the second into the first destroys the signal, and claiming ignorance is exactly the
+route the 8B takes unless it is forbidden by name. Verified: closed tier **5/5 declined visibly,
+0 claimed ignorance** (*"Family's not something I'm comfortable talkin' about"*).
+
+⚠ **The OPEN list has to be directive too.** Listed as merely permissive ("what you are willing to
+discuss"), the closed block's strong language bled into general reticence and the control only
+opened up **2/5**. Adding *"if they ask about anything on THIS list, answer properly with real
+specific detail — brushing off something you ARE willing to discuss is WRONG"* took it to **6/6**.
+Both halves need the failure route named, not just the prohibition.
+
+**Hard limits are now emitted LAST** (`_persona` returns them separately so callers place them
+after the disclosure block). The two instructions genuinely conflict about whether "I don't know"
+is correct, and whichever lands later wins.
+
+⚠ **CONDITIONAL LIMITS ARE WEAK — this is a lore-data problem, not a prompt problem.** Measured on
+the full prompt:
+
+| Probe | Limit wording | Result |
+|---|---|---|
+| *"what are the Archmagisters in the Citadel planning?"* | `later-region politics` (absolute) | **10/10 clean** |
+| *"what is the layout inside the Temple?"* | `Temple internal layout **unless visited**` | ~3/10 |
+
+The model reasons it *might* have visited and hedges. **The `unless visited` phrasing in
+`location_knowledge_audit` restricted_knowledge undermines the whole limits mechanism** for those
+entries. Fixing that is a lore-file edit, not a prompt edit. Do not use a conditional limit as a
+probe when testing anti-fabrication — it will look like a regression that is not there.
+
+⚠ **Spec §26 (information provenance) was tried here and REMOVED — do not re-add it as a prompt
+instruction.** *"When you pass on something you did not witness, say how you came by it"* reads
+harmless but explicitly licenses the hedged-hearsay route (*"I don't know, but I've heard..."*)
+that `LIMITS_HEADER` exists to kill. Fencing it with a "this never applies to your hard limits"
+carve-out did not clear it — the phrase primes "I've heard" merely by being present. If provenance
+is wanted, it must come from the structured `event_log` (which already carries a `provenance`
+field), never from free text.
+
 ### Relationships — the vector (design spec §4.1)
 
 `friendship` alone could not express *"likes you but does not trust you"*, which the spec calls the
