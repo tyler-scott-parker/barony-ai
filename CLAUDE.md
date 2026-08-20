@@ -187,6 +187,28 @@ history ~~unless a special individual is elevated~~"*), with the original preser
 `knowledge_boundary_lift`. Four conditionals about canon/sources (`merlin`, `shelob`, `bram_kindly`,
 `succubus_consort`) read correctly as written and were left.
 
+⚠ **Lore lookup was silently missing most of the file.** Two separate key bugs, both found by
+auditing rather than by anything failing visibly:
+
+- **Multi-word races never matched.** The game hands back display names with spaces
+  (`"crystal golem"`, `"earth sprite"`, `"revenant skull"`, `"gnome thief"`) while the lore keys use
+  underscores. `_lore_key()` now normalises (lowercase, spaces/hyphens → `_`, strip apostrophes).
+- **44 of the 75 `individual_denizen_research` entries were unreachable.** They are keyed by
+  *individual*, not race — `merlin`, `king_arthur`, `lilith`, `bram_kindly`, `gharbad`, `algernon`,
+  `baron_herx` — but lookup only ever used the race. Every named NPC fell through to generic race
+  lore, so all that researched canon was dead weight. `build_lore_context(..., npc_name=)` now
+  prefers the individual's entry over their species'.
+
+Verified: King Arthur asked *"who are you, and what is that sword?"* names **Dyrnwyn** 4/4, where an
+unnamed human gives a generic "old family blade". And his boundary — *"Do not import Camelot,
+Guinevere, Lancelot"* — refuses 6/6, a rule that **could never have fired before**.
+
+⚠ **`npc_name` is passed only from `build_npc_prompt`, never for followers.** A follower's name is
+chosen by the model, and a follower who names itself "Merlin" must not inherit Merlin's canon.
+
+`npc_rules` is now sliced `[:3]` rather than `[:2]` — three rules (in `gnomish_mines`, `mines`,
+`swamp`) were authored but never rendered. `restricted_knowledge[:3]` still covers every profile.
+
 ⚠ **Measure before rewriting a limit class.** Three probes — authoring-instruction leakage at the
 Temple, a permission-under-prohibition Swamp goblin, and a class restriction on a Mine rat — all
 scored **6/6 correct** *before* any of this. Neither class was behaviourally broken; the changes

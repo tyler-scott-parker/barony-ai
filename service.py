@@ -101,7 +101,7 @@ def _book_block(race_l):
     lore = get_book_lore(race_l)
     return ("RELEVANT LORE (what your kind knows):\n" + lore + "\n") if lore else ""
 
-def _persona(race, grounded, floor, map_name=""):
+def _persona(race, grounded, floor, map_name="", npc_name=""):
     """The opening every prompt shares: setting, character guidance and canonical grounding.
 
     Returns (head, body, limits). The HARD LIMITS come back SEPARATELY so callers can place
@@ -116,7 +116,7 @@ def _persona(race, grounded, floor, map_name=""):
     tail = f"CHARACTER GUIDANCE: {slice_}\n"
     limits = ""
     if grounded:
-        facts, constraints = build_lore_context(race_l, floor, map_name=map_name)
+        facts, constraints = build_lore_context(race_l, floor, map_name=map_name, npc_name=npc_name)
         tail += _grounding_block(facts)
         limits = _limits_block(constraints)
     return head, tail + _book_block(race_l), limits
@@ -616,15 +616,30 @@ def floor_to_region(floor, map_name=""):
             return name
     return "citadel"
 
-def build_lore_context(race, floor, budget=16, map_name=""):
+def _lore_key(name):
+    """Lore files key everything with underscores ('crystal_golem', 'king_arthur') but the game
+    hands us display names with spaces ('crystal golem'). Without this, every multi-word race
+    silently missed its own entry -- crystal golem, earth sprite, revenant skull, gnome thief."""
+    return (name or "").strip().lower().replace("-", "_").replace(" ", "_").replace("'", "")
+
+def build_lore_context(race, floor, budget=16, map_name="", npc_name=""):
     """Priority-ordered static context (per the file's runtime_context_priority):
-    entry-specific canon -> base race -> location. Returns (facts, constraints)."""
-    r = race.lower()
+    entry-specific canon -> base race -> location. Returns (facts, constraints).
+
+    `npc_name` lets a NAMED character claim their own researched entry. 44 of the 75 entries in
+    individual_denizen_research are keyed by individual rather than race -- merlin, king_arthur,
+    lilith, bram_kindly, gharbad, baron_herx -- so before this they could never be reached and
+    every named NPC fell through to generic race lore."""
+    r = _lore_key(race)
+    ind = _lore_key(npc_name)
     facts, constraints = [], []
-    entry = FULL.get("individual_denizen_research", {}).get("entries", {}).get(r, {})
+    entries = FULL.get("individual_denizen_research", {}).get("entries", {})
+    # An individual's own canon outranks their species'.
+    entry = (entries.get(ind) if ind else None) or entries.get(r, {})
 
     # 1. Identity: entity profile
-    e = FULL.get("denizen_context_profiles", {}).get(r)
+    profiles = FULL.get("denizen_context_profiles", {})
+    e = (profiles.get(ind) if ind else None) or profiles.get(r)
     if e:
         facts.append(f"YOU ARE ({e.get('category','?')}): {e.get('baseline','').strip()}")
         if e.get("knowledge_scope"):
@@ -686,7 +701,7 @@ def build_lore_context(race, floor, budget=16, map_name=""):
     # ("Gnome residents should have strong colony knowledge") which read as a flat contradiction.
     # Rules addressed to the lore author rather than to a character now live in
     # profile["authoring_notes"] and are deliberately not rendered at all.
-    for nr in loc.get("npc_rules", [])[:2]:
+    for nr in loc.get("npc_rules", [])[:3]:
         facts.append(f"HOW YOUR KIND FITS IN HERE: {nr.strip()}")
 
     return facts[:budget], constraints
@@ -1100,7 +1115,7 @@ def build_npc_prompt(race, floor, says="", uid=0, player=0, player_name="",
                      name="", role="townsfolk", shop=-1, map_name="", greeting=False):
     st = get_npc_state(uid, race, name, role, shop, floor) if uid else {
         "name": name, "role": role, "shop": shop, "exchanges": []}
-    head, body, limits = _persona(race, True, floor, map_name)
+    head, body, limits = _persona(race, True, floor, map_name, st.get("name", ""))
     who = player_name.strip() or "The adventurer"
     if greeting:
         closing = (f"{who} has just walked up to you. Greet them, or say whatever you would "
