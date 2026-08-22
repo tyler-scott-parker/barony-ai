@@ -670,6 +670,53 @@ pool exhaustion.
 
 **The HUD rename is free:** `GameUI.cpp:2401` already reads `followerStats->name` and displays it when non-empty and not `"nothing"`. So `strncpy(Stat->name, ...)` renames the party UI with no rendering change. (`getMonsterLocalizedName` in `actmonster.cpp:224` does *not* use `Stat->name` for ordinary races — dead end.)
 
+### The Archmagisters: Orpheus and Erudyce (floor 35)
+
+The endgame twins — `LICH_ICE` **Erudyce** and `LICH_FIRE` **Orpheus** (`stat_shared.cpp:918`,
+`946`), 2000 HP each against Herx's 1250. Arch-wizard **siblings** and the Guild's former
+leadership who, per the lore, *bicker*.
+
+⚠ **That bickering is the design.** Their weakness is not anatomy like Herx's — it is each other.
+Every truth is something one sibling would be humiliated to have said aloud, and each names
+**which twin** it is about, so a truth about Orpheus does nothing to Erudyce. Learning *which*
+is the point.
+
+⚠ **A spy's lie here BUFFS instead of doing nothing.** Herx's false secrets report `debuff 0` and
+the boss is untouched; at the endgame, walking in with a plan that is wrong should cost something.
+`debuff` is **negative** for a buff, and the false "they are bound together" variant names
+Orpheus *and* buffs Orpheus — act on it and you pour everything into the sibling who just got
+harder.
+
+| | Herx | the twins |
+|---|---|---|
+| races | skeleton, human | human, gnome, automaton, shopkeeper |
+| friendship | 50 | **60** |
+| fights | 4 | **6** |
+| floors | up to 20 | **25+** |
+| a lie does | nothing (`debuff 0`) | **buffs the boss** |
+
+⚠ **`until` matters as much as `floor`.** Herx dies on floor 20, so a follower offering his
+weakness on floor 30 is offering something worthless — and worse, it consumed the roll that
+should have gone to the Archmagisters.
+
+⚠ **The boss the player ASKED about comes first.** Measured: asking *"what do you know about the
+Archmagisters?"* deep in a run offered the **Herx** secret, the model quite reasonably answered
+the question instead, and the offer was dropped — so the arc could never fire at all.
+
+⚠ **Every variant must NAME its sibling.** Left with a pronoun the model swapped them —
+*"Orpheus won't act while **her** brother's alive"*, mechanically targeting Erudyce while telling
+the player to leave Orpheus for last. A true secret that misdirects is worse than none. After
+naming them explicitly: **2/2 correct**. There is a test that no variant can be added without a
+name.
+
+The engine field extends rather than changes: Herx keeps `"<debuff>:<uid>"` and the twins add
+`"<debuff>:<uid>:twins:<who>"` (1 = Erudyce, 2 = Orpheus). `initLichIce`/`initLichFire` each apply
+only their own `who`, and tier 2 still doubles either direction if the informant is alive.
+
+The whole arc is **generalised, not duplicated**: `BOSS_SECRETS` and `SECRET_STATE` are keyed by
+boss, `HERX_STATE` aliases `SECRET_STATE["herx"]` so both views stay in step, and the 24 Herx
+assertions were the regression net through the refactor.
+
 ### Herx secret weakness
 Gate: eligible race (skeleton/human) **and** named **and** friendship ≥50 **and** ≥4 `fought_alongside` events, then an escalating roll (+30% if the player asks about Herx directly, +25% if the follower is a spy). One reveal per run.
 

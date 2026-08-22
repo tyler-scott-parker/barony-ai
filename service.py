@@ -1115,8 +1115,10 @@ def reset_run():
     """Clear all per-playthrough state: follower relationships and the Herx secret."""
     n = len(follower_state)
     follower_state.clear()
-    HERX_STATE.update({"revealed": False, "variant": None, "uid": 0, "pending": {},
-                       "is_false": False, "player": 0})
+    for b in SECRET_STATE:
+        SECRET_STATE[b].clear()
+        SECRET_STATE[b].update(_fresh_secret_state())
+    # HERX_STATE aliases SECRET_STATE["herx"], so clearing in place keeps both views in step.
     BOON_STATE["good_used"].clear()
     BOON_STATE["map_used"].clear()
     SABOTAGE_STATE["used"] = False
@@ -1232,66 +1234,144 @@ HERX_FALSE_VARIANTS = [
     {"debuff": 0, "truth": "Speak his given name — his true one, Herxel — and he must stop and answer. It buys you time.",
      "keywords": ["herxel", "true name", "given name", "must answer"]},
 ]
-# Run-global: one boss, one secret per playthrough, whichever player's follower tells it.
+# ---- The twins: Orpheus and Erudyce, floor 35 --------------------------------------------
+# Arch-wizard SIBLINGS and the Guild's former leadership, who "bicker" per the lore. That is the
+# design gift: their weakness is not anatomy like Herx's, it is each other. Every truth below is
+# something one of them would be humiliated to have said aloud, which is why it works.
+#
+# ⚠ A spy's lie here BUFFS the twin instead of doing nothing. Herx's false secrets report
+# debuff 0 and the boss is untouched; at the endgame, walking in with a plan that is wrong
+# should cost something. `debuff` is negative for a buff, and initLichIce/initLichFire read the
+# sign.
+TWINS_ELIGIBLE_RACES = ("human", "gnome", "automaton", "shopkeeper")
+TWINS_MIN_FRIENDSHIP = 60
+TWINS_MIN_FIGHTS = 6
+TWINS_MIN_FLOOR = 25          # not before Hamlet: nobody down in the mines is discussing them
+
+# "who": 1 = Erudyce (LICH_ICE), 2 = Orpheus (LICH_FIRE)
+TWINS_SECRET_VARIANTS = [
+    {"debuff": 1, "who": 2, "truth": "Orpheus never finished the work — Erudyce did, and he has never forgiven it. Say her name to him and he loses the thread of what he is doing.",
+     "keywords": ["never finished", "she did", "erudyce did", "loses the thread", "say her name"]},
+    {"debuff": 2, "who": 2, "truth": "The fire was Erudyce's craft before it was Orpheus's. He wears it badly and it burns him as much as anyone. Keep Orpheus casting and he will wear himself out.",
+     "keywords": ["erudyce's craft", "wears it badly", "burns him", "wear himself out"]},
+    {"debuff": 3, "who": 1, "truth": "Erudyce holds the cold around herself like a held breath. Break her concentration once and the whole of it has to be rebuilt.",
+     "keywords": ["held breath", "concentration", "rebuilt", "holds the cold"]},
+    {"debuff": 4, "who": 1, "truth": "Erudyce will not act while Orpheus still stands. Everything Erudyce does is second — kill Orpheus LAST and Erudyce fights half-committed the whole way.",
+     "keywords": ["will not act", "second", "orpheus last", "half-committed", "still stands"]},
+]
+# ⚠ Negative debuff = a BUFF. Plausible, wrong, and acted upon.
+TWINS_FALSE_VARIANTS = [
+    {"debuff": -1, "who": 2, "truth": "Orpheus cannot abide being ignored. Turn your back on him and he will falter rather than strike.",
+     "keywords": ["ignored", "turn your back", "falter"]},
+    {"debuff": -1, "who": 1, "truth": "Erudyce's ice will not hold on stone that has been warmed. Fight her by the braziers and she is nothing.",
+     "keywords": ["braziers", "warmed", "will not hold"]},
+    # ⚠ Names the twin it misdirects you onto, and that twin is the one the buff lands on: act
+    # on this and you pour everything into the sibling who just got harder.
+    {"debuff": -1, "who": 2, "truth": "They are bound together — kill Orpheus and Erudyce dies with him. Spend everything on Orpheus and the other falls for free.",
+     "keywords": ["bound together", "dies with him", "spend everything", "falls for free"]},
+]
+
+# Run-global per boss: one secret each per playthrough, whichever player's follower tells it.
 # "player" records who was told, for logging and for the C++ tier-2 informant check.
 # "pending" is keyed by follower uid, not a single slot: with several players talking at
 # once, two followers can each be holding an unconfirmed offer in the same instant.
-HERX_STATE = {"revealed": False, "variant": None, "uid": 0, "pending": {},
-              "is_false": False, "player": 0}
+def _fresh_secret_state():
+    return {"revealed": False, "variant": None, "uid": 0, "pending": {},
+            "is_false": False, "player": 0}
 
-def _herx_pool(is_false):
-    return HERX_FALSE_VARIANTS if is_false else HERX_SECRET_VARIANTS
+BOSS_SECRETS = {
+    # ⚠ `until` matters as much as `floor`: Herx dies on floor 20, so a follower offering his
+    # weakness on floor 30 is offering something worthless -- and worse, it consumes the roll
+    # that should have gone to the Archmagisters.
+    "herx":  {"races": HERX_ELIGIBLE_RACES,  "friendship": HERX_MIN_FRIENDSHIP,
+              "fights": HERX_MIN_FIGHTS,     "floor": 0, "until": 20,
+              "true": HERX_SECRET_VARIANTS,  "false": HERX_FALSE_VARIANTS,
+              "subject": "Baron Herx"},
+    "twins": {"races": TWINS_ELIGIBLE_RACES, "friendship": TWINS_MIN_FRIENDSHIP,
+              "fights": TWINS_MIN_FIGHTS,    "floor": TWINS_MIN_FLOOR, "until": 99,
+              "true": TWINS_SECRET_VARIANTS, "false": TWINS_FALSE_VARIANTS,
+              "subject": "the Archmagisters, Orpheus and Erudyce"},
+}
+SECRET_STATE = {b: _fresh_secret_state() for b in BOSS_SECRETS}
+
+# Herx keeps its own name: 24 assertions and the C++ field both use it, and aliasing the dict
+# means both views stay in step.
+HERX_STATE = SECRET_STATE["herx"]
+
+def _herx_pool(is_false, boss="herx"):
+    cfg = BOSS_SECRETS[boss]
+    return cfg["false"] if is_false else cfg["true"]
 
 def _fight_count(st):
     return sum(1 for e in st.get("event_log", []) if e.get("type") == "fought_alongside")
 
-def herx_eligible(st, race):
-    # ⚠ A conjurer's skeleton knight reports race "skeleton" -- getMonsterLocalizedName does
-    # not distinguish it -- so without this a creature conjured ninety seconds ago could hold
-    # the Baron's secret weakness. A machine cannot have learned it either.
-    return (not HERX_STATE["revealed"]
+def secret_eligible(boss, st, race, floor=0):
+    """The same gate for every boss, with that boss's own numbers."""
+    cfg = BOSS_SECRETS[boss]
+    return (not SECRET_STATE[boss]["revealed"]
             and st.get("origin") not in NO_SECRET_ORIGINS
-            and race.lower() in HERX_ELIGIBLE_RACES
+            and race.lower() in cfg["races"]
+            and cfg["floor"] <= floor <= cfg.get("until", 99)
             and bool(st.get("name"))
-            and st["friendship"] >= HERX_MIN_FRIENDSHIP
-            and _fight_count(st) >= HERX_MIN_FIGHTS)
+            and st["friendship"] >= cfg["friendship"]
+            and _fight_count(st) >= cfg["fights"])
 
-def herx_roll(st, says):
-    extra = max(0, _fight_count(st) - HERX_MIN_FIGHTS)
+def secret_roll(boss, st, says):
+    cfg = BOSS_SECRETS[boss]
+    extra = max(0, _fight_count(st) - cfg["fights"])
     chance = min(0.80, 0.25 + 0.10 * extra)
     low = (says or "").lower()
-    if any(k in low for k in ("herx", "baron", "weakness", "secret")):
+    probes = (("herx", "baron", "weakness", "secret") if boss == "herx"
+              else ("orpheus", "erudyce", "archmagister", "guild", "twins", "weakness", "secret"))
+    if any(k in low for k in probes):
         chance = min(0.95, chance + 0.30)
     if st.get("allegiance") == "spy":
         chance = min(0.95, chance + 0.25)   # a spy wants you to believe it
     return random.random() < chance
 
+def herx_eligible(st, race):
+    # ⚠ A conjurer's skeleton knight reports race "skeleton" -- getMonsterLocalizedName does
+    # not distinguish it -- so without this a creature conjured ninety seconds ago could hold
+    # the Baron's secret weakness. A machine cannot have learned it either. (Handled for every
+    # boss by secret_eligible's NO_SECRET_ORIGINS check.)
+    return secret_eligible("herx", st, race, floor=1)
+
+def herx_roll(st, says):
+    return secret_roll("herx", st, says)
+
 def herx_detect(uid, raw, speech, player=0):
     """If a secret was offered to this follower this turn, decide whether it was actually
     told. There is no sentinel in the model's output -- we match the variant's keywords.
     A pending offer the model talked around is dropped."""
-    pend = HERX_STATE["pending"].pop(uid, None)
+    boss = None
+    pend = None
+    for b in BOSS_SECRETS:
+        if uid in SECRET_STATE[b]["pending"]:
+            boss = b
+            pend = SECRET_STATE[b]["pending"].pop(uid)
+            break
     if not pend:
         return
     vi, is_false = pend
-    v = _herx_pool(is_false)[vi]
+    v = _herx_pool(is_false, boss)[vi]
+    state = SECRET_STATE[boss]
     txt = ((speech or "") + " " + (raw or "")).lower()
     told = '"secret"' in (raw or "").lower() or any(k in txt for k in v["keywords"])
-    if told and HERX_STATE["revealed"]:
+    if told and state["revealed"]:
         # Another player's follower got there first this run; one reveal only.
         print(f"[SERVICE-DBG] follower {uid} told the secret too, but it is already revealed")
-        logrec("herx", stage="duplicate", uid=uid, player=player)
+        logrec("herx", stage="duplicate", uid=uid, player=player, boss=boss)
         return
     if not told:
         # Offered and then talked around. This branch is otherwise completely invisible.
-        logrec("herx", stage="dropped", uid=uid, player=player, is_false=is_false)
+        logrec("herx", stage="dropped", uid=uid, player=player, is_false=is_false, boss=boss)
     if told:
-        HERX_STATE.update({"revealed": True, "variant": vi, "uid": uid,
-                           "is_false": is_false, "player": player})
+        state.update({"revealed": True, "variant": vi, "uid": uid,
+                      "is_false": is_false, "player": player})
         print(f"[SERVICE-DBG] HERX SECRET revealed by follower {uid} to player{player} "
               f"(debuff variant {v['debuff']})")
         logrec("herx", stage="revealed", uid=uid, player=player, is_false=is_false,
-               debuff=v["debuff"], truth=v["truth"][:120])
+               boss=boss, who=v.get("who"), debuff=v["debuff"], truth=v["truth"][:120])
 
 # ---- Spy sabotage: calling the minotaur -------------------------------------------------
 # The first thing a follower can do that actively spends the player's run against them.
@@ -1617,18 +1697,34 @@ def _boon_section(uid, st, race_l, floor, player=0):
     return ("UNPROMPTED: you are giving them something you came by honestly — "
             + iname + ". Offer it in one short line, with a plausible reason you have it.\n")
 
-def _secret_section(uid, st, race, says):
-    if HERX_STATE["revealed"] and HERX_STATE["uid"] == uid:
-        return ("YOU HAVE ALREADY TOLD THIS ADVENTURER HERX'S WEAKNESS: "
-                + _herx_pool(HERX_STATE.get("is_false"))[HERX_STATE["variant"]]["truth"] + "\n")
-    if not (herx_eligible(st, race) and herx_roll(st, says)):
+def _secret_section(uid, st, race, says, floor=0):
+    for b, state in SECRET_STATE.items():
+        if state["revealed"] and state["uid"] == uid:
+            return ("YOU HAVE ALREADY TOLD THIS ADVENTURER WHAT YOU KNOW ABOUT "
+                    + BOSS_SECRETS[b]["subject"].upper() + ": "
+                    + _herx_pool(state.get("is_false"), b)[state["variant"]]["truth"] + "\n")
+    # ⚠ Whichever boss the player actually asked about comes FIRST. Measured: asking "what do
+    # you know about the Archmagisters?" deep in a run offered the HERX secret, the model quite
+    # reasonably answered the question instead, and the offer was dropped -- so the arc could
+    # never fire. Order by what was said, then by which arc comes earlier.
+    low = (says or "").lower()
+    order = ["herx", "twins"]
+    if any(k in low for k in ("orpheus", "erudyce", "archmagister", "guild", "twins", "sanctum")):
+        order = ["twins", "herx"]
+    boss = None
+    for b in order:
+        if secret_eligible(b, st, race, floor) and secret_roll(b, st, says):
+            boss = b
+            break
+    if not boss:
         return ""
     is_spy = st.get("allegiance") == "spy"
-    pool = _herx_pool(is_spy)
+    pool = _herx_pool(is_spy, boss)
     vi = random.randrange(len(pool))
-    HERX_STATE["pending"][uid] = (vi, is_spy)
-    logrec("herx", stage="offered", uid=uid, is_false=is_spy)
-    return ("A SECRET YOU HAVE CARRIED: You know one true thing about Baron Herx, "
+    SECRET_STATE[boss]["pending"][uid] = (vi, is_spy)
+    logrec("herx", stage="offered", uid=uid, is_false=is_spy, boss=boss)
+    return ("A SECRET YOU HAVE CARRIED: You know one true thing about "
+            + BOSS_SECRETS[boss]["subject"] + ", "
             "learned long ago and never spoken. You trust this adventurer enough to tell them now. "
             "Share it in your own words, plainly, as something you know for certain: "
             + pool[vi]["truth"] + "\n")
@@ -1647,15 +1743,18 @@ def _secret_override(uid):
 
     Named routes, not a general permission: 'I do not know' and hedging are what the limits
     push it toward, so both are forbidden here by name."""
-    pend = HERX_STATE["pending"].get(uid)
-    if not pend:
+    for b, state in SECRET_STATE.items():
+        if uid in state["pending"]:
+            vi, is_false = state["pending"][uid]
+            boss = b
+            break
+    else:
         return ""
-    vi, is_false = pend
-    return ("THE ONE EXCEPTION TO THE LIMITS ABOVE — about Baron Herx you DO know this, for "
-            "certain, and you have already decided to tell them: "
-            + _herx_pool(is_false)[vi]["truth"] + "\n"
+    return ("THE ONE EXCEPTION TO THE LIMITS ABOVE — about " + BOSS_SECRETS[boss]["subject"]
+            + " you DO know this, for certain, and you have already decided to tell them: "
+            + _herx_pool(is_false, boss)[vi]["truth"] + "\n"
             "Say it. Saying you do not know it, saying you have only heard rumours of it, or "
-            "answering with general talk about Herx instead is WRONG. Everything else in your "
+            "answering with general talk about them instead is WRONG. Everything else in your "
             "limits still stands — this one fact is the exception.\n")
 
 # ---- Pre-cached follower names ----------------------------------------------
@@ -1946,7 +2045,7 @@ def _follower_sections(uid, race, floor, says, player=0, ident=None):
     evlines = events_for_prompt(st)
     alleg = allegiance_section(st, says)
     boon = _boon_section(uid, st, race_l, floor, player)
-    secret = _secret_section(uid, st, race, says)
+    secret = _secret_section(uid, st, race, says, floor)
     # ⚠ Not while a secret is being told: two unprompted behaviours in one reply and the later
     # one takes the turn. Unlike the Herx/crack pair -- which measured as ALIGNED, both being
     # "let something slip" -- the tell and the crack pull opposite ways. The crack wants
@@ -2463,12 +2562,21 @@ def ask_ollama(prompt):
         return json.loads(r.read())["response"].strip()
 
 def herx_secret_field():
-    """The "<debuff>:<uid>" the C++ side reads to apply the Herx debuff. A false
-    secret reports debuff 0, so initLich applies nothing."""
-    if not HERX_STATE["revealed"]:
-        return ""
-    debuff = 0 if HERX_STATE.get("is_false") else HERX_SECRET_VARIANTS[HERX_STATE["variant"]]["debuff"]
-    return "%d:%d" % (debuff, HERX_STATE["uid"])
+    """What the C++ side reads. Herx keeps its original two-field shape for compatibility:
+    "<debuff>:<uid>", where a false secret reports 0 and initLich applies nothing.
+
+    The twins add a third and fourth: "<debuff>:<uid>:twins:<who>", where `who` is 1 for
+    Erudyce and 2 for Orpheus, and ⚠ a NEGATIVE debuff is a BUFF -- a spy's lie at the endgame
+    costs you rather than merely wasting your time."""
+    st = SECRET_STATE["herx"]
+    if st["revealed"]:
+        d = 0 if st.get("is_false") else HERX_SECRET_VARIANTS[st["variant"]]["debuff"]
+        return "%d:%d" % (d, st["uid"])
+    st = SECRET_STATE["twins"]
+    if st["revealed"]:
+        v = _herx_pool(st.get("is_false"), "twins")[st["variant"]]
+        return "%d:%d:twins:%d" % (v["debuff"], st["uid"], v.get("who", 1))
+    return ""
 
 class Handler(http.server.BaseHTTPRequestHandler):
     def handle_one_request(self):
