@@ -779,7 +779,13 @@ def dims_summary(st):
 # friendship must come from deeds/events.
 CHAT_CAP_PER_FLOOR = 2
 
-def record_follower_interaction(uid, says, floor=0, player=0):
+# How many exchanges a follower keeps, and how many reach the prompt. Both sides of each are
+# stored: see the block in _follower_sections for why storing only the player's half was a bug.
+FOLLOWER_EXCHANGE_MEMORY = 6
+FOLLOWER_EXCHANGES_SHOWN = 3
+FOLLOWER_REPLY_RECALL    = 140   # trims a rambling reply; the gist is what has to stay consistent
+
+def record_follower_interaction(uid, says, floor=0, player=0, replied=""):
     st = get_follower_state(uid, "", player)
     gained = st.setdefault("chat_gain_by_floor", {})
     fkey = str(floor)
@@ -797,8 +803,13 @@ def record_follower_interaction(uid, says, floor=0, player=0):
         print(f"[SERVICE-DBG] player tone '{tone}' -> {dims_summary(st)}")
         logrec("tone", uid=uid, tone=tone, player=player, floor=floor)
     if says:
-        st["events"].append('they said to you: "' + says[:60] + '"')
-        st["events"] = st["events"][-6:]
+        # ⚠ BOTH sides. Storing only the player's half meant a follower had no record of what
+        # IT had said, so it contradicted itself across turns -- the observed case was a rat
+        # that loved cheese and then did not eat cheese. The non-follower NPC path already
+        # stored both and was verified to hold the same answer under the same question twice;
+        # this is that fix applied to followers.
+        st["events"].append({"said": says[:80], "replied": (replied or "")[:FOLLOWER_REPLY_RECALL]})
+        st["events"] = st["events"][-FOLLOWER_EXCHANGE_MEMORY:]
 
 # ---- Priority-ordered lore retrieval -----------------------------------------
 
@@ -1527,13 +1538,30 @@ def _obedience_section(st):
                  "let the reply be a little too quick, a little too flat. Do NOT sound warm about it.\n")
     return base
 
+def _follower_memory_block(st):
+    """What was actually said, on both sides. Worded exactly like the NPC block, which is the
+    version that measured working: told merely to 'remember' an exchange the 8B paraphrases it
+    and drifts; told not to contradict itself, it holds the answer."""
+    lines = []
+    for e in st.get("events", [])[-FOLLOWER_EXCHANGES_SHOWN:]:
+        if not isinstance(e, dict):
+            continue          # a run that started before both sides were stored
+        if e.get("replied"):
+            lines.append(f'they said: "{e["said"]}" — you replied: "{e["replied"]}"')
+        else:
+            lines.append(f'they said: "{e["said"]}"')
+    if not lines:
+        return ""
+    return ("WHAT YOU ALREADY SAID TO THEM (stay consistent with this; do not contradict "
+            "yourself):\n" + _bullets(lines) + "\n")
+
 def _follower_sections(uid, race, floor, says, player=0, ident=None):
     """The relationship half of the prompt. Order matters: boon and secret rolls
     consume randomness, and the sections read as one escalating block."""
     race_l = race.lower()
     st = get_follower_state(uid, race, player)
-    mem = (" You remember: " + "; ".join(st["events"][-3:])) if st["events"] else ""
-    history = f"YOUR HISTORY WITH THIS ADVENTURER: {friendship_descriptor(st['friendship'])}{mem}\n"
+    history = f"YOUR HISTORY WITH THIS ADVENTURER: {friendship_descriptor(st['friendship'])}\n"
+    history += _follower_memory_block(st)
     relations = relationship_block(st) + disclosure_block(st)
     evlines = events_for_prompt(st)
     alleg = allegiance_section(st, says)
@@ -2252,7 +2280,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                self_chosen=(True if _own else None))
                     name = st.get("name", "")
                     herx_detect(uid, raw, speech, player)
-                    record_follower_interaction(uid, says, floor, player)
+                    record_follower_interaction(uid, says, floor, player, speech)
                     boon = LAST_BOON.pop(uid, "")
                     print(f"[SERVICE-DBG] follower {uid} (player{player}) {dims_summary(st)}")
                 secret = herx_secret_field()

@@ -1433,7 +1433,14 @@ is unchanged from the single-player path that already works. Untested in an actu
 
 **Known gaps:**
 - The **false secret has never been observed firing** — all test rolls landed non-spy. It's the one branch where a bug would be invisible.
-- **Chat history stores only the player's side**, so followers contradict themselves across turns (observed: a rat claimed to love cheese, then to not eat cheese). Storing both sides would fix it.
+- ~~Chat history stores only the player's side~~ **FIXED.** `record_follower_interaction` now
+  stores both halves and `_follower_memory_block` renders them under the NPC path's exact
+  wording — *"stay consistent with this; do not contradict yourself"*, which is the version that
+  measured working there. Verified: a human follower asked about their past four different ways
+  held "lived in Hamlet / worked in the mines as a laborer" every time. Bounded at 6 kept / 3
+  shown / 140 chars of reply so a long conversation cannot inflate the prompt, and old
+  string-format entries from a run already in flight are skipped rather than crashed on.
+  16 assertions in `test_memory.py`.
 - Grounding is only in the main `build_prompt` and `build_taunt_prompt`; ambient babble has none.
 - Prompt sizes vary wildly by race (652 rat → 3100 human) because book-lore injection is uneven. Thin races are where fabrication would reappear first.
 
