@@ -1118,6 +1118,7 @@ def reset_run():
     HERX_STATE.update({"revealed": False, "variant": None, "uid": 0, "pending": {},
                        "is_false": False, "player": 0})
     BOON_STATE["good_used"].clear()
+    BOON_STATE["map_used"].clear()
     SABOTAGE_STATE["used"] = False
     SABOTAGE_STATE["trap_floors"].clear()
     GUARD_STATE.update({"minotaur": False, "sokoban": False})
@@ -1504,7 +1505,18 @@ BOON_GOOD = [("POTION_HEALING", 1), ("POTION_EXTRAHEALING", 1), ("GEM_GARNET", 1
 BOON_TRAP_RACES = ("gnome", "automaton", "kobold", "goblin")
 # The one-good-item-per-run latch is PER PLAYER: joining a co-op party must not dilute
 # what your own follower is willing to give you. The Herx secret stays run-global.
-BOON_STATE = {"good_used": set()}   # set of player indices that have had their good item
+BOON_STATE = {"good_used": set(), "map_used": set()}   # per-player once-per-run latches
+
+# ⚠ A follower who wanders off and comes back knowing the floor. Gated on CURIOSITY, which is
+# otherwise the least-used dimension in the system -- nothing reads it but a behaviour line --
+# and which is exactly the trait of someone who goes and looks. Same move as giving trust a
+# purpose with the minotaur guard.
+#
+# Stronger than a scroll of magic mapping (that reveals 16+8*beatitude tiles; this reveals the
+# floor), so it is once per run per player, like the good item.
+BOON_MAP_MIN_CURIOSITY = 40
+BOON_MAP_MIN_FRIENDSHIP = 20
+BOON_MAP_CHANCE = 0.25
 LAST_BOON = {}   # uid -> "item:TYPE:N" or "traps:" pending delivery to C++
 LAST_SABOTAGE = {}   # uid -> "minotaur", pending delivery to C++
 
@@ -1534,6 +1546,14 @@ def boon_roll(st, floor, player=0):
             return ("info", "")
         it, ct = random.choice(BOON_MUNDANE)
         return ("item", "%s:%d" % (it, ct))
+    # The floor, mapped. Before the good item in priority: it is rarer and it is the better
+    # moment, and a follower who has been off exploring should not hand you bread instead.
+    if (player not in BOON_STATE["map_used"]
+            and st.get("curiosity", 0) >= BOON_MAP_MIN_CURIOSITY
+            and f >= BOON_MAP_MIN_FRIENDSHIP
+            and random.random() < BOON_MAP_CHANCE):
+        BOON_STATE["map_used"].add(player)
+        return ("map", "")
     # one genuinely good item per run, per player
     if player not in BOON_STATE["good_used"] and f >= 40 and random.random() < 0.20:
         BOON_STATE["good_used"].add(player)
@@ -1560,6 +1580,14 @@ def _boon_section(uid, st, race_l, floor, player=0):
         return ("UNPROMPTED: you decide to share something useful with them now, "
                 "unasked, because you have come to trust them. Work it naturally into your reply: "
                 + pick + "\n")
+    if kind == "map":
+        LAST_BOON[uid] = "map:"
+        logrec("boon", uid=uid, boon_kind="map")
+        # The engine fills the minimap in; the line only has to explain where they went.
+        return ("UNPROMPTED: you slipped away earlier and walked the whole of this floor, and "
+                "you have just finished describing the layout of it to them — every corridor, "
+                "every dead end. Mention it plainly, as a thing already done and already told. "
+                "Do NOT list directions or name rooms; they have it now.\n")
     if kind == "traps":
         LAST_BOON[uid] = "traps:"
         logrec("boon", uid=uid, boon_kind="traps")

@@ -820,6 +820,30 @@ Gating is unit-tested: silent for loyal/self_interested/fearful at any friendshi
 
 **Spies reveal FALSE weaknesses** from `HERX_FALSE_VARIANTS` (running water / silver / true name — all plausible undead lore, all wrong). Reported as `debuff 0`, so `initLich` applies nothing. Discovered through consequences, never announced — per the design doc's core rule.
 
+### The map boon: a follower who walked the floor
+
+A curious companion slips away, walks the whole level, and comes back having described it — the
+minimap fills in completely.
+
+⚠ **Gated on CURIOSITY**, which was otherwise the least-used dimension in the system: nothing
+read it but a single behaviour line. It is also exactly the trait of someone who goes and looks.
+Same move as giving trust a job with the minotaur guard. Curiosity ≥40, friendship ≥20, 25% when
+eligible, and it **outranks the good item** in the boon order — a follower who has been off
+exploring should not hand you bread instead.
+
+⚠ **Stronger than the scroll it resembles**, so it is **once per run per player**. Scroll of
+magic mapping reveals `16 + 8*beatitude` tiles from you (`item_usage_funcs.cpp:3906`); this
+reveals the floor. `radius == 0` means every tile (`maps.cpp:11002`).
+
+**No netcode needed.** `spell_magicMap` already sends an `MMAP` packet to a remote client itself
+(`magic.cpp:70`), so a co-op client's minimap fills in with nothing added by us — the same
+self-replication that made chat and speech bubbles free.
+
+The prompt line explains where they went and forbids reciting directions: the engine has already
+filled the map in, so a list of corridors would be noise on top of it.
+
+> *"We've been over this floor, Ada. I told you about the layout and what to expect."*
+
 ### Spy sabotage: calling the minotaur
 
 **The first thing a follower can do that actively spends the player's run against them.**
