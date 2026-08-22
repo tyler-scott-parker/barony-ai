@@ -1255,7 +1255,17 @@ SABOTAGE_MAX_FLOOR = 19              # betrayal, it is a mugging. And never on a
                                      # in Hell, or in the town.
 SABOTAGE_MIN_FRIENDSHIP = 15         # they have to be embedded first; a stranger sabotaging
                                      # you is not a betrayal either
-SABOTAGE_CHANCE = 0.12
+SABOTAGE_CHANCE = 0.12               # picks the MOMENT, not whether -- see below
+
+# ⚠ The per-reply chance is nearly meaningless on its own. An embedded spy gets roughly thirty
+# eligible replies across floors 5-19, so 12% per reply fires essentially always; measured, the
+# per-run rate tracked the 7% spy rate exactly, i.e. every spy sabotaged. Turning the chance
+# down would only move when it happens, not how often.
+#
+# So the real decision is made ONCE per spy, the first time one becomes eligible: is this
+# particular traitor a saboteur at all? Most are not -- they are there to watch and report.
+# That makes SABOTAGE_SPY_SHARE the honest knob, and the per-reply chance just staggers it.
+SABOTAGE_SPY_SHARE = 0.4
 
 # The tell. Chosen server-side, like the spy crack's concrete details and for the same measured
 # reason: left to invent one the 8B produces the same line every run. Each has to be innocuous
@@ -1282,6 +1292,14 @@ def sabotage_roll(st, floor):
     if not (SABOTAGE_MIN_FLOOR <= floor <= SABOTAGE_MAX_FLOOR):
         return None
     if st.get("friendship", 0) < SABOTAGE_MIN_FRIENDSHIP:
+        return None
+    # Decided once, on first eligibility, and remembered: most spies are watchers, not
+    # saboteurs. Rolling this per reply would make it certain (see SABOTAGE_SPY_SHARE).
+    if "saboteur" not in st:
+        st["saboteur"] = random.random() < SABOTAGE_SPY_SHARE
+        logrec("saboteur", uid=st.get("uid"), player=st.get("owner"),
+               saboteur=st["saboteur"] or None)
+    if not st["saboteur"]:
         return None
     if random.random() >= SABOTAGE_CHANCE:
         return None

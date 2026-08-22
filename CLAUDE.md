@@ -794,7 +794,27 @@ party including remote clients.
 | allegiance | `spy` only; never a summon or bot (a conjuration has no outside to signal to) |
 | floors | **5–19**. Not the opening mines, not a boss floor, not Hell, not the town |
 | friendship | ≥15 — they have to be embedded first; a stranger sabotaging you is not betrayal |
-| frequency | **once per run**, run-global like the Herx secret; 12% per eligible reply |
+| frequency | **once per run**, run-global (three spies still produce one sabotage) |
+| who | only ~40% of spies are saboteurs at all — decided **once**, on first eligibility |
+
+⚠ **The per-reply chance was nearly meaningless, and measuring said so.** An embedded spy gets
+roughly thirty eligible replies across floors 5–19, so 12% per reply fires essentially always —
+the measured per-run rate tracked the 7% spy rate *exactly*, i.e. every spy sabotaged. Turning the
+chance down would only have moved *when* it happened, not *how often*. The real decision is now
+made **once per spy** (`SABOTAGE_SPY_SHARE = 0.4`): most traitors are watchers, not saboteurs.
+That is the honest knob; the per-reply chance just staggers the moment.
+
+| followers recruited in a run | before | after |
+|---|---|---|
+| 1 | 7.1% | **2.6%** |
+| 3 | 19.1% | **8.0%** |
+| 5 | 29.7% | **12.6%** |
+
+⚠ **The engine keeps its own latch too** (`mymod_sabotageUsed`, cleared on `new_run`). The
+service's latch lives in RAM, so a host who restarts `service.py` mid-playthrough re-arms it —
+true of all run state, but this is the only thing that can actively cost the player the run.
+It also fails safe the other way: if a reply is lost between the roll and delivery, the sabotage
+is spent without happening.
 
 **The tell** is chosen server-side from `SABOTAGE_TELLS` — the spy-crack lesson again, since left
 to invent one the 8B repeats the same line every run. Each has to be innocuous in the moment and

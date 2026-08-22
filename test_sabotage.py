@@ -20,9 +20,13 @@ def spy(uid=1, alleg="spy", f=25, origin=""):
     return st
 
 def fires(st, floor, tries=4000):
-    S.SABOTAGE_STATE["used"] = False
+    """Does the GATE let this through at all? Clears the once-per-spy saboteur decision each
+    try as well as the run latch -- otherwise a spy that rolled 'watcher' once can never fire,
+    and this would be testing that decision rather than the gate. The saboteur share is
+    checked separately below."""
     for _ in range(tries):
         S.SABOTAGE_STATE["used"] = False
+        st.pop("saboteur", None)
         if S.sabotage_roll(st, floor): return True
     return False
 
@@ -63,6 +67,43 @@ ck("and not the crack", "not cracking" in sec)
 ck("there are several tells, so it is not the same line each run", len(S.SABOTAGE_TELLS) >= 5)
 ck("no tell hints at the minotaur",
    not any("minotaur" in t.lower() or "danger" in t.lower() for t in S.SABOTAGE_TELLS))
+
+# --- 4b. once per PLAYTHROUGH, not once per follower -----------------------------------
+# A party can hold several spies. The latch is run-global so three of them still produce one
+# sabotage, not three.
+S.reset_run()
+party = []
+for i in range(3):
+    st = S.get_follower_state(2000 + i, "human", 0)
+    st.update(allegiance="spy", friendship=30, saboteur=True)
+    party.append(st)
+fired = 0
+for floor in range(5, 20):
+    for st in party:
+        for _ in range(200):
+            if S.sabotage_roll(st, floor): fired += 1
+ck("three spies over fifteen floors still fire it once", fired == 1, fired)
+S.reset_run()
+ck("and a new playthrough re-arms it", not S.SABOTAGE_STATE["used"])
+
+# --- 4c. most spies are watchers, not saboteurs ----------------------------------------
+# ⚠ The per-reply chance is nearly meaningless: an embedded spy gets ~30 eligible replies, so
+# 12% per reply fires essentially always. Measured, the per-run rate tracked the 7% spy rate
+# exactly -- every spy sabotaged. The decision is made once per spy instead.
+S.reset_run()
+saboteurs = 0
+for i in range(600):
+    S.SABOTAGE_STATE["used"] = False
+    S.follower_state.pop(3000 + i, None)
+    st = S.get_follower_state(3000 + i, "human", 0)
+    st.update(allegiance="spy", friendship=30)
+    for _ in range(80):
+        if S.sabotage_roll(st, 10): break
+    if st.get("saboteur"): saboteurs += 1
+share = saboteurs / 600
+ck("only a minority of spies are saboteurs", 0.30 < share < 0.50, "%.2f" % share)
+st = S.get_follower_state(3000, "human", 0)
+ck("and the decision is remembered, not re-rolled", "saboteur" in st)
 
 # --- 5. it does not stack with the other unprompted behaviours -------------------------
 S.reset_run()
