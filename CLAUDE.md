@@ -711,6 +711,53 @@ follower's state, so the friendship-50 / four-fights gate can be reached without
 Off unless the env var is set, and the service binds loopback only. This is the only practical
 way to exercise the Herx arc; keep it.
 
+### The fearful allegiance (8%)
+
+⚠ **`self_interested` and `fearful` had one prompt line each and no mechanics** — 23% of recruits
+with no behaviour of their own, against 7% spies with five. This is the first half of closing
+that.
+
+**The shape: a liability in a fight who is the reason you survive the floor.** Each behaviour is
+a different face of the same nerves.
+
+| | |
+|---|---|
+| **They break under fire** | `EFF_COWARDICE` at 50% HP *while fighting*. The game's own effect — `shouldRetreat()` honours it (`entity.cpp:25937`) so they run, and it docks STR and CON so they fight worse while panicking. 8s, then a 30s cooldown so they can rally. |
+| **Frightened, not bitter** | `ALLEGIANCE_FEEL` scales fear ×1.5 and resentment ×0.5. **Increases only** — reassurance still calms them at full rate, or they could never be talked down. |
+| **They will not go deeper** | Below floor 15 with trust <45 they refuse `FOLLOW` outright. |
+| **⚠ But they notice things first** | Trust gate for the minotaur guard drops 40 → **20**, chance 70% → **90%**. |
+
+That last row is the point of the whole allegiance. The coward is the one who saves you, because
+they were the one who wasn't relaxed — which is what makes them worth keeping rather than
+dismissing.
+
+⚠ **The refusal names the required speech act, not the mood.** "You are frightened" produced a
+follower who agreed cheerfully and *mentioned* being scared — the same failure the spy crack and
+the hard limits both taught. It forbids agreeing cheerfully and *"if you insist"* by name, and
+lands **after** `_obedience_section`, which is telling them to carry out orders.
+
+Measured on floor 17, same order to each:
+
+| | result |
+|---|---|
+| fearful, trust 20 | **4/4 refused**, action NONE |
+| loyal control, trust 20 | **3/3 followed** |
+| fearful, trust 20, reassured in the same message | **3/4 went**, reluctantly |
+| fearful, trust 60 (earned) | **3/3 went** willingly |
+
+That progression is the conversation system doing real mechanical work: fear is real, talking
+them down works, and earned trust removes it entirely.
+
+⚠ **Allegiance stays server-side; only `traits` crosses to the engine.** The engine has no
+business knowing who the spy is and its log is visible, so the recruitment response carries
+`"fearful"` and nothing else — sent because cowardice has to trigger on HP, which only the engine
+sees.
+
+**Not built — `self_interested` (15%).** ⚠ **Do NOT give them the loot-grabbing behaviour**
+(`monsterAllyPickupItems`), tempting as it is: items are one of the main ways the player
+progresses, and a follower hoovering up the floor takes that away rather than colouring it.
+Their price should be paid in favours and information, not in your gear.
+
 ### Allegiance & spies
 Weighted roll at recruitment: **loyal 70 / self_interested 15 / fearful 8 / spy 7**. Never shown to the player. Spies get a motive and behavioral tells: deflect on personal history, over-interest in the player's gear and plans, hesitation at Herx's name. `allegiance_section(st, says)` detects probing questions and sharpens the tell.
 

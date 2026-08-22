@@ -445,8 +445,7 @@ def allegiance_section(st, says=""):
         return ("HIDDEN: your own survival and gain come first. You help while it suits you, and you are "
                 "candid about wanting something in return.\n")
     if a == "fearful":
-        return ("HIDDEN: you are frightened of what waits below and of powers stronger than this adventurer. "
-                "It shows as hedging and reluctance when danger is discussed.\n")
+        return ""      # handled by _fearful_section, which also knows the floor
     if a != "spy":
         return ""
     low = (says or "").lower()
@@ -550,11 +549,23 @@ def dims_init(st):
         st.setdefault(d, DIMENSION_START.get(d, 0))
     return st
 
+# ⚠ A fearful follower is frightened, not bitter. Same events, different shape: fear lands
+# harder and resentment barely sticks, so a bad run makes them jumpy rather than hostile --
+# which is what keeps them distinct from a follower you have simply mistreated.
+ALLEGIANCE_FEEL = {
+    "fearful": {"fear": 1.5, "resentment": 0.5},
+}
+
 def adjust(st, **deltas):
     """Move relationship dimensions, clamped to 0..100. The only way any of them change."""
+    feel = ALLEGIANCE_FEEL.get(st.get("allegiance", ""), {})
     for d, v in deltas.items():
         if d not in DIMENSIONS:
             raise KeyError("unknown relationship dimension: %s" % d)
+        # Scale only INCREASES: a fearful follower is quicker to frighten, but reassurance
+        # should still calm them at the normal rate rather than being blunted too.
+        if v > 0 and d in feel:
+            v = int(round(v * feel[d])) or (1 if v > 0 else 0)
         st[d] = max(0, min(100, st.get(d, 0) + v))
     return st
 
@@ -1384,6 +1395,8 @@ def sabotage_section(tell):
 # notices.
 GUARD_MIN_TRUST = 40
 GUARD_CHANCE    = 0.7           # even the right companion can miss it
+GUARD_FEARFUL_TRUST  = 20       # a jumpy follower notices sooner and on thinner acquaintance
+GUARD_FEARFUL_CHANCE = 0.9
 
 # Solving the boulder puzzle for you. Gated on friendship rather than trust: this is a favour,
 # not a matter of judgement -- they are doing you a tedious errand because they like you.
@@ -1404,7 +1417,16 @@ def favour_roll(kind, st):
         return False            # a conjuration has no history here, and no hands to spare
     if kind == "minotaur":
         # Trust, not friendship: not "do they like you" but "will they act for you".
-        if st.get("trust", 0) < GUARD_MIN_TRUST or random.random() >= GUARD_CHANCE:
+        #
+        # ⚠ A FEARFUL follower is better at this, and that inversion is the point of the
+        # allegiance. They are a liability in a fight and the reason you survive the floor,
+        # because they are the one who was not relaxed. It is what makes them worth keeping.
+        need = GUARD_MIN_TRUST
+        chance = GUARD_CHANCE
+        if st.get("allegiance") == "fearful":
+            need = GUARD_FEARFUL_TRUST
+            chance = GUARD_FEARFUL_CHANCE
+        if st.get("trust", 0) < need or random.random() >= chance:
             return False
     elif kind == "sokoban":
         if (st.get("friendship", 0) < SOKOBAN_MIN_FRIENDSHIP
@@ -1784,6 +1806,25 @@ def _name_section(st):
             f"not invent a different name and do not add a title or surname. IMPORTANT: when you "
             f"tell them, you MUST also put ONLY {nm} in the \"name\" field of your JSON.\n")
 
+# Below this they are simply somewhere they never agreed to be.
+FEARFUL_DEEP_FLOOR = 15
+
+def _fearful_section(st, floor):
+    """⚠ Names the refusal as a required speech act, not a mood. 'You are frightened' produced
+    a follower who said yes cheerfully and mentioned being scared -- the same failure the spy
+    crack and the hard limits both taught. The route that must be forbidden is agreeing."""
+    if st.get("allegiance") != "fearful":
+        return ""
+    out = ("HIDDEN: you are frightened of what waits below and of powers stronger than this "
+           "adventurer. It shows as hedging and reluctance when danger is discussed.\n")
+    if floor >= FEARFUL_DEEP_FLOOR and st.get("trust", 0) < 45:
+        out += ("YOU DO NOT WANT TO BE THIS DEEP. If they ask you to go further down, to press "
+                "on, or to lead the way, you say NO and you mean it — say plainly that you want "
+                "to turn back. Agreeing cheerfully and then mentioning you are scared is WRONG; "
+                "so is 'if you insist'. You can be talked round, but they have to actually "
+                "reassure you first, in this conversation.\n")
+    return out
+
 def _obedience_section(st):
     """Willingness to act on an order. Friendship alone was never the right input: someone can
     obey out of respect without warmth, or out of fear without loyalty, and resentment eats
@@ -1865,7 +1906,7 @@ def _follower_sections(uid, race, floor, says, player=0, ident=None):
     # orders, and at 8B whatever follows an instruction competes with it. An emplacement told
     # to obey and then told it cannot move gets the order of those two the right way round.
     return (history + memory + relations + _name_section(st) + secret + boon + identify + alleg
-            + _obedience_section(st) + fixed + sabotage)
+            + _obedience_section(st) + _fearful_section(st, floor) + fixed + sabotage)
 
 def build_prompt(race, floor, says="", uid=0, player=0, player_name="", party=1, map_name="",
                  ident=None):
@@ -2492,7 +2533,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 with STATE_LOCK:
                     _fs = get_follower_state(uid, race, player)
                     _fs.update(data["force"])
-                return self._send_json({"ok": True})
+                # Traits the ENGINE has to act on, and only those. Allegiance itself stays
+                # server-side -- the engine has no business knowing who the spy is, and its logs
+                # are visible. "fearful" is sent because cowardice has to trigger on HP, which
+                # only the engine sees.
+                traits = ""
+                if uid:
+                    _st = follower_state.get(uid, {})
+                    if _st.get("allegiance") == "fearful":
+                        traits = "fearful"
+                return self._send_json({"ok": True, "traits": traits})
 
             # Comprehension filter: if the player can't understand this speaker, return noises.
             # (Applies to overheard/ambient + taunts; /aicommand sends no player_race so passes through.)
