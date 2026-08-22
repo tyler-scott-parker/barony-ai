@@ -14,6 +14,7 @@ def ck(label, cond, extra=""):
 
 def spy(uid=1, alleg="spy", f=25, origin=""):
     S.SABOTAGE_STATE["used"] = False
+    S.SABOTAGE_STATE["trap_floors"].clear()
     S.follower_state.pop(uid, None)
     st = S.get_follower_state(uid, "human", 0, origin, origin and "skeleton knight")
     st.update(allegiance=alleg, friendship=f)
@@ -34,11 +35,15 @@ def fires(st, floor, tries=4000):
 ck("a spy can", fires(spy(), 10))
 for a in ("loyal", "self_interested", "fearful", "bound", "machine"):
     ck("a %s never does" % a, not fires(spy(2, a), 10))
+# The saboteur decision is sticky (see 4c), so clear it between tries here too -- otherwise
+# this tests that decision rather than the once-per-run latch it is aiming at.
 st = spy(3)
-S.SABOTAGE_STATE["used"] = False
-first = any(S.sabotage_roll(st, 10) for _ in range(4000))
+first = fires(st, 10)
 ck("it fires at all", first)
-ck("and never twice in a run", not any(S.sabotage_roll(st, 10) for _ in range(4000)))
+S.SABOTAGE_STATE["used"] = True                 # pretend the minotaur is spent
+S.SABOTAGE_STATE["trap_floors"] = {5, 6, 7}     # and the trap budget too
+ck("with both budgets spent, nothing fires",
+   not any(S.sabotage_roll(st, 10) for _ in range(2000)))
 S.reset_run()
 ck("a new run re-arms it", not S.SABOTAGE_STATE["used"])
 
@@ -77,12 +82,18 @@ for i in range(3):
     st = S.get_follower_state(2000 + i, "human", 0)
     st.update(allegiance="spy", friendship=30, saboteur=True)
     party.append(st)
-fired = 0
+fired = {"minotaur": 0, "traps": 0}
 for floor in range(5, 20):
     for st in party:
         for _ in range(200):
-            if S.sabotage_roll(st, floor): fired += 1
-ck("three spies over fifteen floors still fire it once", fired == 1, fired)
+            r = S.sabotage_roll(st, floor)
+            if r: fired[r[0]] += 1
+# The minotaur is the once-per-RUN one. Traps have their own per-floor budget, so the two are
+# counted separately -- this used to assert on the total, before there were two kinds.
+ck("three spies over fifteen floors still call the minotaur once",
+   fired["minotaur"] == 1, fired)
+ck("and rig no more floors than the cap",
+   fired["traps"] <= S.SABOTAGE_TRAPS_PER_RUN, fired)
 S.reset_run()
 ck("and a new playthrough re-arms it", not S.SABOTAGE_STATE["used"])
 
@@ -104,6 +115,35 @@ share = saboteurs / 600
 ck("only a minority of spies are saboteurs", 0.30 < share < 0.50, "%.2f" % share)
 st = S.get_follower_state(3000, "human", 0)
 ck("and the decision is remembered, not re-rolled", "saboteur" in st)
+
+# --- 4d. two kinds, with separate budgets ----------------------------------------------
+# The minotaur can cost you the run; rigged traps cost a health bar. They should not compete
+# for one slot, and the caps are what keep the milder one from becoming constant.
+S.reset_run()
+st = S.get_follower_state(4000, "human", 0)
+st.update(allegiance="spy", friendship=30, saboteur=True)
+kinds, floors_rigged = set(), set()
+for floor in range(5, 20):
+    for _ in range(300):
+        r = S.sabotage_roll(st, floor)
+        if r:
+            kinds.add(r[0])
+            if r[0] == "traps": floors_rigged.add(floor)
+ck("the roll returns (kind, tell)", all(isinstance(k, str) for k in kinds), kinds)
+ck("both kinds can happen", kinds == {"minotaur", "traps"}, kinds)
+ck("the minotaur is still once per run", S.SABOTAGE_STATE["used"])
+ck("traps are capped per run", len(floors_rigged) <= S.SABOTAGE_TRAPS_PER_RUN, floors_rigged)
+ck("and never twice on the same floor",
+   len(floors_rigged) == len(S.SABOTAGE_STATE["trap_floors"]), S.SABOTAGE_STATE["trap_floors"])
+S.reset_run()
+ck("a new run clears both budgets",
+   not S.SABOTAGE_STATE["used"] and not S.SABOTAGE_STATE["trap_floors"])
+
+# The tell must not give away WHICH kind it is -- the player should not be able to tell a
+# rigged floor from a called minotaur by what the spy said.
+ck("one tell pool, so the kind is not readable from the line",
+   not any("trap" in t.lower() or "boulder" in t.lower() or "arrow" in t.lower()
+           for t in S.SABOTAGE_TELLS))
 
 # --- 5. it does not stack with the other unprompted behaviours -------------------------
 S.reset_run()

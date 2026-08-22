@@ -753,6 +753,42 @@ Gating is unit-tested: silent for loyal/self_interested/fearful at any friendshi
 ### Spy sabotage: calling the minotaur
 
 **The first thing a follower can do that actively spends the player's run against them.**
+Two kinds, with **separate budgets**, because they are not the same size of event: the minotaur
+can cost you the run, rigged traps cost you a health bar.
+
+| kind | budget | what it does |
+|---|---|---|
+| `minotaur` | once per **run** | starts the countdown; see below |
+| `traps` | once per **floor**, 3 per run | every boulder and arrow trap on the floor fires **twice** |
+
+**Rigged traps** re-fire ~2s after they go off — a second boulder out of the same hole once you
+have stepped clear and stopped worrying about it. No new firing code: `skill[28]` is Barony's
+power state (0 = not powerable, 1 = unpowered, 2 = powered, `mechanisms.cpp:876`), and powering a
+trap directly is what `mechanisms.cpp:1293` already does. The mod clears the trap's fired flag
+(`skill[0]` — a 0/1 flag for boulders, an even/odd counter for the arrow trap, whose `skill[3]`
+refire cooldown is cleared too), powers it for one frame, and the trap's own act function spawns
+exactly what it would have spawned. `skill[28]` is then **restored to what it was**, so the
+circuit is left as found.
+
+⚠ **Boulders and arrows only.** Magic and spear traps (`actTrap`/`actTrapPermanent`) already fire
+on a repeating cycle, so "again" means nothing for them. Already-spent traps are not re-armed
+either — the edge detection only fires on a trap going off *after* the rigging, so the design is
+"the next trap you set off fires twice", not "a boulder rolls at nobody".
+
+Rigging is **per floor and does not follow you down** — `mymod_rigged` is cleared on a level
+change and on `new_run`.
+
+Measured with realistic allegiance rolls (7% spy, 40% of those saboteurs):
+
+| followers recruited | a minotaur | any rigged floor | floors rigged, avg |
+|---|---|---|---|
+| 1 | 2.5% | 2.8% | 0.08 |
+| 3 | 7.0% | 7.5% | 0.21 |
+| 5 | 12.0% | 12.9% | 0.35 |
+
+⚠ **One tell pool for both kinds**, deliberately: the player must not be able to read which
+sabotage happened from what the spy said.
+
 Everything else is additive — gifts, information, trap disarms — and the false Herx secret only
 misleads. This takes.
 

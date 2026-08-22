@@ -1096,6 +1096,7 @@ def reset_run():
                        "is_false": False, "player": 0})
     BOON_STATE["good_used"].clear()
     SABOTAGE_STATE["used"] = False
+    SABOTAGE_STATE["trap_floors"].clear()
     LAST_BOON.clear()
     npc_state.clear()
     PERSISTENT_IDENTITY.clear()
@@ -1249,7 +1250,15 @@ def herx_detect(uid, raw, speech, player=0):
 # (actplayer.cpp:8089), so nothing announces it. That silence is the point -- the consequence
 # arrives two and a half minutes later and the player has to work backwards.
 
-SABOTAGE_STATE = {"used": False}     # once per run, run-global like the Herx secret
+# Two kinds, with separate budgets. They are not the same size of event and should not compete
+# for one slot: the minotaur can cost you the run; rigged traps cost you a health bar and teach
+# you to distrust a floor.
+#
+#   minotaur -- once per RUN, run-global.
+#   traps    -- once per FLOOR, capped per run. A rigged trap fires TWICE: a second boulder from
+#               the same hole a couple of seconds after the first, once you have stepped clear.
+SABOTAGE_STATE = {"used": False, "trap_floors": set()}
+SABOTAGE_TRAPS_PER_RUN = 3
 SABOTAGE_MIN_FLOOR = 5               # not the opening mines: a minotaur at level 2 is not a
 SABOTAGE_MAX_FLOOR = 19              # betrayal, it is a mugging. And never on a boss floor,
                                      # in Hell, or in the town.
@@ -1281,10 +1290,10 @@ SABOTAGE_TELLS = [
 ]
 
 def sabotage_roll(st, floor):
-    """Decide whether this spy calls the minotaur down on the party. Server-side and once per
-    run; the model is only told to say the tell, never that it is doing anything."""
-    if SABOTAGE_STATE["used"]:
-        return None
+    """Decide whether this spy sabotages, and how. Server-side; the model is only ever told to
+    say the tell, never that it is doing anything. Returns (kind, tell) or None."""
+    if SABOTAGE_STATE["used"] and len(SABOTAGE_STATE["trap_floors"]) >= SABOTAGE_TRAPS_PER_RUN:
+        return None      # both budgets spent
     if st.get("allegiance") != "spy":
         return None
     if st.get("origin") in NO_SECRET_ORIGINS:      # a conjuration has no outside to signal to
@@ -1303,8 +1312,21 @@ def sabotage_roll(st, floor):
         return None
     if random.random() >= SABOTAGE_CHANCE:
         return None
-    SABOTAGE_STATE["used"] = True
-    return random.choice(SABOTAGE_TELLS)
+    # Which one? The minotaur is the once-per-run headline; rigging traps is the everyday
+    # version and carries the roll whenever the big one is spent or this floor is already
+    # rigged. Returns (kind, tell).
+    floors = SABOTAGE_STATE["trap_floors"]
+    can_traps = floor not in floors and len(floors) < SABOTAGE_TRAPS_PER_RUN
+    can_mino = not SABOTAGE_STATE["used"]
+    if can_mino and (not can_traps or random.random() < 0.35):
+        SABOTAGE_STATE["used"] = True
+        kind = "minotaur"
+    elif can_traps:
+        floors.add(floor)
+        kind = "traps"
+    else:
+        return None
+    return kind, random.choice(SABOTAGE_TELLS)
 
 def sabotage_section(tell):
     """⚠ Names what NOT to do, because everything else in this prompt pushes the other way.
@@ -1700,15 +1722,16 @@ def _follower_sections(uid, race, floor, says, player=0, ident=None):
     # visible strain; the tell only works if it sounds like nothing.
     sabotage = ""
     if not secret and not ident:
-        tell = sabotage_roll(st, floor)
-        if tell:
+        rolled = sabotage_roll(st, floor)
+        if rolled:
+            kind, tell = rolled
             sabotage = sabotage_section(tell)
-            LAST_SABOTAGE[uid] = "minotaur"
-            print(f"[SERVICE-DBG] SABOTAGE: spy {uid} calls the minotaur on floor {floor}")
+            LAST_SABOTAGE[uid] = kind
+            print(f"[SERVICE-DBG] SABOTAGE ({kind}): spy {uid} on floor {floor}")
             # NOTE: not kind= -- logrec's first positional parameter is named `kind`, so a
             # kind= keyword collides and throws. It would have thrown the first time this
             # ever fired in a real run.
-            logrec("sabotage", uid=uid, player=player, floor=floor, what="minotaur",
+            logrec("sabotage", uid=uid, player=player, floor=floor, what=kind,
                    race=race, tell=tell)
     memory = ("WHAT YOU REMEMBER (things that actually happened):\n" + _bullets(evlines) + "\n") if evlines else ""
     fixed = _emplacement_section(race_l)
