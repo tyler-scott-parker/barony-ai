@@ -85,6 +85,36 @@ S.reset_run()
 seen = {S.reserve_name("duck") for _ in range(len(pool))}
 ck("exhausted pool stays unique within the run", len(seen) == len(pool), len(seen))
 
+# 7b. recency, and what happens once every name really is spent
+S.reset_run(); S._NAME_HISTORY.clear(); S._NAMES_TAKEN.clear()
+S.commit_name("Alpha"); S.commit_name("Beta"); S.commit_name("Gamma")
+ck("history is oldest-first", S._NAME_HISTORY == ["Alpha", "Beta", "Gamma"], S._NAME_HISTORY)
+S.commit_name("Alpha")
+# Without this the last-resort tier reads Alpha as permanently the oldest and hands it back
+# every single run; measured, the gap between repeats collapsed to 1.
+ck("meeting a name again moves it to the END",
+   S._NAME_HISTORY == ["Beta", "Gamma", "Alpha"], S._NAME_HISTORY)
+ck("and does not duplicate it", len(S._NAME_HISTORY) == 3)
+
+S.reset_run()
+_pool = S._name_pool("duck")
+for _n in _pool:                      # every reachable duck name already met...
+    S.commit_name(_n)
+_oldest = next(n for n in S._NAME_HISTORY if n in _pool)
+S.reset_run()
+ck("a fully spent pool returns the name seen LONGEST ago",
+   S.reserve_name("duck") == _oldest, _oldest)
+
+# 7c. the validator exercises every route the model can actually use
+import io, contextlib
+S.FOLLOWER_NAMES["races"]["duck"].append("Zx\u0438")   # unmatchable by the speech patterns
+_buf = io.StringIO()
+with contextlib.redirect_stdout(_buf):
+    S.name_report()
+ck("a name only the JSON route could return is REJECTED",
+   "NOT EXTRACTABLE" in _buf.getvalue(), _buf.getvalue()[-90:])
+S.FOLLOWER_NAMES["races"]["duck"].pop()
+
 # 8. unknown race falls back to the default list, not to nothing
 ck("unknown race -> default pool", S.reserve_name("gelatinous archivist") in S.FOLLOWER_NAMES["default"])
 ck("multi-word race resolves", len(S._name_pool("crystal golem")) == len(S._name_pool("crystal_golem")))

@@ -524,7 +524,7 @@ names like `Zx'thal` exist, so this was quietly costing both systems.
 Order is unchanged and matters: JSON field → introducer patterns → bare reply. 17/17 on a table
 built from real session strings, negatives included.
 
-**Names are PRE-CACHED server-side, not invented by the model** (`follower_names.json`, 1432
+**Names are PRE-CACHED server-side, not invented by the model** (`follower_names.json`, 4153
 names). Asked to make one up, the 8B draws from a handful — the same names kept reappearing
 across separate playthroughs. So the service reserves a name when the follower is created and
 the nudge names it explicitly (*"Your name is Skarn … use EXACTLY that name"*); the model only
@@ -542,6 +542,36 @@ the same reason: one literal choice left to the 8B comes back canned.
   — it is per-player state. Env: `BARONY_AI_NAMEHIST`, `BARONY_AI_NAMEHIST_MAX`.
 - Constraints weaken in a fixed order when a pool runs dry: cross-run repetition is conceded
   **before** within-run repetition — two followers sharing a name in one party is worse.
+
+⚠ **The total was never the binding constraint — the REACHABLE pool for a favoured species is.**
+Because lookup is tiered, a player who mostly recruits goblins draws from goblin + humanoid +
+default, not from all 4153. Simulated at the original sizes (4 named followers per run, half of
+them goblins): a goblin got a **non-goblin name at run 21**, and a name **repeated at run 61** —
+both far sooner than "1432 names" suggests. Measure the reachable pool, not the file.
+
+| | before | after |
+|---|---|---|
+| goblin race tier | 40 | **106** |
+| reachable pool for a goblin | 124 | **319** |
+| goblin pool runs dry | run 21 | **run 56** |
+| first repeated name | run 61 | **run 157** |
+| worst gap between repeats (600-run stress) | — | **43 runs** |
+
+`NAME_HISTORY_MAX` went 400 → **2000** for the same reason: a history shorter than the reachable
+pool becomes the binding constraint itself.
+
+⚠ **Once every name really is spent, hand back the one seen LONGEST ago.** The last-resort tier
+now sorts by position in `_NAME_HISTORY`, which is oldest-first. This needed a matching fix in
+`commit_name`: a name met *again* must move to the END of history, not keep its original index —
+otherwise it is permanently "the oldest" and comes back every single run. Measured, that bug took
+the gap between repeats down to **1 run** before the recency fix took it to 43.
+
+⚠ **The validator was only testing the most permissive route.** `name_report` round-tripped each
+name through the JSON `"name"` field alone, whose regex is `"name"\s*:\s*"([^"]{1,40})"` — and
+`[^"]` accepts anything that is not a quote. Two names with Cyrillic letters in them passed while
+being unmatchable by the speech patterns, which are the load-bearing ones (the 8B reliably *says*
+the name and omits the field). It now round-trips all three routes: JSON field, introducer
+pattern, and bare reply.
 
 ⚠ **The reserved name appearing verbatim in the reply is itself a reveal.** `extract_name`'s
 patterns only catch phrasings they know; here we know the exact string to look for. That match is

@@ -1268,7 +1268,12 @@ def _secret_section(uid, st, race, says):
 FOLLOWER_NAMES    = _load_json("follower_names.json")
 NAME_HISTORY_PATH = os.environ.get("BARONY_AI_NAMEHIST",
                                    os.path.join(BASE_DIR, "name_history.json"))
-NAME_HISTORY_MAX  = int(os.environ.get("BARONY_AI_NAMEHIST_MAX", "400"))
+# Sized against the pools, not picked round. A favoured species has ~250 reachable names
+# (its own tier plus its group plus the default list), and a run names a handful of
+# followers -- so a history shorter than the reachable pool would become the binding
+# constraint and hand back a name the player still remembers. 2000 covers hundreds of runs
+# and costs about 30 KB of JSON.
+NAME_HISTORY_MAX  = int(os.environ.get("BARONY_AI_NAMEHIST_MAX", "2000"))
 
 _NAME_HISTORY = []      # names revealed in past runs, oldest first -- persisted
 _NAMES_TAKEN  = set()   # lowercased, reserved this process whether revealed or not
@@ -1337,7 +1342,7 @@ def reserve_name(race):
         return ""
     with _NAME_LOCK:
         recent = {n.lower() for n in _NAME_HISTORY}
-        cand = []
+        cand, exhausted = [], False
         for keep in (lambda n: n.lower() not in _NAMES_TAKEN and n.lower() not in recent,
                      lambda n: n.lower() not in _NAMES_TAKEN,
                      lambda n: True):
@@ -1347,6 +1352,15 @@ def reserve_name(race):
                     break
             if cand:
                 break
+            exhausted = True
+        if exhausted and len(cand) > 1:
+            # Every constraint has been dropped, so SOME name must come back twice. Hand back
+            # the one seen longest ago rather than a random one: _NAME_HISTORY is oldest-first,
+            # so its index is exactly "how long since the player met this name". Turns an
+            # arbitrary repeat into the most forgettable one available.
+            order = {n.lower(): i for i, n in enumerate(_NAME_HISTORY)}
+            oldest = min(order.get(n.lower(), -1) for n in cand)
+            cand = [n for n in cand if order.get(n.lower(), -1) == oldest]
         pick = random.choice(cand)
         _NAMES_TAKEN.add(pick.lower())
         return pick
@@ -1365,8 +1379,11 @@ def commit_name(name):
     with _NAME_LOCK:
         low = name.lower()
         _NAMES_TAKEN.add(low)
-        if low in {n.lower() for n in _NAME_HISTORY}:
-            return
+        # ⚠ A name met AGAIN moves to the END, it does not keep its old place. History order is
+        # read as recency by reserve_name's last-resort tier, so leaving a re-used name at its
+        # original index makes it permanently "the oldest" -- and it then comes back every
+        # single run. Measured: the gap between repeats was 1 run until this moved.
+        _NAME_HISTORY[:] = [n for n in _NAME_HISTORY if n.lower() != low]
         _NAME_HISTORY.append(name)
         del _NAME_HISTORY[:-NAME_HISTORY_MAX]
         _save_name_history()
@@ -1410,8 +1427,16 @@ def name_report():
                     dupes.append(f"{src}:{key}:{n}")
                 seen.add(n.lower())
                 allnames.add(n)
-                # round-trip: the model says exactly this, we must get exactly this back
-                if extract_name('{"name": "%s"}' % n, n, "what is your name?") != n:
+                # Round-trip through ALL THREE routes the model can actually use, not just the
+                # JSON field. ⚠ The field route alone is far too permissive -- its regex is
+                # `"name"\s*:\s*"([^"]{1,40})"`, and `[^"]` accepts anything that is not a
+                # quote, so two names with Cyrillic letters in them passed this check while
+                # being unmatchable by the speech patterns. CLAUDE.md notes the 8B reliably
+                # SAYS the name and omits the field, so the speech routes are the load-bearing
+                # ones and they are the ones that must be tested.
+                if (extract_name('{"name": "%s"}' % n, n, "what is your name?") != n
+                        or extract_name("{}", "My name is %s." % n, "") != n
+                        or extract_name("{}", "%s." % n, "what is your name?") != n):
                     bad.append(f"{src}:{key}:{n}")
     for r in races + ["nonexistent_dlc_race"]:
         pool = _name_pool(r)
