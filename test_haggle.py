@@ -3,7 +3,9 @@ import os, sys, tempfile
 _tmp = tempfile.mkdtemp()
 os.environ["BARONY_AI_LOGDIR"] = _tmp
 os.environ["BARONY_AI_NAMEHIST"] = os.path.join(_tmp, "n.json")
-sys.path.insert(0, "/home/tyler/barony-ai")
+# Import the service from beside this file, not from a path baked in at authoring
+# time -- these tests should run from a clone anywhere.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import service as S
 
 fails = []
