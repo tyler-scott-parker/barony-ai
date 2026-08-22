@@ -39,9 +39,10 @@ Fetch upstream with `git fetch origin`; push your work with `git push mine mymod
 | `files.cpp` | `new_run` event in `physfsLoadMapFile` at `levelToLoad <= 1`; plus a `__attribute__((weak))` `mymod_recordEvent` stub | The weak stub exists because the **editor** target compiles `files.cpp` without the mod and would otherwise fail to link |
 | `monster_lich.cpp` | Herx debuff block after `my->setHardcoreStats(*myStats)` | inside the `!MONSTER_INIT` guard, so it can't double-apply |
 | `consolecommand.cpp` | `/aicommand`, `/aiserver`, `/aitest` + `#include "../mymod/mymod.hpp"` | commands legitimately belong here |
-| `net.cpp` | `{'MYAI'}`, `{'MYID'}` in `serverPacketHandlers`; `{'MYNM'}`, `{'MYSH'}`, `{'MYIV'}` in `clientPacketHandlers` + `#include "mymod/mymod.hpp"` | the five mod packets. The tables are file-`static`, so registration cannot happen from `mymod.cpp` |
+| `net.cpp` | `{'MYAI'}`, `{'MYID'}` in `serverPacketHandlers`; `{'MYNM'}`, `{'MYSH'}`, `{'MYIV'}`, `{'MYFR'}` in `clientPacketHandlers` + `#include "mymod/mymod.hpp"` | the six mod packets. The tables are file-`static`, so registration cannot happen from `mymod.cpp` |
 | `actmonster.cpp` | `mymod_npcEngage()` at the top of `handleMonsterChatter` (~12216) | clicking a talking NPC. **Falls through to the vanilla canned line when it returns false**, so an NPC is never mute if the service is down |
 | `shops.cpp` | `mymod_npcEngage()` at the end of `startTradingServer` | merchant greets on shop open. At the END of the function on purpose — the local-player and remote-client branches both flow through it |
+| `player.cpp` | `everybodyfriendly || intro` early-out at the top of `monsterIsFriendlyForTooltip` (~3367) | **the other half of `MYFR`** — without it a client receives the flag and still ignores it, because the `checkEnemy` shortcut that reads it is wrapped in `if (multiplayer != CLIENT)`. Mirrors `checkFriend`/`checkEnemy` exactly |
 
 ## Build & run
 
@@ -77,6 +78,76 @@ defaults to the hardcoded Steam path — that default is the remaining portabili
 `BARONY_AI_TTS` (**default `0`**), `BARONY_AI_TTSDIR`, `BARONY_AI_TTSQUEUE`.
 
 In-game test harness: `/enablecheats` → `/summonall` → `/friendly`, then interact-recruit.
+⚠ **`/friendly` did not work for co-op clients until the `MYFR` packet** — see Multiplayer below.
+For most of this project the harness was therefore single-player-only without anyone noticing.
+
+### The DLC build (Steamworks) — separate from the mod-testing build
+
+Barony's DLC is **entitlement-only**: the content ships in the base depot and three bools gate it
+(`menu.cpp:277-279`). Evidence — the Steam app manifest installs one depot (371973, 1.35 GB) and
+nothing else, and the GOG unlock mechanism is a 32-byte key file, so there is nothing to download.
+
+Exactly two mechanisms can set those bools, and they are mutually exclusive at compile time:
+
+| Build | Mechanism | Where |
+|---|---|---|
+| `STEAMWORKS` or `USE_EOS` defined | `SteamApps()->BIsDlcInstalled(1010820/21/22)` | `MainMenu.cpp:26400-26408` |
+| **neither** | GOG `.key` files (`mythsandoutcasts.key`, …) | `init_game.cpp:218-290` |
+
+A `STEAMWORKS_ENABLED=OFF` build compiles the second branch, looks for GOG key files a Steam
+customer does not have, and locks all DLC. That was the state of this project until Aug 21 2026.
+
+⚠ **`-DSTEAMWORKS_ENABLED=ON` does NOT define the `STEAMWORKS` preprocessor macro.** Nothing in
+`CMakeLists.txt` ever does — it only calls `find_package` and `target_link_libraries`, while every
+Steam code path is behind `#ifdef STEAMWORKS`. The build **succeeds**, links `libsteam_api.so`,
+references **zero** Steam symbols, and changes nothing. It looks exactly like success. Upstream's
+CI must pass the define in flags; we pass it explicitly.
+
+⚠ **SDK version must be 1.53a, not the current one.** Barony 5.0.2 targets it exactly — the
+shipped `libsteam_api.so` and 1.53a agree on `SteamClient020`, `SteamUser021`, `SteamFriends017`,
+`SteamUtils010`, and both export `SteamAPI_Init`. SDK 1.65 drifts on all four, drops
+`SteamAPI_Init`, and removed `ISteamUtils::IsSteamRunningOnSteamDeck` (6 call sites) in favour of
+`IsRunningOnSteamHardware()`. Building against 1.65 would need source patches **and** overwriting
+the game folder's `libsteam_api.so`, which vanilla loads too (`-rpath='$ORIGIN'`). With 1.53a:
+zero source patches, nothing in the Steam install touched.
+
+⚠ **Steamworks makes `nativefiledialog` a REQUIRED dependency** (`CMakeLists.txt:366`) for one
+call — `NFD_PickFolder` for the Workshop mod-upload picker (`MainMenu.cpp:31110`). The real
+library needs GTK3 headers. `~/nfd-stub` is an API-compatible stub (`libnfd.a`, enum order matches
+upstream so the real lib drops in later); every entry point reports cancelled, so only that one
+Workshop dialog is inert.
+
+```bash
+# one time: SDK 1.53a from partner.steamgames.com -> ~/steamworks-153 (must contain sdk/public)
+cd ~/Barony/build-steam && STEAMWORKS_ROOT=~/steamworks-153 NFD_DIR=~/nfd-stub cmake .. \
+  -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DSTEAMWORKS_ENABLED=ON \
+  -DOPENAL_ENABLED=OFF -DFMOD_ENABLED=OFF -DEOS_ENABLED=OFF \
+  -DCMAKE_C_FLAGS="-DSTEAMWORKS" -DCMAKE_CXX_FLAGS="-DSTEAMWORKS"
+make -j$(nproc) && cp barony ~/.local/share/Steam/steamapps/common/Barony/barony-modded-steam
+```
+
+Needs the Steam client running and logged in; `steam_appid.txt` (371970) is already in the game
+folder, which is what lets a self-built binary init Steam at all.
+
+**Two binaries on purpose**, two build trees, neither disturbing the other:
+
+| Binary | Build tree | Use |
+|---|---|---|
+| `barony-modded` | `build/` | mod testing — direct-IP, two local instances |
+| `barony-modded-steam` | `build-steam/` | playing — DLC + Steam lobbies |
+
+**Verifying which path compiled** (both silent at runtime — the Steam path never `printlog`s DLC
+status; only the GOG branch prints `[LICENSE]`):
+```bash
+strings barony | grep -c "Myths and Outcasts DLC license key found"   # 1 = GOG path, 0 = Steam path
+strings barony | grep -c "store.steampowered.com/dlc/371970"          # 1 = Steam path
+nm -D -u barony | grep -ic steam                                      # 0 = STEAMWORKS macro missing!
+```
+
+⚠ **The Steam build changes multiplayer shape.** `directConnect` becomes `false` (`main.cpp:319`),
+so hosting creates a Steam lobby with friend invites instead of direct IP — much better for
+non-technical friends, but it likely breaks the two-local-instances test setup. That is the reason
+`barony-modded` is kept as-is.
 
 ## Ollama configuration
 
@@ -328,7 +399,25 @@ Structured records: `{type, floor, claim, importance, provenance}`. `IMPORTANCE_
 - **`new_run`** — clears `follower_state` and `HERX_STATE`
 
 ### Naming
-Friendship ≥5 unlocks a nudge; follower names itself. `extract_name(raw, speech)` prefers a JSON `name` field, falls back to parsing speech — **the fallback is essential**, the 8B says the name but omits the field. Patterns use `(?i:...)` scoped flags and normalize typographic apostrophes (`\u2019`) — both were real bugs that silently disabled naming *and*, transitively, the Herx secret (which gates on the follower being named).
+Friendship ≥5 unlocks a nudge; follower names itself. `extract_name(raw, speech, says)` prefers a JSON `name` field, falls back to parsing speech — **the fallback is essential**, the 8B says the name but omits the field. Patterns use `(?i:...)` scoped flags and normalize typographic apostrophes (`\u2019`) — both were real bugs that silently disabled naming *and*, transitively, the Herx secret (which gates on the follower being named).
+⚠ **The 8B just as often says NOTHING BUT the name, and that was dropped for the whole project.**
+Both `NAME_PATTERNS` required an introducing phrase ("my name is", "I'm", "they call me"). Asked
+*"what is your name"*, a terse creature answers `"Glim."` and stops — observed on slimes, rats and
+skeletons alike. From one real co-op session: `Rast` ✗, `Glim` ✗, `Zhilak` ✗, `Kha'zix` ✗, while
+`"My name is Kalthok"` ✓. The player caught it live — *"your name didn't change the first time but
+it just changed to kalthok"* — which is exactly the diagnosis.
+
+`BARE_NAME` now takes the whole reply as the name, **gated on `ASKED_NAME` matching what the
+player actually said** — which is why `extract_name` needs `says`. Without that gate the branch
+would take any short reply (`"Yes."`, `"Cheese!"`) as the character's name; `NAME_REJECTS` grew
+from 5 entries to ~45 for the same reason.
+
+⚠ **Invented names carry apostrophes and hyphens, and `[A-Z][a-zA-Z]+` truncated them.** `"I am
+Zx'thal"` yielded `Zx`. The class is now `[A-Z][a-zA-Z'\-]+`. The TTS section already assumed
+names like `Zx'thal` exist, so this was quietly costing both systems.
+
+Order is unchanged and matters: JSON field → introducer patterns → bare reply. 17/17 on a table
+built from real session strings, negatives included.
 
 **The HUD rename is free:** `GameUI.cpp:2401` already reads `followerStats->name` and displays it when non-empty and not `"nothing"`. So `strncpy(Stat->name, ...)` renames the party UI with no rendering change. (`getMonsterLocalizedName` in `actmonster.cpp:224` does *not* use `Stat->name` for ordinary races — dead end.)
 
@@ -599,12 +688,51 @@ Two findings made this cheap, and both are worth remembering before writing any 
   before the recruitment hook runs**, so `mymod_ownerOf()` falls back to `leader_uid → actPlayer→skill[2]`.
   That fallback is what covers the `/friendly` + force-recruit path — don't remove it.
 
-So the only new netcode is **two packets**:
+So the only new netcode is **three packets** (`MYID`/`MYIV` for identify aside):
 
 | Packet | Direction | Payload | Why it must exist |
 |---|---|---|---|
 | `MYAI` | client → host | `[4]`=pnum, `[5..]`=utterance | the client→host direction has no vanilla equivalent |
 | `MYNM` | host → clients | `[4..7]`=uid, `[8..]`=name | vanilla fills a follower's `clientStats->name` **only at recruit time** (`LEAD`); a later rename needs its own packet or the party HUD never updates |
+| `MYFR` | host → clients | `[4]`=everybodyfriendly | `/friendly` is host-local and vanilla never networks it, which silently made the whole test harness single-player-only — see below |
+
+⚠ **`/friendly` was never replicated, and it silently broke co-op recruiting for the entire
+project.** Monsters behaved correctly for clients — pacified, non-hostile — because monster AI is
+host-authoritative. But a **client could not recruit any of them**, while the host could recruit
+freely. Found only by reading; nothing errored.
+
+`everybodyfriendly` appears in 10 places tree-wide and none is a packet: `/friendly` sets it
+(`consolecommand.cpp:1012`, and it refuses outright on a client), `checkFriend`/`checkEnemy`
+early-out on it (`entity.cpp:18806`, `19434`), `menu.cpp` resets it. The client's copy is
+permanently `false`.
+
+The chain, which is worth reading once because every link looks innocent:
+
+1. `monsterIsFriendlyForTooltip` (`player.cpp:3361`) wraps its `checkEnemy` shortcut in
+   `if (multiplayer != CLIENT)` — and that shortcut is **the only branch that reads
+   `everybodyfriendly`**. A client never reaches it.
+2. The client falls through to the static `monsterally[monsterType][playerRace]` table, which
+   knows nothing about the cheat, and reads every summoned monster as hostile.
+3. No friendly classification → no interact tooltip (`player.cpp:3534`, `4617`).
+4. `entityClicked` is called with `ENTITY_CLICK_USE_TOOLTIPS_ONLY` (`actplayer.cpp:9742`) and
+   returns null → no `CKIR` sent (`actplayer.cpp:10361`).
+5. Host-side `client_selected[n]`/`inrange[n]` never set → `monsterclicked` never becomes that
+   player (`actmonster.cpp:4484`) → `makeFollower` is never called for them.
+
+⚠ **Replicating the flag alone does NOT fix it** — step 1 means the client would receive the value
+and still ignore it. `MYFR` is therefore *half* the fix; the other half is an
+`everybodyfriendly || intro` early-out added to `monsterIsFriendlyForTooltip` before the
+`multiplayer != CLIENT` guard, mirroring exactly what `checkFriend`/`checkEnemy` already do.
+
+**`MYFR` is pushed by polling, not by hooking `/friendly`.** `mymod_syncFriendly()` runs from the
+host branch of `mymod_pollAI` and compares the flag against the last value sent to each client,
+sending only on a change. That way a client who joins *after* the toggle is synced too, and
+`consolecommand.cpp` needs no edit — keeping the upstream diff at two files instead of three.
+Disconnect clears the per-client sent flag so a reconnect re-syncs.
+
+Workaround if ever building without the fix: the HUMAN row of `monsterally`
+(`actmonster.cpp:101`) is 1 for HUMAN, SHOPKEEPER, AUTOMATON and the bot family, so a Human client
+can recruit a **human or automaton** with `/friendly` off entirely.
 
 **Per-player state.** `mymod_convo[MAXPLAYERS + 1]` — one conversation slot per player, plus
 `MYMOD_WORLD_SLOT` for ambient/taunts. Everything that was a global singleton (inflight, ready,
@@ -794,7 +922,7 @@ is unchanged from the single-player path that already works. Untested in an actu
 
 **Designed, not built — the peaceful Herx route.** `actWinningPortal` already contains the answer: the portal **exists on the boss floor, invisible**, and reveals itself when its per-tick scan finds no `LICH` or `DEVIL` alive. So a spared-Herx ending needs only (a) a flag excluding a pacified Herx from that scan and (b) clearing his hostility. No new entity, no replaced code path. The chain that *earns* it — merchants, testimony, leverage — is the real project and is undesigned. Design the failure mode first: a half-fired peaceful path could strand the player with a non-hostile boss and no exit.
 
-**DLC:** *Deserters & Disciples* shipped Jan 29 2026 with *Instruments of Destruction Part 1* (which removed Magic/Casting/Swimming and revamped magic into Sorcery/Thaumaturgy/Mysticism). **Part 2 is the upcoming one.** New races will need entries in `race_lore.json`, `comprehension.json`, and the lore file's denizen profiles or they fall through to generic defaults. Untested: whether a `STEAMWORKS_ENABLED=OFF` build can access DLC content at all.
+**DLC:** *Deserters & Disciples* shipped Jan 29 2026 with *Instruments of Destruction Part 1* (which removed Magic/Casting/Swimming and revamped magic into Sorcery/Thaumaturgy/Mysticism). **Part 2 is the upcoming one.** New races will need entries in `race_lore.json`, `comprehension.json`, and the lore file's denizen profiles or they fall through to generic defaults. **Answered Aug 21 2026: a `STEAMWORKS_ENABLED=OFF` build can NOT** — it compiles the GOG `.key` branch and locks everything. `barony-modded-steam` (SDK 1.53a, `-DSTEAMWORKS`) unlocks all three packs against real Steam entitlement; all DLC races confirmed present in character creation. See **The DLC build** under Build & run. The lore-file gap above is now live, not hypothetical.
 
 ---
 

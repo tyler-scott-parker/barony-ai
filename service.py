@@ -1310,11 +1310,43 @@ def build_npc_prompt(race, floor, says="", uid=0, player=0, player_name="",
 
 # ---- Reply parsing -----------------------------------------------------------
 
+# Invented names carry apostrophes and hyphens far more often than English words do
+# (Zx'thal, Kha'zix, Mor-gath). A bare [a-zA-Z] class silently TRUNCATES them at the
+# punctuation -- "I am Zx'thal" was yielding "Zx" -- so they are part of the name.
+_NAME_WORD = r"[A-Z][a-zA-Z'\-]+(?:\s+[A-Z][a-zA-Z'\-]+)?"
+
 NAME_PATTERNS = [
-    r"(?i:they call me|call me|i am called|my name is|i am|i'm|name'?s)\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)?)",
-    r"(?i:i go by|known as)\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)?)",
+    rf"(?i:they call me|call me|i am called|my name is|i am|i'm|name'?s)\s+({_NAME_WORD})",
+    rf"(?i:i go by|known as)\s+({_NAME_WORD})",
 ]
-NAME_REJECTS = ("name", "none", "null", "unknown", "adventurer")
+
+# The whole reply IS the name, with no introducing phrase. Asked "what is your name",
+# a terse creature answers "Glim." and nothing else -- observed on slimes, rats and
+# skeletons alike, and neither pattern above can match it.
+BARE_NAME = re.compile(rf"^({_NAME_WORD})$")
+
+# ...but only when the player actually asked. Without this gate the bare branch would
+# take ANY short reply as the character's name ("Yes.", "Cheese!").
+ASKED_NAME = re.compile(
+    r"(?i:what(?:'?s| is| are)?\s+(?:you|your|yer)\s*(?:name|called)"
+    r"|your\s+name"
+    r"|who\s+are\s+you"
+    r"|have\s+a\s+name"
+    r"|call\s+you"
+    r"|name\s+again)"
+)
+
+# Short capitalised words a creature might answer with that are plainly not names.
+# Only consulted for the bare branch's benefit; the introducer patterns rarely need it.
+NAME_REJECTS = (
+    "name", "none", "null", "unknown", "adventurer",
+    "yes", "no", "aye", "nay", "okay", "sure", "maybe", "perhaps", "indeed",
+    "hello", "hi", "hey", "greetings", "well", "hmm", "what", "who", "why", "how",
+    "nothing", "nobody", "someone", "silence", "never", "always",
+    "master", "boss", "friend", "stranger", "human", "sir", "madam", "ma'am",
+    "me", "you", "it", "they", "them", "mine", "ours",
+    "squeak", "glub", "grunt", "growl", "hiss", "food", "meat", "cheese",
+)
 
 def _clean_name(nm):
     nm = nm.strip().strip('.,!?"\'')
@@ -1322,15 +1354,22 @@ def _clean_name(nm):
         return ""
     return nm
 
-def extract_name(raw, speech=""):
+def extract_name(raw, speech="", says=""):
     """Prefer an explicit JSON "name" field; else parse the speech. The fallback is
-    ESSENTIAL -- the 8B reliably SAYS the name while omitting the field."""
+    ESSENTIAL -- the 8B reliably SAYS the name while omitting the field, and just as
+    often says nothing BUT the name, which needs the player's question as context."""
     m = re.search(r'"name"\s*:\s*"([^"]{1,40})"', raw)
     if m and _clean_name(m.group(1)):
         return _clean_name(m.group(1))
     txt = (speech or "").replace("’", "'")   # normalize typographic apostrophes
     for pat in NAME_PATTERNS:
         mm = re.search(pat, txt)
+        if mm and _clean_name(mm.group(1)):
+            return _clean_name(mm.group(1))
+    if ASKED_NAME.search((says or "").replace("’", "'")):
+        bare = txt.strip().strip('*_"“”').strip()
+        bare = re.sub(r"[.!?,]+$", "", bare).strip()
+        mm = BARE_NAME.match(bare)
         if mm and _clean_name(mm.group(1)):
             return _clean_name(mm.group(1))
     return ""
@@ -1522,7 +1561,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             with STATE_LOCK:
                 if uid:
                     st = get_follower_state(uid, race, player)
-                    revealed = extract_name(raw, speech)
+                    revealed = extract_name(raw, speech, says)
                     if revealed and not st.get("name"):
                         st["name"] = revealed
                         print(f"[SERVICE-DBG] follower {uid} is now named '{revealed}'")
