@@ -1,0 +1,615 @@
+<title>Adorcism</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Grenze:wght@400;500;600;700&family=Karla:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+
+<style>
+  :root {
+    /* Light: limestone and lamp-black. Neutrals carry a green bias toward the accent. */
+    --ground:      #DFDACF;
+    --surface:     #EBE7DE;
+    --surface-alt: #D5CFC2;
+    --ink:         #1E2321;
+    --ink-soft:    #4A5150;
+    --murk:        #6E706A;
+    --rule:        #C2BBAC;
+    --rule-soft:   #CFC9BC;
+    --verdigris:   #3E7A6B;
+    --verdigris-q: #E0EAE4;
+    --ember:       #A34A22;
+    --ember-q:     #F0E1D6;
+    --shadow:      0 1px 0 rgba(30,35,33,.05), 0 2px 10px rgba(30,35,33,.06);
+
+    --f-display: "Grenze", "Iowan Old Style", Georgia, serif;
+    --f-body:    "Karla", "Helvetica Neue", Arial, sans-serif;
+    --f-mono:    "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+
+    --measure: 66ch;
+    --pad: clamp(1.25rem, 4vw, 3rem);
+  }
+
+  /* Dark: wet slate, not an inversion. Guarded so an explicit light choice wins. */
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:      #14181A;
+      --surface:     #1C2124;
+      --surface-alt: #232A2C;
+      --ink:         #DFDACE;
+      --ink-soft:    #B3B2A8;
+      --murk:        #8A8E88;
+      --rule:        #2E3639;
+      --rule-soft:   #262D30;
+      --verdigris:   #6FB8A2;
+      --verdigris-q: #1B2A28;
+      --ember:       #D98651;
+      --ember-q:     #2B211B;
+      --shadow:      0 1px 0 rgba(0,0,0,.3), 0 2px 12px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground:      #14181A;
+    --surface:     #1C2124;
+    --surface-alt: #232A2C;
+    --ink:         #DFDACE;
+    --ink-soft:    #B3B2A8;
+    --murk:        #8A8E88;
+    --rule:        #2E3639;
+    --rule-soft:   #262D30;
+    --verdigris:   #6FB8A2;
+    --verdigris-q: #1B2A28;
+    --ember:       #D98651;
+    --ember-q:     #2B211B;
+    --shadow:      0 1px 0 rgba(0,0,0,.3), 0 2px 12px rgba(0,0,0,.35);
+  }
+
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--f-body);
+    font-size: 17px;
+    line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: 74rem;
+    margin: 0 auto;
+    padding: var(--pad);
+    display: flex;
+    flex-direction: column;
+    gap: clamp(3rem, 7vw, 5.5rem);
+  }
+
+  a { color: var(--verdigris); text-underline-offset: 3px; }
+  a:focus-visible, summary:focus-visible {
+    outline: 2px solid var(--verdigris);
+    outline-offset: 3px;
+    border-radius: 2px;
+  }
+
+  h1, h2, h3 { font-family: var(--f-display); text-wrap: balance; margin: 0; }
+
+  .eyebrow {
+    font-family: var(--f-mono);
+    font-size: .72rem;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    color: var(--murk);
+  }
+
+  /* ---------- hero ---------- */
+  .hero { display: flex; flex-direction: column; gap: 1.5rem; }
+  .hero h1 {
+    font-size: clamp(3.4rem, 13vw, 8rem);
+    font-weight: 600;
+    line-height: .92;
+    letter-spacing: .01em;
+    margin: .1em 0 0;
+  }
+  .define {
+    border-left: 2px solid var(--verdigris);
+    padding: .1rem 0 .1rem 1.1rem;
+    max-width: var(--measure);
+    color: var(--ink-soft);
+  }
+  .define b { font-family: var(--f-display); font-style: italic; font-weight: 600; color: var(--ink); }
+  .define .pos { font-style: italic; color: var(--murk); }
+  .lede { max-width: var(--measure); font-size: 1.12rem; }
+  .lede strong { font-weight: 700; }
+
+  .status {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: .6rem 1rem;
+    padding: .8rem 1rem;
+    background: var(--ember-q);
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    font-size: .92rem;
+    color: var(--ink-soft);
+  }
+  .pill {
+    font-family: var(--f-mono);
+    font-size: .68rem;
+    letter-spacing: .13em;
+    text-transform: uppercase;
+    padding: .28rem .6rem;
+    border-radius: 2px;
+    background: var(--ember);
+    color: var(--ground);
+    white-space: nowrap;
+  }
+
+  /* ---------- sections ---------- */
+  section { display: flex; flex-direction: column; gap: 1.6rem; }
+  .head { display: flex; flex-direction: column; gap: .5rem; }
+  .head h2 { font-size: clamp(1.6rem, 3.6vw, 2.3rem); font-weight: 600; }
+  .head p { margin: 0; max-width: var(--measure); color: var(--ink-soft); }
+  .rule { height: 1px; background: var(--rule); }
+
+  /* ---------- compendium entries ---------- */
+  .entries { display: grid; gap: 1px; background: var(--rule); border: 1px solid var(--rule); border-radius: 3px; }
+  @media (min-width: 720px) { .entries { grid-template-columns: 1fr 1fr; } }
+  .entry {
+    background: var(--surface);
+    padding: 1.4rem 1.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: .7rem;
+  }
+  .entry .who {
+    display: flex; flex-wrap: wrap; align-items: baseline; gap: .5rem .75rem;
+  }
+  .entry .name {
+    font-family: var(--f-display);
+    font-size: 1.18rem;
+    font-weight: 600;
+  }
+  .entry .tag {
+    font-family: var(--f-mono);
+    font-size: .66rem;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--verdigris);
+    background: var(--verdigris-q);
+    padding: .2rem .45rem;
+    border-radius: 2px;
+  }
+  .entry blockquote {
+    margin: 0;
+    font-family: var(--f-display);
+    font-size: 1.24rem;
+    line-height: 1.4;
+    color: var(--ink);
+  }
+  .entry .note { margin: 0; font-size: .88rem; color: var(--murk); }
+
+  /* ---------- systems ---------- */
+  .systems { display: grid; gap: 1.1rem; }
+  @media (min-width: 640px) { .systems { grid-template-columns: repeat(2, 1fr); } }
+  @media (min-width: 1000px) { .systems { grid-template-columns: repeat(3, 1fr); } }
+  .sys {
+    background: var(--surface);
+    border: 1px solid var(--rule-soft);
+    border-radius: 3px;
+    padding: 1.15rem 1.25rem;
+    display: flex; flex-direction: column; gap: .45rem;
+    box-shadow: var(--shadow);
+  }
+  .sys h3 { font-size: 1.06rem; font-weight: 600; }
+  .sys p { margin: 0; font-size: .93rem; color: var(--ink-soft); }
+
+  /* ---------- tables ---------- */
+  .scroll { overflow-x: auto; border: 1px solid var(--rule); border-radius: 3px; }
+  table { border-collapse: collapse; width: 100%; font-size: .94rem; }
+  th, td { text-align: left; padding: .72rem .95rem; border-bottom: 1px solid var(--rule-soft); vertical-align: top; }
+  thead th {
+    font-family: var(--f-mono);
+    font-size: .68rem; letter-spacing: .12em; text-transform: uppercase;
+    color: var(--murk); background: var(--surface-alt); border-bottom: 1px solid var(--rule);
+  }
+  tbody tr:last-child td { border-bottom: 0; }
+  tbody td:first-child { font-weight: 600; white-space: nowrap; }
+  table code { white-space: nowrap; }
+
+  /* ---------- steps ---------- */
+  ol.steps { list-style: none; counter-reset: s; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1.1rem; }
+  ol.steps > li {
+    counter-increment: s;
+    display: grid; grid-template-columns: 2rem 1fr; gap: 1rem;
+    align-items: start;
+  }
+  ol.steps > li::before {
+    content: counter(s);
+    font-family: var(--f-mono); font-size: .8rem;
+    color: var(--verdigris);
+    border: 1px solid var(--verdigris);
+    border-radius: 2px;
+    width: 1.9rem; height: 1.9rem;
+    display: grid; place-items: center;
+  }
+  ol.steps h3 { font-size: 1.04rem; font-weight: 600; margin-bottom: .25rem; }
+  ol.steps p { margin: 0 0 .5rem; max-width: var(--measure); color: var(--ink-soft); }
+
+  pre {
+    margin: 0;
+    background: var(--surface-alt);
+    border: 1px solid var(--rule-soft);
+    border-radius: 3px;
+    padding: .8rem 1rem;
+    overflow-x: auto;
+  }
+  pre, code { font-family: var(--f-mono); font-size: .85rem; }
+  code { background: var(--surface-alt); padding: .1em .35em; border-radius: 2px; }
+  pre code { background: none; padding: 0; }
+
+  /* ---------- checklist ---------- */
+  ul.check { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .7rem; }
+  ul.check li { display: grid; grid-template-columns: 5.5rem 1fr; gap: 1rem; align-items: baseline; }
+  ul.check .mark {
+    font-family: var(--f-mono); font-size: .64rem; letter-spacing: .1em; text-transform: uppercase;
+    padding: .2rem .45rem; border-radius: 2px; text-align: center;
+  }
+  .mark.done { background: var(--verdigris-q); color: var(--verdigris); }
+  .mark.todo { background: var(--ember-q); color: var(--ember); }
+  ul.check p { margin: 0; color: var(--ink-soft); font-size: .95rem; }
+  ul.check b { color: var(--ink); font-weight: 600; }
+
+  .todo-note {
+    font-family: var(--f-mono);
+    font-size: .74rem;
+    letter-spacing: .06em;
+    color: var(--ember);
+    background: var(--ember-q);
+    border: 1px dashed var(--ember);
+    border-radius: 2px;
+    padding: .5rem .75rem;
+    display: inline-block;
+  }
+
+  footer { color: var(--murk); font-size: .9rem; display: flex; flex-direction: column; gap: .8rem; padding-bottom: 1rem; }
+  footer p { margin: 0; max-width: var(--measure); }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { animation-duration: .001ms !important; transition-duration: .001ms !important; }
+  }
+</style>
+
+<div class="wrap">
+
+  <header class="hero">
+    <div class="eyebrow">A mod for Barony &middot; v5.0.2</div>
+    <h1>Adorcism</h1>
+    <p class="define">
+      <b>adorcism</b> <span class="pos">n.</span> &mdash; the deliberate invitation of a spirit into a body,
+      so that it wakes and acts alongside you. The inverse of exorcism.
+      <span class="pos">Barony&rsquo;s own word: the Adorcise menu binds a spirit into a weapon so it fights at your side.</span>
+    </p>
+    <p class="lede">
+      Everything in the dungeon can speak, and means it. Followers, townsfolk, merchants, the named
+      dead &mdash; all of them talk through a language model running <strong>on your own machine</strong>,
+      grounded in Barony&rsquo;s actual lore, and they remember what you did. Nothing leaves your computer.
+      There is no account, no API key, and no bill.
+    </p>
+    <div class="status">
+      <span class="pill">Pre-release draft</span>
+      <span>Not on Nexus yet. This page is the copy, written ahead of the build &mdash; see
+        <a href="#before-release">Before release</a> for what still blocks it.</span>
+    </div>
+  </header>
+
+  <div class="rule"></div>
+
+  <section>
+    <div class="head">
+      <div class="eyebrow">Compendium</div>
+      <h2>What it sounds like</h2>
+      <p>
+        Every line below came out of the model during development, unedited. Nothing here is scripted,
+        and none of it is in the base game &mdash; vanilla Barony gives spoken dialogue to humans only.
+      </p>
+    </div>
+
+    <div class="entries">
+      <article class="entry">
+        <div class="who"><span class="name">A dummybot</span><span class="tag">Deployed</span></div>
+        <blockquote>&ldquo;Bring it on, Sparkle Face!&rdquo;</blockquote>
+        <p class="note">Shouted at a crystal golem. A dummybot is a training dummy on a spring &mdash;
+          its entire combat value is being noticed &mdash; so it heckles whatever is nearest, constantly,
+          and is certain it is a celebrated warrior.</p>
+      </article>
+
+      <article class="entry">
+        <div class="who"><span class="name">A skeleton knight</span><span class="tag">Conjured</span></div>
+        <blockquote>&ldquo;Three times, I think. You unmade me and called me back each time. You are a peculiar one, Ada.&rdquo;</blockquote>
+        <p class="note">Asked how many times it had died. A Conjurer&rsquo;s summons keep one identity across
+          every recast, so the count is real rather than invented.</p>
+      </article>
+
+      <article class="entry">
+        <div class="who"><span class="name">A goblin follower</span><span class="tag">Resentful</span></div>
+        <blockquote>&ldquo;Fine, you want me to go first? I&rsquo;m not getting killed again because of your recklessness.&rdquo;</blockquote>
+        <p class="note">Same order, same character, after a run where they had been hurt and left behind.
+          They obeyed &mdash; resentfully. On a clean run the same follower answers &ldquo;Aye, boss!&rdquo;</p>
+      </article>
+
+      <article class="entry">
+        <div class="who"><span class="name">A human companion</span><span class="tag">Hiding something</span></div>
+        <blockquote>&ldquo;Family&rsquo;s not something I&rsquo;m comfortable talkin&rsquo; about.&rdquo;</blockquote>
+        <p class="note">Not every recruit is loyal. This one deflected a question about their past and then
+          asked, unprompted, about the player&rsquo;s rations and route.</p>
+      </article>
+
+      <article class="entry">
+        <div class="who"><span class="name">A sentrybot</span><span class="tag">Fixed in place</span></div>
+        <blockquote>&ldquo;I&rsquo;ll hold this spot, you go ahead. I&rsquo;ve got my eye on the corridor.&rdquo;</blockquote>
+        <p class="note">Asked to come along. A deployed turret cannot move, and it will tell you so
+          rather than promising something it cannot do.</p>
+      </article>
+
+      <article class="entry">
+        <div class="who"><span class="name">A shopkeeper</span><span class="tag">Not interested</span></div>
+        <blockquote>&ldquo;I&rsquo;m a shopkeeper, not a soldier.&rdquo;</blockquote>
+        <p class="note">Asked to join the party. Merchants greet you inside the shop window when you open
+          it, and they are not recruitable no matter how the request is phrased.</p>
+      </article>
+    </div>
+  </section>
+
+  <section>
+    <div class="head">
+      <div class="eyebrow">Systems</div>
+      <h2>What it actually does</h2>
+      <p>
+        It is not a chat box bolted to the side of the game. Conversation feeds systems that change how
+        the run goes, and none of them ever show you a number.
+      </p>
+    </div>
+
+    <div class="systems">
+      <div class="sys">
+        <h3>Everyone speaks</h3>
+        <p>All 49 creatures the game can produce, plus merchants, townsfolk and the roughly thirty
+          named characters &mdash; each with its own written sense of what it is and what it could
+          plausibly know.</p>
+      </div>
+      <div class="sys">
+        <h3>They remember</h3>
+        <p>Fighting beside you, being healed, being wounded, being struck by you, being left behind,
+          watching another companion die. Recorded as events, recalled specifically &mdash; one follower
+          brought up &ldquo;the last time you left me behind, floor 7&rdquo; without being asked.</p>
+      </div>
+      <div class="sys">
+        <h3>Seven kinds of regard</h3>
+        <p>Friendship, trust, respect, fear, resentment, dependence, curiosity &mdash; tracked separately,
+          so a companion can like you without trusting you, or obey you out of fear. You never see the
+          numbers; you hear the difference.</p>
+      </div>
+      <div class="sys">
+        <h3>Obedience is earned</h3>
+        <p>A refusal is a real refusal, not flavour text over compliance. Respect without warmth reads as
+          purely tactical; fear that outweighs friendship reads as obedience a little too quick and a
+          little too flat.</p>
+      </div>
+      <div class="sys">
+        <h3>Not everyone is loyal</h3>
+        <p>A small share of recruits are working against you, with a reason of their own. They deflect on
+          their past and take too much interest in your route. One who comes to like you anyway will
+          eventually strain, and let something slip.</p>
+      </div>
+      <div class="sys">
+        <h3>The Baron&rsquo;s weakness</h3>
+        <p>A companion you have earned may tell you something true about Baron Herx that measurably
+          weakens him. A companion who is deceiving you may tell you something plausible and wrong.
+          You find out which at the boss.</p>
+      </div>
+      <div class="sys">
+        <h3>&ldquo;What is this thing?&rdquo;</h3>
+        <p>Hand a companion an unidentified item. Whether they know is one question; whether they tell
+          you the truth is another. A confident lie leaves you carrying something that is not what you
+          were told.</p>
+      </div>
+      <div class="sys">
+        <h3>Gifts, warnings, sabotage</h3>
+        <p>Companions who like you occasionally volunteer something &mdash; a scrap of food, a piece of
+          local knowledge, or quietly disarming the traps on the floor. Rare on purpose.</p>
+      </div>
+      <div class="sys">
+        <h3>They name themselves</h3>
+        <p>Get close enough and a companion tells you its name, and the party display starts using it.
+          Names come from a pool of over 1,400 written per species, and one you have met will not come
+          back in your next run.</p>
+      </div>
+      <div class="sys">
+        <h3>You are not always understood</h3>
+        <p>Polymorph into a rat and most of the dungeon stops making sense &mdash; you get chittering and
+          snarling instead of speech, unless the speaker is close enough to your own kind. Turn back and
+          the words return.</p>
+      </div>
+      <div class="sys">
+        <h3>Class companions differ</h3>
+        <p>A Conjurer&rsquo;s summons carry one relationship across every recast and remember being unmade.
+          A Machinist&rsquo;s turrets know they are bolted down. Charmed creatures are dungeon natives with
+          histories of their own.</p>
+      </div>
+      <div class="sys">
+        <h3>Speak and be spoken to <span class="tag">Optional</span></h3>
+        <p>Hold a key and talk to your companion instead of typing. Turn on the other half and the
+          dungeon answers out loud, in 109 distinct voices cast by species. Both off by default.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="head">
+      <div class="eyebrow">Requirements</div>
+      <h2>Who needs what</h2>
+      <p>
+        In co-op, <strong>only the host runs anything extra</strong>. Everyone else installs the mod and
+        joins. The setup burden falls on one person by design.
+      </p>
+    </div>
+    <div class="scroll">
+      <table>
+        <thead>
+          <tr><th scope="col">You are</th><th scope="col">You install</th><th scope="col">You need</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Hosting</td>
+            <td>The mod, Python 3, <a href="https://ollama.com">Ollama</a>, and one 8B model</td>
+            <td>A GPU with 8&nbsp;GB of memory or better. Developed on an RTX 2070 Super; replies come back
+              in about 2&ndash;4 seconds and the model sits entirely on the card.</td>
+          </tr>
+          <tr>
+            <td>Joining</td>
+            <td>The mod. Nothing else.</td>
+            <td>Nothing. No Python, no model, no port forwarding, no configuration. Your companions talk
+              because the host&rsquo;s machine is doing the work.</td>
+          </tr>
+          <tr>
+            <td>Playing alone</td>
+            <td>Same as hosting</td>
+            <td>Same as hosting.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p style="margin:0; max-width:var(--measure); color:var(--ink-soft);">
+      The default model is <code>llama3.1:8b</code>. If you would rather point it at something else &mdash;
+      a bigger local model, or a machine down the hall &mdash; <code>/aiserver &lt;url&gt;</code> in the
+      console redirects it, and every setting has an environment variable.
+    </p>
+  </section>
+
+  <section>
+    <div class="head">
+      <div class="eyebrow">Setup &middot; host only</div>
+      <h2>Getting it running</h2>
+    </div>
+    <ol class="steps">
+      <li>
+        <div>
+          <h3>Install Ollama and pull the model</h3>
+          <p>Ollama is a free local model runner. Install it, then pull the model once &mdash; about 5&nbsp;GB,
+            downloaded a single time.</p>
+          <pre><code>ollama pull llama3.1:8b</code></pre>
+        </div>
+      </li>
+      <li>
+        <div>
+          <h3>Install the mod</h3>
+          <p class="todo-note">TODO: install path and file list, once the release build exists.</p>
+        </div>
+      </li>
+      <li>
+        <div>
+          <h3>Start the dialogue service</h3>
+          <p>Leave this running in the background while you play. It talks only to your own machine.</p>
+          <pre><code>python3 service.py</code></pre>
+        </div>
+      </li>
+      <li>
+        <div>
+          <h3>Play</h3>
+          <p>Talk to a companion with <code>/aicommand &lt;what you want to say&gt;</code>, or click any
+            townsperson or merchant to start a conversation. Ask a companion about an item with
+            <code>/aiidentify</code>. If something goes wrong, <code>/ailog &lt;what happened&gt;</code>
+            writes a note into the session timeline so it can be traced afterwards.</p>
+        </div>
+      </li>
+      <li>
+        <div>
+          <h3>Optional: voice</h3>
+          <p>Hold a key and speak instead of typing, and&nbsp;/&nbsp;or have the dungeon answer out loud.
+            Both halves are off unless you turn them on, and neither competes with the model for graphics
+            memory.</p>
+          <pre><code>python3 voice_bridge.py                    # speak to them
+python3 tts_bridge.py --setup              # one time, ~80 MB
+BARONY_AI_TTS=1 python3 service.py         # and hear them</code></pre>
+        </div>
+      </li>
+    </ol>
+  </section>
+
+  <section id="before-release">
+    <div class="head">
+      <div class="eyebrow">Honest status</div>
+      <h2>Before release</h2>
+      <p>
+        Written down plainly because a mod page that oversells is worse than one that waits. Everything
+        described above is built and works on the development machine. These are the things standing
+        between that and a Nexus download.
+      </p>
+    </div>
+    <ul class="check">
+      <li>
+        <span class="mark todo">Blocker</span>
+        <p><b>Windows support.</b> The mod and the service pass messages through files under
+          <code>/tmp</code>, which is a Linux path, and the book-lore reader still assumes a Linux Steam
+          install. Both need a portability pass before anyone on Windows can run it.</p>
+      </li>
+      <li>
+        <span class="mark todo">Blocker</span>
+        <p><b>A full playthrough.</b> Every system has been verified in isolation, but no one has yet
+          played a whole run start to finish. The tuning &mdash; how often gifts appear, whether a
+          deceiver is catchable in the moment, whether the Baron&rsquo;s secret is reachable before you
+          reach him &mdash; is educated guesswork until then.</p>
+      </li>
+      <li>
+        <span class="mark todo">Blocker</span>
+        <p><b>Co-op on two machines.</b> The multiplayer path is written and verified one side at a time,
+          but a second computer has never joined. Four people talking at once queue on one graphics card,
+          and how that feels is unknown.</p>
+      </li>
+      <li>
+        <span class="mark done">Ready</span>
+        <p><b>Everything else.</b> Lore for all 49 species, the relationship and memory systems, the
+          non-follower conversations, item identification, class companions, optional voice in and out,
+          and a session log that makes a bad run diagnosable afterwards.</p>
+      </li>
+    </ul>
+    <p class="todo-note">TODO before publishing: screenshots, a short clip of a conversation in play,
+      Nexus category and tags, licence, and a version number.</p>
+  </section>
+
+  <section>
+    <div class="head">
+      <div class="eyebrow">Credits</div>
+      <h2>Standing on other people&rsquo;s work</h2>
+    </div>
+    <div class="systems">
+      <div class="sys">
+        <h3>Barony</h3>
+        <p>By Turning Wheel LLC, and open source &mdash; which is the only reason a mod like this can exist
+          at all. Adorcism is built against v5.0.2 and changes as little of the game as it can.</p>
+      </div>
+      <div class="sys">
+        <h3>Ollama</h3>
+        <p>Does the heavy lifting. Every word your companions say is generated locally by Ollama, on your
+          own hardware, with nothing sent anywhere. The mod would not be practical without it.</p>
+      </div>
+      <div class="sys">
+        <h3>Llama 3.1, Whisper, Piper</h3>
+        <p>The default model, the speech recognition behind push-to-talk, and the voices behind spoken
+          replies. All local, all optional except the first.</p>
+      </div>
+    </div>
+    <p style="margin:0;max-width:var(--measure);color:var(--ink-soft);">
+      Inspired by the AI-companion mods that came before it in other games &mdash; CHIM, Mantella and
+      Herika for Skyrim chief among them &mdash; which proved the idea was worth building and set the bar
+      for what these characters should sound like.
+    </p>
+  </section>
+
+  <div class="rule"></div>
+
+  <footer>
+    <p><strong>Adorcism</strong> &mdash; pre-release draft of the mod page. Nothing on this page is
+      published yet.</p>
+    <p>Runs entirely on your own machine. No account, no API key, no telemetry, no network traffic
+      leaving your computer.</p>
+  </footer>
+
+</div>

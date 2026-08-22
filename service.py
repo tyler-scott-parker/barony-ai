@@ -1625,11 +1625,156 @@ SHOP_TYPES = {
     9: "general goods", 10: "rare and specialist goods",
 }
 
+# ---- Haggling ------------------------------------------------------------------------
+# A merchant who likes you shades the price your way; one you have been rude to shades it the
+# other. Deliberately tiny: Barony's own trading skill already swings buy prices from x3.00 down
+# to x1.00 (items.cpp:5990), and charisma moves sell prices by up to +100%, so anything with
+# real economic weight here would just be a worse version of a system the game already has.
+# What this buys is the FEELING of having negotiated, and a reason to be civil to a shopkeeper.
+#
+# ⚠ The SERVER decides the outcome, never the model -- the same division of labour boons, the
+# spy crack and item identification use. Asked to judge its own haggle, the 8B agrees to
+# practically anything; it is told what happened and only phrases it.
+
+HAGGLE_STEP       = 1    # percent the price moves per successful negotiation
+HAGGLE_CAP        = 5    # the most a merchant will ever shift, in either direction
+HAGGLE_REGARD_CAP = 6    # bounds on how warm or cold a merchant can get
+
+# Negative = better for the player. Applied to buying AND selling, with the sign flipped on
+# the sell side so "a better deal" means the same thing in both directions.
+HAGGLE_PHRASES = (
+    "discount", "better price", "lower price", "cheaper", "knock off", "take off",
+    "good price", "best price", "deal for", "a deal", "haggle", "bargain", "barter",
+    "too expensive", "too much", "can't afford", "cant afford", "for less", "any lower",
+    "come down", "meet me halfway", "throw in", "cut me",
+    # Asking for a concession without using the word "discount" -- how people actually haggle.
+    # Kept to phrases that cannot be an innocent question: a bare "the price" would fire on
+    # "what's the price?", which is not a negotiation.
+    "do on the price", "do about the price", "do better", "any better", "budge", "sweeten",
+    "your best", "best you can", "give me a break", "shave a", "spare me",
+)
+
+# Merchants read courtesy and rudeness, not the follower vector -- they have no relationship
+# ladder and are not meant to grow one.
+MERCHANT_TONE = (
+    ("courteous", ("thank you", "thanks", "please", "appreciate", "good day", "well met",
+                   "kind of you", "much obliged", "sorry", "apolog"), 1),
+    ("rude",      ("rip off", "ripoff", "robbery", "thief", "crook", "swindl", "cheat",
+                   "you're a", "idiot", "fool", "shut up", "or else", "i'll kill",
+                   "don't make me", "hand it over", "give me it"), -2),
+)
+
+def wants_to_haggle(says):
+    low = (says or "").lower()
+    return any(p in low for p in HAGGLE_PHRASES)
+
+def merchant_tone(st, says):
+    """Move the merchant's regard for this player. Returns the tone name, or ''."""
+    low = (says or "").lower()
+    for name, phrases, delta in MERCHANT_TONE:
+        if any(p in low for p in phrases):
+            r = max(-HAGGLE_REGARD_CAP, min(HAGGLE_REGARD_CAP, st.get("regard", 0) + delta))
+            st["regard"] = r
+            return name
+    return ""
+
+def haggle_attempt(st, floor):
+    """Resolve a negotiation. One per merchant per floor -- asking twice in the same shop is
+    exactly the behaviour that should not be rewarded. Returns (outcome, new_deal_pct)."""
+    if st.get("haggle_floor") == floor:
+        return "already", st.get("deal_pct", 0)
+    st["haggle_floor"] = floor
+    regard = st.get("regard", 0)
+    deal = st.get("deal_pct", 0)
+    if regard > 0:
+        outcome = "better"
+    elif regard < 0:
+        outcome = "worse"
+    else:
+        outcome = "better" if random.random() < 0.5 else "refused"
+    if outcome == "better":
+        deal = max(-HAGGLE_CAP, deal - HAGGLE_STEP)
+    elif outcome == "worse":
+        deal = min(HAGGLE_CAP, deal + HAGGLE_STEP)
+    st["deal_pct"] = deal
+    return outcome, deal
+
+# ⚠ Without these the merchant repeats its own previous reply almost verbatim -- the exchange
+# memory replays what it said last time and, given the same instruction, the 8B copies it. Same
+# lesson the spy crack taught: one literal route gets parroted, so the SERVER picks the angle
+# and the model only phrases it. Measured, this is the difference between four identical
+# "Aye, I'm makin' you a favor this one time" replies and four different ones.
+HAGGLE_GRANT_ANGLES = (
+    "You are pretending it is because of a flaw in the goods you had not mentioned before.",
+    "You are making a great point of saying this is the one and only time.",
+    "You are doing it mostly to get them out of your shop so you can get on.",
+    "You are doing it because they have been decent to you, and you say so plainly.",
+    "You are grumbling about your own margin and your own suppliers the whole way through.",
+    "You are treating it as an investment in them coming back alive to spend again.",
+    "You are doing it quickly and changing the subject, as if embarrassed by it.",
+)
+HAGGLE_REFUSE_ANGLES = (
+    "You explain, patiently, that this is what it costs and you did not set the world up.",
+    "You point out that you have overheads down here that they have not thought about.",
+    "You are amused by the attempt and say so.",
+    "You compare them, unfavourably, to a customer who does not argue.",
+    "You say the price is the price and go back to what you were doing.",
+)
+HAGGLE_MARKUP_ANGLES = (
+    "You make it clear the increase is specifically because of how they have spoken to you.",
+    "You claim, transparently, that costs have risen — and you do not care that they can tell.",
+    "You suggest they try their luck somewhere else, knowing there is nowhere else.",
+    "You are icily polite about it, which is worse than being rude.",
+)
+
+def haggle_section(outcome, deal):
+    """Tell the model what already happened so it only has to say it. Each branch names the
+    route that would contradict the resolved outcome, because the 8B will otherwise be
+    agreeable in words while the engine charges full price."""
+    # ⚠ NO FIGURES, in every branch. Left to itself the model answers "twenty-five instead of
+    # thirty" -- a 17% cut, invented, while the shop window beside it still shows the real
+    # price. The engine owns the numbers; the merchant only owns the attitude.
+    nonum = ("Do NOT state any number, price, amount of gold, or figure — you do not know what "
+             "the ledger says and the shop board shows the real price. Speak only about whether "
+             "you are giving ground, never about how much.\n")
+    # ⚠ The memory block above tells this character to stay consistent with what it already
+    # said, and quotes it. For a repeated haggle that instruction is being obeyed too well:
+    # repeating the previous wording IS the most consistent answer available, so the angle
+    # above loses to it. Consistency is about FACTS here, not phrasing -- and as everywhere
+    # else in this project, the failing route has to be named or it gets taken.
+    fresh = ("If you have said something like this to them before, do NOT reuse your previous "
+             "wording. Staying consistent means not contradicting the FACTS of what you said — "
+             "it does not mean repeating the sentence. Say it a different way this time.\n")
+    if outcome == "better":
+        angle = "HOW YOU PLAY IT: " + random.choice(HAGGLE_GRANT_ANGLES) + "\n"
+        return ("THE PLAYER HAS JUST ASKED YOU FOR A BETTER PRICE, AND YOU HAVE DECIDED TO GIVE "
+                "THEM ONE. It is a small one and it is the last of your margin. Say so in "
+                "character, grudgingly or warmly as suits you, and make clear it is a little "
+                "off and not a windfall. Do NOT refuse — you have already agreed.\n" + angle + fresh + nonum)
+    if outcome == "worse":
+        angle = "HOW YOU PLAY IT: " + random.choice(HAGGLE_MARKUP_ANGLES) + "\n"
+        return ("THE PLAYER HAS JUST ASKED YOU FOR A BETTER PRICE. You do not like them, and "
+                "the answer is no — in fact the price has gone UP a little. Tell them so. Do "
+                "NOT apologise, do NOT offer a discount anyway, and do NOT be talked round.\n" + angle + fresh + nonum)
+    if outcome == "refused":
+        angle = "HOW YOU PLAY IT: " + random.choice(HAGGLE_REFUSE_ANGLES) + "\n"
+        return ("THE PLAYER HAS JUST ASKED YOU FOR A BETTER PRICE AND THE ANSWER IS NO. Say no "
+                "plainly, in character. Do NOT offer a discount, a smaller discount, a "
+                "compromise, or 'just this once' — the answer is no and the price is unchanged.\n" + angle + fresh + nonum)
+    if outcome == "already":
+        return ("THE PLAYER IS ASKING YOU FOR A BETTER PRICE AGAIN, HAVING ALREADY ASKED YOU "
+                "ONCE HERE. You have said all you are going to say about the price. Tell them "
+                "it is settled. Do NOT move the price again.\n" + nonum)
+    return ""
+
 def get_npc_state(uid, race, name="", role="townsfolk", shop=-1, floor=0):
     st = npc_state.get(uid)
     if st is None:
         st = {"race": race, "name": name, "role": role, "shop": shop,
-              "first_floor": floor, "met": 0, "exchanges": []}
+              "first_floor": floor, "met": 0, "exchanges": [],
+              # Haggling: how the merchant feels about this player, and what that has done to
+              # their prices so far. Both persist for the run and are never shown as numbers.
+              "regard": 0, "deal_pct": 0, "haggle_floor": None}
         npc_state[uid] = st
         print(f"[SERVICE-DBG] new NPC {uid}: {name or race} ({role}"
               + (f", sells {SHOP_TYPES.get(shop, 'goods')}" if role == "shopkeeper" else "") + ")")
@@ -1685,7 +1830,7 @@ def _npc_memory_block(st):
     return ("WHAT YOU ALREADY SAID TO THEM (stay consistent with this; do not contradict "
             "yourself):\n" + _bullets(lines) + "\n")
 
-def build_npc_prompt(race, floor, says="", uid=0, player=0, player_name="",
+def build_npc_prompt(race, floor, says="", uid=0, player=0, player_name="", haggle="",
                      name="", role="townsfolk", shop=-1, map_name="", greeting=False):
     st = get_npc_state(uid, race, name, role, shop, floor) if uid else {
         "name": name, "role": role, "shop": shop, "exchanges": []}
@@ -1707,6 +1852,9 @@ def build_npc_prompt(race, floor, says="", uid=0, player=0, player_name="",
             + _npc_memory_block(st)
             + limits
             + closing
+            # LAST, after the closing instruction: position is a lever at 8B, and a resolved
+            # haggle must beat the generic "reply in character" that precedes it.
+            + haggle
             + 'Respond ONLY with JSON, no other text, like: {"speech": "your line"}')
 
 # ---- Reply parsing -----------------------------------------------------------
@@ -1870,7 +2018,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
             greeting = bool(data.get("greeting", False))
             npc_name = (data.get("npc_name") or "").strip()
             npc_role = (data.get("npc_role") or "townsfolk").strip()
-            npc_shop = int(data.get("shop", -1) or -1)
+            # ⚠ NOT `or -1`: shop type 0 is "arms and armor", the commonest shop in the game,
+            # and 0 is falsy -- so every weapon merchant was read as "not a shop at all" and
+            # described as generic. Pre-existing; found because haggling never fired for them.
+            _shop = data.get("shop", -1)
+            npc_shop = int(_shop) if _shop not in (None, "") else -1
             # Item identification (spec 9). The engine supplies the real name and a few decoys
             # from the same category; the service picks which one is claimed.
             ident_req = data.get("identify") or None
@@ -1949,8 +2101,26 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 elif npc:
                     if uid:
                         get_npc_state(uid, race, npc_name, npc_role, npc_shop, floor)["met"] += 1
+                    # Merchants only: a townsperson has no prices to argue about. Resolved
+                    # BEFORE generation so the model is told the outcome rather than asked for
+                    # one, and so the engine and the reply can never disagree.
+                    haggle_sec, haggle_field = "", ""
+                    if uid and npc_shop >= 0 and not greeting:
+                        with STATE_LOCK:
+                            st_m = get_npc_state(uid, race, npc_name, npc_role, npc_shop, floor)
+                            tone = merchant_tone(st_m, says)
+                            if wants_to_haggle(says):
+                                outcome, deal = haggle_attempt(st_m, floor)
+                                haggle_sec = haggle_section(outcome, deal)
+                                haggle_field = "%u:%d" % (uid, deal)
+                                print(f"[SERVICE-DBG] haggle {uid}: {outcome} "
+                                      f"(regard {st_m.get('regard', 0)}, deal {deal:+d}%)")
+                                logrec("haggle", uid=uid, race=race, player=player, floor=floor,
+                                       outcome=outcome, deal_pct=deal,
+                                       regard=st_m.get("regard", 0), tone=tone or None)
                     prompt = build_npc_prompt(race, floor, says, uid, player, player_name,
-                                              npc_name, npc_role, npc_shop, map_name, greeting)
+                                              haggle_sec, npc_name, npc_role, npc_shop,
+                                              map_name, greeting)
                 else:
                     ident_line, ident_truthful, ident_kind = None, False, ""
                     if ident_req and uid:
@@ -2004,7 +2174,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                        player=player, greeting=greeting or None, says=says[:160],
                        reply=speech[:400], gen_ms=_gen_ms, prompt_chars=len(prompt))
                 return self._send_json({"reply": speech, "action": "NONE", "name": npc_name,
-                                        "player": player, "secret": "", "boon": ""})
+                                        "player": player, "secret": "", "boon": "",
+                                        "haggle": haggle_field})
 
             name, secret, boon = "", "", ""
             with STATE_LOCK:

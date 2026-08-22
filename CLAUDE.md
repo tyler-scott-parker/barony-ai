@@ -726,6 +726,58 @@ these mines my whole life"* — picking up "the Mines" from the SETTING line. `p
 for NPCs and followers alike. Verified: 4/4 said Hamlet after, and a follower on floor 20 named
 Herx's stronghold unprompted.
 
+### Haggling with merchants
+
+A merchant who likes you shades the price your way; one you have been rude to shades it the
+other. **±1% per negotiation, capped at ±5%**, and that smallness is the design, not timidity:
+Barony's own trading skill already swings buy prices from **×3.00 down to ×1.00**
+(`items.cpp:5990`) and charisma moves sell prices by up to +100%. Anything with real economic
+weight here would just be a worse version of a system the game already has. What this buys is
+the *feeling* of having negotiated, and a reason to be civil to a shopkeeper.
+
+On a 200-gold sword: 480g at PRO_TRADING 0, and the negotiation moves it to 456 or 504. The
+game's own trading skill moves the same sword from 480 to 200.
+
+⚠ **Applied inside `Item::buyValue`/`sellValue`, not at the point of purchase.** Those are the
+only two functions the shop DISPLAY and the transaction both pass through — hooking the purchase
+alone is how you get a shop that quotes one number and charges another. Negative percent means
+"better for the player" on both sides of the counter, so `mymod_priceModifier` **flips the sign
+when selling**, or a good deal would mean opposite things buying and selling.
+
+⚠ **At PRO_TRADING ≥ 75 the negotiation stops mattering** — `buyValue` ends
+`return std::max(value, getGoldValue())`, and a maxed trader is already at that floor. Not worth
+fixing; a master haggler having nothing left to haggle for is a reasonable place to land.
+
+**The server resolves the outcome; the model only phrases it** — boons, the spy crack and
+identification all work this way, and asked to judge its own haggle the 8B agrees to practically
+anything. Regard moves on courtesy and rudeness (`MERCHANT_TONE`, rudeness costs twice what
+courtesy earns), one attempt per merchant per floor, and the outcome follows regard: liked →
+better, disliked → *worse*, neutral → a coin flip.
+
+Three things the model had to be forbidden by name, each found by testing:
+
+1. ⚠ **It quotes figures it cannot know.** Left alone it answered *"I can give ya the sword for
+   25 gold instead of 30"* — an invented 17% cut, while the shop window beside it showed the real
+   price. Every branch now forbids stating any number; the engine owns the arithmetic and the
+   merchant owns only the attitude.
+2. ⚠ **It repeats its own previous reply verbatim.** `_npc_memory_block` says *"stay consistent
+   with this; do not contradict yourself"* and quotes what the merchant said last time — so
+   repeating the sentence is the most obedient answer available. Adding a server-chosen angle
+   (`HAGGLE_GRANT_ANGLES`, the `SPY_CRACK_WARNINGS` pattern) was **not enough on its own**; the
+   fix needed the route named too: *"staying consistent means not contradicting the FACTS — it
+   does not mean repeating the sentence."* Five identical replies became five distinct ones.
+3. **A refusal gets talked round.** Each branch names the specific relenting route ("a smaller
+   discount, a compromise, or 'just this once'").
+
+⚠ **`shop` type 0 is "arms and armor" and 0 is falsy** — `int(data.get("shop", -1) or -1)` read
+every weapon merchant, the commonest shop in the game, as *not a shop at all*. Pre-existing, and
+it meant they were described generically in their own prompt. Found only because haggling never
+fired for them.
+
+`MYHG` is the seventh packet: clients compute shop prices themselves for display
+(`monster_shopkeeper.cpp:1074` calls `buyValue` with `clientnum`), so without it a client would
+see the pre-haggle price and be charged the post-haggle one. 45 assertions in `test_haggle.py`.
+
 ### Item identification (design spec §9)
 
 `/aiidentify [n]` — ask your follower what your nth unidentified item is. **The engine stays
@@ -1015,6 +1067,7 @@ So the only new netcode is **three packets** (`MYID`/`MYIV` for identify aside):
 | `MYAI` | client → host | `[4]`=pnum, `[5..]`=utterance | the client→host direction has no vanilla equivalent |
 | `MYNM` | host → clients | `[4..7]`=uid, `[8..]`=name | vanilla fills a follower's `clientStats->name` **only at recruit time** (`LEAD`); a later rename needs its own packet or the party HUD never updates |
 | `MYFR` | host → clients | `[4]`=everybodyfriendly | `/friendly` is host-local and vanilla never networks it, which silently made the whole test harness single-player-only — see below |
+| `MYHG` | host → clients | `[4..7]`=shopkeeper uid, `[8]`=percent+100 | clients compute shop prices themselves, so a haggle the client does not know about shows one price and charges another |
 
 ⚠ **`/friendly` was never replicated, and it silently broke co-op recruiting for the entire
 project.** Monsters behaved correctly for clients — pacified, non-hostile — because monster AI is
