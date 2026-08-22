@@ -1113,14 +1113,44 @@ def flush_resummon(uid, race, floor, player=0):
         return
     record_event(uid, race or st.get("race", ""), "resummoned", floor, player)
 
-def record_event(uid, race, etype, floor, player=0, origin="", origin_key=""):
+# Deaths and injuries that carry no social cost, because the target had it coming.
+#
+# Killing a traitor you correctly identified should not cost you the loyalty of everyone else.
+# The spy's tells are visible to the player and the rest of the party is standing right there,
+# so it reads as the party agreeing with you rather than as a murder they will hold against you.
+#
+# ⚠ Unconditional, deliberately: it does NOT require the spy to have been "exposed" first. The
+# alternative punishes a correct read for lacking proof, and there is no proof to be had -- the
+# allegiance is never shown, and a spy who dies before cracking never confirms anything.
+NO_GRIEF_ALLEGIANCES = ("spy",)
+
+def _deserved_it(about_uid):
+    """Was the follower this event is ABOUT one the party would not mourn?"""
+    if not about_uid:
+        return False
+    return follower_state.get(about_uid, {}).get("allegiance") in NO_GRIEF_ALLEGIANCES
+
+def record_event(uid, race, etype, floor, player=0, origin="", origin_key="", about=0):
+    # A spy's death is not a bereavement. The survivors watched the same behaviour the player
+    # did; they are not going to resent you for acting on it.
+    if etype == "ally_died" and _deserved_it(about):
+        print(f"[SERVICE-DBG] {uid} watched spy {about} die; no grief recorded")
+        logrec("no_grief", uid=uid, about=about, floor=floor, player=player, race=race)
+        return False
+    # And striking one costs you nothing with THEM either -- their resentment only ever fed
+    # back into obedience you were not going to rely on.
+    if etype == "hurt_by_player" and follower_state.get(uid, {}).get(
+            "allegiance") in NO_GRIEF_ALLEGIANCES:
+        print(f"[SERVICE-DBG] struck spy {uid}; no relationship cost")
+        logrec("no_grief", uid=uid, floor=floor, player=player, race=race, struck=True)
+        return False
     st = get_follower_state(uid, race, player, origin, origin_key)
     if etype != "resummoned":
         flush_resummon(uid, race, floor, player)   # the recall happened first
     st.setdefault("event_log", [])
     # dedup: a follower can only be recruited once
     if etype == "recruitment" and any(e["type"] == "recruitment" for e in st["event_log"]):
-        return
+        return False
     importance = EVENT_IMPORTANCE.get(etype, "notable")
     record = {
         "type": etype, "floor": floor, "claim": _event_claim(etype, floor, race, st),
@@ -1145,6 +1175,7 @@ def record_event(uid, race, etype, floor, player=0, origin="", origin_key=""):
         deltas = {"friendship": IMPORTANCE_WEIGHT.get(importance, 0)}
     adjust(st, **deltas)
     print(f"[SERVICE-DBG] event '{etype}' recorded for follower {uid}; {dims_summary(st)}")
+    return True
 
 def events_for_prompt(st, budget=6):
     ranked = sorted(st.get("event_log", []),
@@ -2327,11 +2358,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
                         reset_run()
                         logrec("new_run")
                     elif uid:
-                        record_event(uid, race, evt, floor, player, origin, origin_key)
-                        st_e = follower_state.get(uid, {})
-                        logrec("event", event=evt, uid=uid, race=race, floor=floor,
-                               player=player,
-                               dims={d: st_e.get(d, 0) for d in DIMENSIONS} if st_e else None)
+                        recorded = record_event(uid, race, evt, floor, player, origin,
+                                                origin_key, int(data.get("about", 0) or 0))
+                        # Only log an event that actually happened: logreview counts these, and
+                        # a suppressed one showing up would misreport the run.
+                        if recorded:
+                            st_e = follower_state.get(uid, {})
+                            logrec("event", event=evt, uid=uid, race=race, floor=floor,
+                                   player=player,
+                                   dims={d: st_e.get(d, 0) for d in DIMENSIONS} if st_e else None)
                 return self._send_json({"ok": True})
 
             # Resolve the follower's state row BEFORE anything reads it. Every helper below is

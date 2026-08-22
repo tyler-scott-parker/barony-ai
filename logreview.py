@@ -90,6 +90,17 @@ def main():
                 spy = "  <-- SPY" if r.get("allegiance") == "spy" else ""
                 mot = f"  motive: {r['motive']}" if r.get("motive") else ""
                 print(f"   uid {r.get('uid')} ({r.get('race','?')}) {r.get('allegiance')}{spy}{mot}")
+        ng = [r for r in recs if r["kind"] == "no_grief"]
+        if ng:
+            deaths = [r for r in ng if not r.get("struck")]
+            hits = [r for r in ng if r.get("struck")]
+            print("\nSPIES DEALT WITH (no social cost, because they had it coming)")
+            if deaths:
+                print(f"   {len(deaths)} companion(s) watched a spy die and did not hold it "
+                      "against the player")
+            if hits:
+                print(f"   {len(hits)} strike(s) on a spy cost nothing")
+
         reb = [r for r in recs if r["kind"] == "rebind"]
         if reb:
             print("\nCOMPANION CONTINUITY (summons and bots that came back)")

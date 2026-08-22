@@ -877,6 +877,36 @@ moving soon, though."*
 throws. Caught by the test, and it would have thrown the first time the feature ever fired in a
 real run.
 
+### Killing a spy costs you nothing
+
+⚠ **`ally_died` used to fire for the survivors whatever the deceased had been doing**, so
+correctly identifying a traitor and dealing with them cost you −trust, +fear and +resentment
+across the whole rest of the party. The player was punished for a correct read.
+
+Two suppressions, both gated on `allegiance == "spy"`:
+
+| | |
+|---|---|
+| `ally_died` | the survivors do not grieve, and nothing is written into their memory |
+| `hurt_by_player` | striking the spy costs nothing with the spy either |
+
+Everything else is untouched: a `loyal`, `self_interested`, `fearful`, `bound` or `machine` death
+is mourned exactly as before, and hitting any non-spy still costs what it always did.
+
+⚠ **Unconditional, deliberately — it does NOT require the spy to have been "exposed" first.**
+There is no proof to be had: allegiance is never shown, and a spy who dies before cracking never
+confirms anything. Requiring proof would punish a correct read for lacking evidence the game does
+not provide.
+
+**The engine has to name the deceased**, since allegiance lives service-side. `ally_died` carries
+an `about` uid via `mymod_recordEventAbout()` — an internal overload rather than widening
+`mymod_recordEvent`, whose signature is externed from `files.cpp` and `actmonster.cpp` and would
+have dragged two upstream files along. A death with no `about` (an unknown body) is still mourned.
+
+⚠ **`record_event` now returns whether it actually recorded**, and the handler only logs an
+`event` when it did. Without that, `logreview` counted a suppressed `ally_died` as a real one and
+misreported the run.
+
 ### Boons
 `boon_roll(st, floor)`: friendship ≥10, one per follower per floor, `chance = min(0.35, (f-10)/200)`. Measured: none at f9, ~2% at f15, ~9% at f30, ~19% at f45, ~25% at f60.
 
