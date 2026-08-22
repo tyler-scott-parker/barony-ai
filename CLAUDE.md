@@ -763,9 +763,29 @@ Arrival is `getMinotaurTimeToArrive()` — **150s**, or 210s below floor 5, on 1
 is also a 1-in-5 chance the **ZAP Brigade** (nine humans) spawns 30s before arrival
 (`monster_minotaur.cpp:694`).
 
-⚠ **Starting the timer mid-floor is SILENT.** The minotaur warning speech fires on level ENTRY
-(`actplayer.cpp:8089`), so nothing announces it. That silence is the design: the consequence
-arrives two and a half minutes later and the player has to work backwards.
+⚠ **Starting the timer mid-floor is silent in the engine** — the warning speech fires on level
+ENTRY (`actplayer.cpp:8089`) — **so the mod fires it explicitly.** Silence was the wrong call: the
+minotaur is fast, and 150 seconds of nothing followed by it rounding a corner is an unannounced
+execution on a floor the player had no reason to expect one. Tension needs a clock the player can
+see.
+
+`mymod_minotaurWarningTick()` delivers vanilla's own two-stage warning — *"You hear a voice inside
+your head…"* then *"My minotaur is hungry!"*, with the follow-up 8s later. It is **Herx** taunting
+you, not the spy, so it is fair and legible without naming the culprit.
+
+⚠ **Delayed 9 seconds, on purpose.** Herx gloating in the same beat as the spy's small talk hands
+the player the culprit for free and throws the tell away. Nine seconds of separation stops the two
+reading as cause and effect and costs **6%** of the countdown:
+
+| floors | spy speaks | Herx warns | minotaur | warning the player gets |
+|---|---|---|---|---|
+| 5–9, 15–19 | 0s | 9s (+8s) | 150s | **141s** |
+| 10–14 | 0s | 9s (+8s) | 210s | **201s** |
+
+⚠ **Cancelled if the party leaves the floor inside the delay window.** Level generation resets
+`minotaurlevel` and destroys the timer, so without the guard Herx would gloat about nothing on the
+next floor down. `messagePlayerColor` self-replicates, so one per-player loop reaches the whole
+party including remote clients.
 
 **Gating** — every bound is about the difference between a betrayal and a mugging:
 
