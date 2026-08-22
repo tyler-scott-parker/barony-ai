@@ -84,6 +84,29 @@ Categories=Game;
 DESK
 echo "  Added an Adorcism entry to your applications menu."
 
+# --- voice model, if this build wants one ---------------------------------------------
+# Not shipped in the download: it is 142 MB, it is optional, and fetching it here means the
+# zip stays small and you can choose the smaller model on a slow machine.
+if [ ! -f "$HERE/ggml-base.en.bin" ] && [ ! -f "$HERE/ggml-tiny.en.bin" ]; then
+  echo
+  read -r -p "  Download the voice model for push-to-talk? 142 MB. (y/N): " want
+  case "$want" in
+    y|Y)
+      url="https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin"
+      echo "  Downloading..."
+      if command -v curl >/dev/null; then curl -L --fail -o "$HERE/ggml-base.en.bin.part" "$url"
+      else wget -O "$HERE/ggml-base.en.bin.part" "$url"; fi
+      if [ -s "$HERE/ggml-base.en.bin.part" ]; then
+        mv "$HERE/ggml-base.en.bin.part" "$HERE/ggml-base.en.bin"
+        echo "  Voice model ready. Hold V in game to talk."
+      else
+        rm -f "$HERE/ggml-base.en.bin.part"
+        echo "  Download failed. Voice stays off; everything else works. Re-run setup to retry."
+      fi ;;
+    *) echo "  Skipped. You can type instead, and re-run setup later if you change your mind." ;;
+  esac
+fi
+
 echo
 echo "  Done. Start Steam, then launch Adorcism."
 echo "  Your host needs to be hosting; you just join their game as normal."

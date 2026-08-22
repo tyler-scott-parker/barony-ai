@@ -102,6 +102,26 @@ if errorlevel 1 (
   echo   Added "Adorcism" to your desktop.
 )
 
+rem --- 6. Voice model, if wanted. Not shipped in the zip: 142 MB and optional. -----
+if not exist "%~dp0ggml-base.en.bin" if not exist "%~dp0ggml-tiny.en.bin" (
+  echo.
+  set "WANT="
+  set /p "WANT=  Download the voice model for push-to-talk? 142 MB. (y/N): "
+  if /i "!WANT!"=="y" (
+    echo   Downloading...
+    rem curl ships with Windows 10 and later.
+    curl -L --fail -o "%~dp0ggml-base.en.bin.part" "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin"
+    if exist "%~dp0ggml-base.en.bin.part" (
+      move /y "%~dp0ggml-base.en.bin.part" "%~dp0ggml-base.en.bin" >nul
+      echo   Voice model ready. Hold V in game to talk.
+    ) else (
+      echo   Download failed. Voice stays off; everything else works. Re-run Setup to retry.
+    )
+  ) else (
+    echo   Skipped. You can type instead, and re-run Setup later if you change your mind.
+  )
+)
+
 echo.
 echo   Done. Start Steam, then run Adorcism from your desktop.
 echo   Your host needs to be hosting; you just join their game as normal.

@@ -1242,6 +1242,44 @@ answered Bram by name without being told to.
 *if* that player chooses to run `voice_bridge.py` (Python + faster-whisper) — transcribed text goes
 out over the same `MYAI` path. Optional extra, never a requirement.
 
+### whisper.cpp in-process: voice with no Python at all
+
+`-DADORCISM_WHISPER=ON -DWHISPER_ROOT=<checkout>` builds whisper.cpp into the binary, so a co-op
+client needs **nothing but the mod and a model file** — no Python, no pip, no CUDA. OFF by default:
+it adds real compile time and the mod is fully usable without it (the clip falls through to
+`voice_bridge.py`, and falls through at runtime too if no model is on disk).
+
+**Measured on this machine, CPU only:**
+
+| | base.en (142 MB) | tiny.en (75 MB) |
+|---|---|---|
+| model load | 0.05s (mmap) | 0.04s |
+| per utterance | **~0.78s**, flat regardless of clip length | ~0.32s |
+| *"wait here and guard this door"* | ✅ | ✗ "got this door" |
+| *"ask the gnome about Baphomet and the kobold camp"* | ✅ "Aphomet" | ✗ "Nomemout, Afomet, Cobbled Camp" |
+
+base.en is the default. 0.78s is imperceptible after releasing a key, and the accuracy gap on this
+game's vocabulary is large. Both numbers are against **espeak-ng synthetic speech**, which is much
+harder than a human voice — real speech should do better than this on both.
+
+⚠ **The vocabulary prompt is doing real work.** Whisper has no prior for these proper nouns.
+Measured on the same clip, `initial_prompt` turned *"Barrenburg is waiting in the mines below
+Hamlet"* into *"Baron Herx is waiting in the Mines below Hamlet."* Keep the list to names the model
+would otherwise mangle — it is prepended as decode context, so length costs time.
+
+`use_gpu = false` deliberately: the GPU is holding the 8B at ~6 of 8 GB, and this must never
+compete with generation. Transcription runs on a detached thread (0.78s is eleven frames) and the
+finished text is collected by `mymod_pollPTT` on the main thread. `mymod_onTranscribed()` is now
+the one place that decides what a finished utterance does, whichever transcriber produced it.
+
+Model discovery: `ADORCISM_WHISPER_MODEL` → beside the binary → `models/` → cwd, preferring
+base.en over tiny.en when both exist. Tested in `wavtest.cpp` (32 assertions now), including that
+an **empty** env var is ignored rather than taken literally.
+
+Binary grows 14.2 → 16.3 MB; the static libs are 3.7 MB total. The model is **not** committed and
+**not** shipped in the zip — `dist/` setup offers to download it, which keeps the mod download
+small and lets a slow machine choose tiny.en.
+
 ### Push-to-talk: capture moved into the mod
 
 The microphone is recorded by the **mod** now (SDL, in C++), not by a Python helper. That
