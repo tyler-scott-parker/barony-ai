@@ -25,7 +25,7 @@ Fetch upstream with `git fetch origin`; push your work with `git push mine mymod
 
 - All mod C++ now lives in **`src/mymod/mymod.cpp`** + `mymod.hpp` (extracted so upstream merges stay clean)
 - Listed in `src/CMakeLists.txt` under `GAME_SOURCES` — **not** in `EDITOR_SOURCES`
-- Service: `~/barony-ai/service.py` (port 5001), plus `barony_lore_full.json` (449KB, 45 sections), `barony_lore.json` (**only** source of `world.setting` — its wording differs from the full file's, so they are not interchangeable), `race_lore.json`, `race_books.json`, `comprehension.json`, `voice_bridge.py`, `tts_bridge.py` (optional voice output, off by default; its `.venv-tts/` and `voices/` are gitignored)
+- Service: `~/barony-ai/service.py` (port 5001), plus `barony_lore_full.json` (449KB, 45 sections), `barony_lore.json` (**only** source of `world.setting` — its wording differs from the full file's, so they are not interchangeable), `race_lore.json`, `race_books.json`, `comprehension.json`, `follower_names.json`, `voice_bridge.py`, `tts_bridge.py` (optional voice output, off by default; its `.venv-tts/` and `voices/` are gitignored)
 - Data files are resolved relative to `service.py`, so the repo can live anywhere
 - Dev binary: `~/.local/share/Steam/steamapps/common/Barony/barony-modded`
 - IPC via `/tmp/mymod_*.json` (Linux-specific; needs a portability pass before release)
@@ -522,6 +522,44 @@ names like `Zx'thal` exist, so this was quietly costing both systems.
 
 Order is unchanged and matters: JSON field → introducer patterns → bare reply. 17/17 on a table
 built from real session strings, negatives included.
+
+**Names are PRE-CACHED server-side, not invented by the model** (`follower_names.json`, 1432
+names). Asked to make one up, the 8B draws from a handful — the same names kept reappearing
+across separate playthroughs. So the service reserves a name when the follower is created and
+the nudge names it explicitly (*"Your name is Skarn … use EXACTLY that name"*); the model only
+phrases the reveal. Same division of labour as boons, the spy crack and identification, and for
+the same reason: one literal choice left to the 8B comes back canned.
+
+- **Lookup is tiered, not a union** — race pool → the race's comprehension group → `default`,
+  mirroring `noise_for`. A union averaged the flavour away and produced *Perrick the goblin*;
+  tiers spend the goblin names first. The group tier is what a race with **no entry of its own**
+  draws from, which is the DLC case flagged below.
+- **`name_history.json` is the part that fixes the actual complaint.** A name is written there
+  only when it is *actually spoken in play* (`commit_name`), and reserved-but-never-revealed
+  names are released, so a long session doesn't burn the pool. `reserve_name` skips anything in
+  the last `NAME_HISTORY_MAX` (400) revealed names, so consecutive runs don't repeat. Gitignored
+  — it is per-player state. Env: `BARONY_AI_NAMEHIST`, `BARONY_AI_NAMEHIST_MAX`.
+- Constraints weaken in a fixed order when a pool runs dry: cross-run repetition is conceded
+  **before** within-run repetition — two followers sharing a name in one party is worse.
+
+⚠ **The reserved name appearing verbatim in the reply is itself a reveal.** `extract_name`'s
+patterns only catch phrasings they know; here we know the exact string to look for. That match is
+**case-sensitive and gated on the nudge being live** (`friendship >= 5`) — several pool names are
+ordinary words (`Ember`, `Scrap`, `Bill`), and a lowercase one in passing must not read as an
+introduction.
+
+⚠ **If the model coins its own name anyway, the model wins** — `resolve_revealed_name` takes it
+and releases the reservation. A party HUD disagreeing with the speech bubble the player just read
+is worse than a repeated name. `logreview` flags those as `self-chosen`; they are the cases where
+the prompt lost.
+
+**`python3 service.py --names`** prints pool coverage and round-trips every name through the real
+`extract_name`. A name the extractor can't read back would be assigned, spoken, and silently never
+stick — invisible for exactly one race. Names must match `[A-Z][a-zA-Z'\-]+` (**no digits**, so
+`Cog-Seven` works and `Unit-7` cannot) and must miss `NAME_REJECTS` (`Nobody` was caught this way).
+Verified end-to-end: 12 followers over 3 consecutive runs, 4 races, **12/12 used the reserved name,
+zero repeats**; 28 unit assertions cover reservation, the reveal routes, release, persistence and
+pool exhaustion.
 
 **The HUD rename is free:** `GameUI.cpp:2401` already reads `followerStats->name` and displays it when non-empty and not `"nothing"`. So `strncpy(Stat->name, ...)` renames the party UI with no rendering change. (`getMonsterLocalizedName` in `actmonster.cpp:224` does *not* use `Stat->name` for ordinary races — dead end.)
 
@@ -1026,7 +1064,7 @@ is unchanged from the single-player path that already works. Untested in an actu
 
 **Designed, not built — the peaceful Herx route.** `actWinningPortal` already contains the answer: the portal **exists on the boss floor, invisible**, and reveals itself when its per-tick scan finds no `LICH` or `DEVIL` alive. So a spared-Herx ending needs only (a) a flag excluding a pacified Herx from that scan and (b) clearing his hostility. No new entity, no replaced code path. The chain that *earns* it — merchants, testimony, leverage — is the real project and is undesigned. Design the failure mode first: a half-fired peaceful path could strand the player with a non-hostile boss and no exit.
 
-**DLC:** *Deserters & Disciples* shipped Jan 29 2026 with *Instruments of Destruction Part 1* (which removed Magic/Casting/Swimming and revamped magic into Sorcery/Thaumaturgy/Mysticism). **Part 2 is the upcoming one.** New races will need entries in `race_lore.json`, `comprehension.json`, and the lore file's denizen profiles or they fall through to generic defaults. **Answered Aug 21 2026: a `STEAMWORKS_ENABLED=OFF` build can NOT** — it compiles the GOG `.key` branch and locks everything. `barony-modded-steam` (SDK 1.53a, `-DSTEAMWORKS`) unlocks all three packs against real Steam entitlement; all DLC races confirmed present in character creation. See **The DLC build** under Build & run. The lore-file gap above is now live, not hypothetical.
+**DLC:** *Deserters & Disciples* shipped Jan 29 2026 with *Instruments of Destruction Part 1* (which removed Magic/Casting/Swimming and revamped magic into Sorcery/Thaumaturgy/Mysticism). **Part 2 is the upcoming one.** New races will need entries in `race_lore.json`, `comprehension.json`, and the lore file's denizen profiles or they fall through to generic defaults. (`follower_names.json` is the exception — an unknown race still draws from its comprehension group, so naming degrades to a fitting pool rather than a broken one.) **Answered Aug 21 2026: a `STEAMWORKS_ENABLED=OFF` build can NOT** — it compiles the GOG `.key` branch and locks everything. `barony-modded-steam` (SDK 1.53a, `-DSTEAMWORKS`) unlocks all three packs against real Steam entitlement; all DLC races confirmed present in character creation. See **The DLC build** under Build & run. The lore-file gap above is now live, not hypothetical.
 
 ---
 

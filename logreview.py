@@ -90,6 +90,16 @@ def main():
                 spy = "  <-- SPY" if r.get("allegiance") == "spy" else ""
                 mot = f"  motive: {r['motive']}" if r.get("motive") else ""
                 print(f"   uid {r.get('uid')} ({r.get('race','?')}) {r.get('allegiance')}{spy}{mot}")
+        named = [r for r in recs if r["kind"] == "named"]
+        if named:
+            print("\nNAMES REVEALED")
+            for r in named:
+                # A follower that ignored its reserved name is the one interesting case:
+                # it means the prompt lost, and that name is now the model's own low-entropy
+                # pick -- the thing follower_names.json exists to avoid.
+                own = "  <-- self-chosen, ignored '%s'" % r.get("assigned") if r.get("self_chosen") else ""
+                print(f"   uid {r.get('uid')} ({r.get('race','?')}) is '{r.get('name')}'{own}")
+
         herx = [r for r in recs if r["kind"] == "herx"]
         if herx:
             print("\nHERX ARC")

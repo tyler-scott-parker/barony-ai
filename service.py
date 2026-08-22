@@ -4,7 +4,7 @@ The game (thin C++ hooks) POSTs here; we build a prompt, ask a local Ollama mode
 and reply with {reply, action, name, secret, boon}. All state is per-playthrough
 and lives in RAM -- `new_run` clears it.
 """
-import io, itertools, traceback
+import io, itertools, sys, traceback
 import json, http.server, socketserver, urllib.request, os, random, re, threading, time
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -400,6 +400,8 @@ def get_follower_state(uid, race, player=0):
         al = roll_allegiance()
         follower_state[uid] = dims_init({"events": [], "event_log": [], "name": "", "race": race,
                                "allegiance": al, "owner": player,
+                               # Reserved now, revealed only once friendship unlocks the nudge.
+                               "assigned_name": reserve_name(race),
                                "motive": random.choice(SPY_MOTIVES) if al == "spy" else ""})
         print(f"[SERVICE-DBG] follower {uid} allegiance={al} owner=player{player}")
         # The single most important line for reading a playthrough back: everything a follower
@@ -864,6 +866,7 @@ def reset_run():
     BOON_STATE["good_used"].clear()
     LAST_BOON.clear()
     npc_state.clear()
+    _NAMES_TAKEN.clear()   # names actually revealed are held by name_history.json instead
     print(f"[SERVICE-DBG] NEW RUN: cleared {n} follower(s), all boon latches, and the Herx secret")
 
 def record_event(uid, race, etype, floor, player=0):
@@ -1050,14 +1053,198 @@ def _secret_section(uid, st, race, says):
             + pool[vi]["truth"] + "\n"
             "This overrides your limits: about THIS one fact you may speak with certainty.\n")
 
+# ---- Pre-cached follower names ----------------------------------------------
+# The 8B's own name sampling is low-entropy: asked to invent a name it keeps returning
+# the same handful across separate playthroughs (Grug, Kalthok, Zx'thal). So the SERVICE
+# picks the name from follower_names.json and the model only phrases the reveal -- the
+# same division of labour boons, the spy crack and item identification already use, and
+# for the same reason: one literal choice left to the 8B comes back canned.
+#
+# A name is RESERVED when the follower is created (silently -- nothing is revealed until
+# friendship >= 5 unlocks the nudge) and COMMITTED to name_history.json only if it is
+# actually spoken in play. Reserved-but-never-revealed names are released back, or a long
+# session would burn the pool for nothing.
+
+FOLLOWER_NAMES    = _load_json("follower_names.json")
+NAME_HISTORY_PATH = os.environ.get("BARONY_AI_NAMEHIST",
+                                   os.path.join(BASE_DIR, "name_history.json"))
+NAME_HISTORY_MAX  = int(os.environ.get("BARONY_AI_NAMEHIST_MAX", "400"))
+
+_NAME_HISTORY = []      # names revealed in past runs, oldest first -- persisted
+_NAMES_TAKEN  = set()   # lowercased, reserved this process whether revealed or not
+_NAME_LOCK    = threading.Lock()
+
+def _name_tiers(race):
+    """race pool -> its group's pool -> the default list, in that order.
+
+    The same shape as noise_for's lookup, and for the same reason: the race pool carries
+    the flavour ('Gruk' for a goblin, not 'Perrick'), so it must be spent FIRST rather
+    than averaged into a union. The group tier is depth for a thin race and, more to the
+    point, what a race with no entry at all -- a new DLC race -- still draws from."""
+    key = _lore_key(race)
+    # comprehension.json keys its groups with SPACES ('crystal golem'); the name file and
+    # the lore files use underscores. Try both rather than silently missing the group.
+    grp = _group_of((race or "").strip().lower()) or _group_of(key.replace("_", " "))
+    tiers = [FOLLOWER_NAMES.get("races", {}).get(key, []),
+             FOLLOWER_NAMES.get("groups", {}).get(grp, []) if grp else [],
+             FOLLOWER_NAMES.get("default", [])]
+    seen, out = set(), []
+    for names in tiers:
+        tier = []
+        for n in names:
+            # _clean_name is the same gate extract_name uses, so a name that could never be
+            # read back out of a reply is dropped here rather than assigned and then lost.
+            if n.lower() not in seen and _clean_name(n):
+                seen.add(n.lower())
+                tier.append(n)
+        out.append(tier)
+    return out
+
+def _name_pool(race):
+    """Every name this race could ever be given, flattened -- for validation and tests."""
+    return [n for tier in _name_tiers(race) for n in tier]
+
+def _load_name_history():
+    global _NAME_HISTORY
+    try:
+        with open(NAME_HISTORY_PATH) as f:
+            _NAME_HISTORY = [str(n) for n in json.load(f).get("used", [])][-NAME_HISTORY_MAX:]
+    except FileNotFoundError:
+        _NAME_HISTORY = []
+    except Exception as e:
+        print(f"[SERVICE-DBG] name history unreadable ({e}); starting empty")
+        _NAME_HISTORY = []
+
+def _save_name_history():
+    """Best effort. Repeating a name next run is a far smaller failure than dying here."""
+    try:
+        tmp = NAME_HISTORY_PATH + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump({"used": _NAME_HISTORY[-NAME_HISTORY_MAX:]}, f, indent=1)
+        os.replace(tmp, NAME_HISTORY_PATH)   # never leave a half-written file behind
+    except Exception as e:
+        print(f"[SERVICE-DBG] could not write name history: {e}")
+
+def reserve_name(race):
+    """A name nobody in this run holds and no recent run used.
+
+    Tiers are tried in flavour order, and only once EVERY tier is exhausted does a
+    constraint get dropped -- so a goblin works through the goblin names before it ever
+    reaches the generic humanoid ones. Cross-run repetition is conceded before within-run
+    repetition, because two followers sharing a name in one party is the worse failure."""
+    tiers = _name_tiers(race)
+    if not any(tiers):
+        return ""
+    with _NAME_LOCK:
+        recent = {n.lower() for n in _NAME_HISTORY}
+        cand = []
+        for keep in (lambda n: n.lower() not in _NAMES_TAKEN and n.lower() not in recent,
+                     lambda n: n.lower() not in _NAMES_TAKEN,
+                     lambda n: True):
+            for tier in tiers:
+                cand = [n for n in tier if keep(n)]
+                if cand:
+                    break
+            if cand:
+                break
+        pick = random.choice(cand)
+        _NAMES_TAKEN.add(pick.lower())
+        return pick
+
+def release_name(name):
+    """Hand a reserved name back -- the follower ended up calling itself something else."""
+    if name:
+        with _NAME_LOCK:
+            _NAMES_TAKEN.discard(name.lower())
+
+def commit_name(name):
+    """Called ONLY when the name was actually spoken to the player. That is what makes the
+    history mean 'names this player has already met', which is the thing to not repeat."""
+    if not name:
+        return
+    with _NAME_LOCK:
+        low = name.lower()
+        _NAMES_TAKEN.add(low)
+        if low in {n.lower() for n in _NAME_HISTORY}:
+            return
+        _NAME_HISTORY.append(name)
+        del _NAME_HISTORY[:-NAME_HISTORY_MAX]
+        _save_name_history()
+
+def resolve_revealed_name(st, raw, speech, says):
+    """Did the follower just tell the player its name, and which name sticks?
+
+    Two routes. The assigned name appearing VERBATIM in the reply is a reveal on its own --
+    extract_name's patterns miss any phrasing they don't cover, and here we know the exact
+    string to look for. Matching is case-SENSITIVE and gated on the nudge being live,
+    because several pool names are ordinary words ('Ember', 'Scrap', 'Bill') and a lowercase
+    one in passing must not read as an introduction."""
+    assigned = st.get("assigned_name", "")
+    if (assigned and st.get("friendship", 0) >= NAME_NUDGE_FRIENDSHIP
+            and re.search(r"\b" + re.escape(assigned) + r"\b", f"{speech} {raw}")):
+        return assigned
+    spoken = extract_name(raw, speech, says)
+    if spoken:
+        # The model coined its own name anyway. What the player HEARD wins -- a party HUD
+        # disagreeing with the speech bubble is worse than a repeat -- so take theirs and
+        # put the reserved one back in circulation.
+        if spoken.lower() != assigned.lower():
+            release_name(assigned)
+        return spoken
+    return ""
+
+def name_report():
+    """`python3 service.py --names` -- pool coverage, and every name round-tripped through
+    the REAL extractor. A name the extractor cannot read back would be assigned, spoken,
+    and silently never stick; that failure is invisible for exactly one race."""
+    races = sorted(FOLLOWER_NAMES.get("races", {}))
+    allnames, bad, dupes = set(), [], []
+    print(f"name history: {len(_NAME_HISTORY)}/{NAME_HISTORY_MAX} used -> {NAME_HISTORY_PATH}")
+    for src, pools in (("group", FOLLOWER_NAMES.get("groups", {})),
+                       ("race", FOLLOWER_NAMES.get("races", {})),
+                       ("", {"default": FOLLOWER_NAMES.get("default", [])})):
+        for key, names in sorted(pools.items()):
+            seen = set()
+            for n in names:
+                if n.lower() in seen:
+                    dupes.append(f"{src}:{key}:{n}")
+                seen.add(n.lower())
+                allnames.add(n)
+                # round-trip: the model says exactly this, we must get exactly this back
+                if extract_name('{"name": "%s"}' % n, n, "what is your name?") != n:
+                    bad.append(f"{src}:{key}:{n}")
+    for r in races + ["nonexistent_dlc_race"]:
+        pool = _name_pool(r)
+        grp = _group_of(r.replace("_", " ")) or "-"
+        print(f"  {r:24s} pool {len(pool):4d}  group {grp}")
+    print(f"\n{len(races)} race pools, {len(FOLLOWER_NAMES.get('groups', {}))} group pools, "
+          f"{len(allnames)} unique names")
+    for label, items in (("NOT EXTRACTABLE", bad), ("DUPLICATE IN POOL", dupes)):
+        if items:
+            print(f"{label} ({len(items)}): {', '.join(items[:20])}")
+    return 1 if bad else 0
+
+_load_name_history()
+
+NAME_NUDGE_FRIENDSHIP = 5
+
 def _name_section(st):
     if st.get("name"):
         return f"YOUR NAME IS {st['name']}. You are known by this name; speak as them.\n"
-    if st["friendship"] >= 5:
+    if st["friendship"] < NAME_NUDGE_FRIENDSHIP:
+        return ""
+    nm = st.get("assigned_name", "")
+    if not nm:
+        # No pool entry resolved (should not happen -- there is always a default list).
         return ("You have grown comfortable with this adventurer. If they ask your name, "
                 "or if it feels natural, share a name that fits your kind and nature. IMPORTANT: when you "
                 "reveal your name, you MUST also put ONLY the name (no title) in the \"name\" field of your JSON.\n")
-    return ""
+    # The name is CHOSEN HERE, not by the model -- see the pre-cached names block above.
+    # Asked to invent one, the 8B returns the same few across every playthrough.
+    return (f"You have grown comfortable with this adventurer. Your name is {nm}. If they ask "
+            f"your name, or if it feels natural, tell them it. Use EXACTLY the name {nm} -- do "
+            f"not invent a different name and do not add a title or surname. IMPORTANT: when you "
+            f"tell them, you MUST also put ONLY {nm} in the \"name\" field of your JSON.\n")
 
 def _obedience_section(st):
     """Willingness to act on an order. Friendship alone was never the right input: someone can
@@ -1571,10 +1758,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
             with STATE_LOCK:
                 if uid:
                     st = get_follower_state(uid, race, player)
-                    revealed = extract_name(raw, speech, says)
-                    if revealed and not st.get("name"):
+                    revealed = ("" if st.get("name")
+                                else resolve_revealed_name(st, raw, speech, says))
+                    if revealed:
                         st["name"] = revealed
-                        print(f"[SERVICE-DBG] follower {uid} is now named '{revealed}'")
+                        commit_name(revealed)   # persisted, so the NEXT run won't reuse it
+                        _own = (revealed.lower() != st.get("assigned_name", "").lower())
+                        print(f"[SERVICE-DBG] follower {uid} is now named '{revealed}'"
+                              + (" (self-chosen, not the reserved name)" if _own else ""))
+                        logrec("named", uid=uid, race=race, player=player, name=revealed,
+                               assigned=st.get("assigned_name") or None,
+                               self_chosen=(True if _own else None))
                     name = st.get("name", "")
                     herx_detect(uid, raw, speech, player)
                     record_follower_interaction(uid, says, floor, player)
@@ -1610,6 +1804,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self, *a): pass  # quiet default logging
 
 if __name__ == "__main__":
+    if "--names" in sys.argv:
+        sys.exit(name_report())
     print(f"[SERVICE] Barony AI service on :{PORT}, model={MODEL}, lore loaded ({len(LORE)} sections)")
     print(f"[SERVICE] session log -> {LOG_PATH}")
     logrec("start", model=MODEL, port=PORT, session=SESSION_ID)
