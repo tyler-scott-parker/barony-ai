@@ -912,6 +912,50 @@ gyrobot control that follows normally 2/2.
 bot, every summon and every recruited monster is silent in the base game. There is no canned bot
 voice to match or fall back to, so whatever these say is entirely ours.
 
+#### The dummybot heckler
+
+The dummybot's combat value **is being noticed** — monsters spot one from 96 units away
+(`actmonster.cpp:6115`) where they would not see anything else. So while deployed it shouts
+insults at the nearest hostile, roughly every 1.2s, and is certain it is a celebrated warrior.
+
+⚠ **Lines come in MAGAZINES, not one generation per shout.** Rapid-fire is the whole joke and a
+generation is 1–4s, so a per-line request would either stutter or eat the GPU real dialogue needs.
+One call returns a batch of 12 (measured **1.7–2.1s**), the mod fires them locally at no cost, and
+a refill goes out at 5 remaining — about 6s of buffer against a 2s refill, so it never runs dry.
+Refills are also gated on `mymod_anyPlayerBusy()`, so conversation keeps GPU priority.
+
+⚠ **Bubble only, no chat line.** The shared feed carries the actual conversation, and a heckler
+firing every 1.2s pushes real dialogue off the screen inside a single fight — at which point it
+stops being funny. `mymod_broadcastBubble` is the bubble half of `mymod_broadcastLine`, which now
+calls it, so one place still knows the `"%s"` guard. Add a chat line by calling `broadcastLine`
+instead, if it turns out to read better in play.
+
+`mymod_heckleTick()` runs **before** the ambient guards, like the fight-survival scan: firing
+costs nothing and must keep happening mid-conversation. It early-outs on the interval timer rather
+than scanning every frame, and reservoir-picks among eligible bots so several take turns instead
+of the first in map order always winning. The magazine is written for whoever the bot is yelling
+at *now*; after a target change it spends a few stale lines rather than throwing them away, and
+nobody can tell.
+
+The prompt's load-bearing instruction is the one forbidding self-awareness — *"never mention being
+a dummy, a decoy, or made of canvas. You do not know."* Without it the model writes wistful lines
+about being a decoy, which is a different (worse) joke. Sample against a crystal golem: *"Bring it
+on, Sparkle Face!"*, *"Pebble Brain, what are you waiting for?"*, *"Rocky Road will be your tomb!"*
+— and against a demon, *"My sword arm is longer than yours!"*, from a thing with no arms.
+
+`parse_heckle_lines` strips numbering, bullets and quotes (the 8B numbers lists however firmly it
+is told not to), drops preambles and trailing notes, dedupes case-insensitively, and cuts at 90
+chars on a word boundary so a bubble stays glanceable. 21 assertions in `test_heckle.py`.
+
+Heckles honour comprehension like any other overheard line — a polymorphed player who cannot
+understand a construct gets noises, sampled at refill (so a mid-magazine polymorph is stale until
+the next one). **`dummybot` had exactly one noise**, which meant a whole magazine of identical
+chimes and read as a broken feature; it now has six, drawn without immediate repeats.
+
+**No TTS for heckles**, deliberately: `tts_emit` fires at generation time, and a magazine is
+generated seconds before it is spoken, so the audio would run ahead of the bubbles. The spool's
+`TTS_MAX_PENDING = 6` would prune most of a batch anyway.
+
 #### `resummoned` — being unmade and called back
 
 The event that makes the persistence *sayable*. Fires on rebind, for summons and bots alike.

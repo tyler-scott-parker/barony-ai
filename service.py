@@ -238,6 +238,62 @@ def build_ambient_prompt(race, floor, relation="hostile"):
         + "Respond with ONLY one short spoken line (a few words), in character. No narration, no quotes, no JSON. Just the line."
     )
 
+# ---- The dummybot heckler ------------------------------------------------------------
+# A dummybot is a sprung training dummy a tinkerer bolted together and threw into a dungeon to
+# be shot at -- its combat value IS being noticed (monsters see one from 96 units away,
+# actmonster.cpp:6115). So it heckles, constantly, at everything, and understands none of this.
+#
+# ⚠ Generated in MAGAZINES, not one line per shout. Rapid-fire is the whole joke and a
+# generation is 1-4s, so a per-line request would either stutter or monopolise the GPU that
+# real dialogue needs. One call returns a batch, the mod fires them locally, and a refill is
+# requested only when the magazine runs low.
+
+HECKLE_MAX_LINES = 12
+HECKLE_MAX_CHARS = 90    # a bubble the player can read at a glance, not a speech
+
+def build_heckle_prompt(race, floor, count):
+    return (
+        "You are a DUMMYBOT: a training dummy on a spring, bolted together out of scrap and "
+        "canvas by a tinkerer, and thrown into a dungeon so that things will shoot at it "
+        "instead of at the tinkerer. That is your entire purpose and your only skill.\n"
+        "YOU DO NOT KNOW ANY OF THIS. You are certain you are a fearsome and celebrated "
+        "warrior. You have never won a fight. You do not know that either.\n"
+        f"A {race} is right in front of you on dungeon floor {floor}, and you are screaming at "
+        "it.\n"
+        f"Write {count} taunts you are shouting at it, ONE PER LINE.\n"
+        "RULES, all of them matter:\n"
+        "- VERY short. Two to eight words. They are shouted, not delivered.\n"
+        f"- Aimed at the {race} specifically — name it, insult what it is.\n"
+        "- Absurdly overconfident. You are challenging it to come and try you.\n"
+        "- Never sad, never self-aware, never mention being a dummy, a decoy, or made of "
+        "canvas. You do not know.\n"
+        "- All different from each other.\n"
+        "- No numbering, no bullets, no quotes, no narration. Just the lines."
+    )
+
+def parse_heckle_lines(raw, count):
+    """The 8B numbers and bullets lists no matter how firmly it is told not to."""
+    out, seen = [], set()
+    for line in (raw or "").splitlines():
+        line = line.strip()
+        line = re.sub(r'^\s*(?:[-*\u2022]|\d+[.):])\s*', '', line).strip()
+        line = line.strip('"\u201c\u201d\'').strip()
+        if not line or len(line) < 3:
+            continue
+        # A refusal or a preamble ("Here are 10 taunts:") is not a taunt.
+        if line.endswith(":") or line.lower().startswith(("here are", "sure", "note:")):
+            continue
+        if len(line) > HECKLE_MAX_CHARS:
+            line = line[:HECKLE_MAX_CHARS].rsplit(" ", 1)[0] + "!"
+        key = line.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(line)
+        if len(out) >= count:
+            break
+    return out
+
 # ---- Within-run follower relationship state (keyed by follower UID) ----
 # The server is threaded (one thread per request) so several players can be served at
 # once. STATE_LOCK guards every mutation of the shared run state below. It is deliberately
@@ -1820,6 +1876,37 @@ class Handler(http.server.BaseHTTPRequestHandler):
             ident_req = data.get("identify") or None
 
             # Fire-and-forget event record (e.g. recruitment): no dialogue, just remember it.
+            # Magazine refill for the dummybot heckler. Answered before any follower state is
+            # touched: it is a batch of shouted lines about a nearby enemy, not a conversation,
+            # and it belongs to no relationship.
+            if data.get("heckle"):
+                count = max(1, min(HECKLE_MAX_LINES, int(data.get("count", 8) or 8)))
+                # Same comprehension rule as every other overheard line: a polymorphed player
+                # who cannot understand a construct gets noises. Sampled at refill rather than
+                # at each shout, so a mid-magazine polymorph is stale until the next refill.
+                if not can_understand(data.get("player_race", ""), "dummybot"):
+                    # Drawn without immediate repeats: twelve identical chimes in a row reads
+                    # as a broken feature rather than as an untranslated one.
+                    lines, last = [], ""
+                    for _ in range(count):
+                        n = noise_for("dummybot")
+                        for _try in range(4):
+                            if n != last:
+                                break
+                            n = noise_for("dummybot")
+                        lines.append(n)
+                        last = n
+                    print(f"[SERVICE] -> heckle: {count} noises (player cannot understand it)")
+                    return self._send_json({"lines": lines})
+                _t0 = time.time()
+                raw = ask_ollama(build_heckle_prompt(race, floor, count))
+                lines = parse_heckle_lines(raw, count)
+                print(f"[SERVICE] -> heckle x{len(lines)} at {race}: "
+                      + " | ".join(lines[:3]))
+                logrec("heckle", race=race, floor=floor, asked=count, got=len(lines),
+                       gen_ms=int((time.time() - _t0) * 1000), sample=lines[:3])
+                return self._send_json({"lines": lines})
+
             evt = data.get("event", "")
             if evt:
                 with STATE_LOCK:
