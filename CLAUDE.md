@@ -646,6 +646,38 @@ Four paired truth/debuff variants — the flavor always matches the mechanic. Re
 
 Barony's own naming calls Herx the **midpoint** (`MOVIE_MIDGAME_HERX`, `HerxMidpoint*`), which is why friendship 50 fits.
 
+### The Herx secret: the ordering bug that suppressed the payoff
+
+⚠ **The carve-out has to land AFTER the limits it carves out of.** The offer used to end with
+*"this overrides your limits"* while sitting ~600 chars **before** the `LIMITS_HEADER` block that
+says *"say you do not know and STOP"*. This project has twice measured that whichever of two
+conflicting instructions lands later wins — which is exactly why the limits are emitted last — so
+the override lost every time and a loyal follower talked around the payoff of the entire arc.
+
+`_secret_override()` is now emitted separately, after `limits`, and names the routes the limits
+push toward (*"saying you do not know it, saying you have only heard rumours of it, or answering
+with general talk about Herx instead is WRONG"*).
+
+| | offers converted |
+|---|---|
+| loyal, before | **40%** (2/5) |
+| loyal, after | **81%** (9/11) |
+
+⚠ **Why the false secret looked healthy while the true one was broken.** The false variants are
+concrete nouns the model repeats anyway — *silver clasp*, *running water*, *Herxel* — while the
+true ones are precisely the kind of specific claim a hard limit suppresses. So the spy branch sat
+at ~80% throughout and hid the fact that the honest branch was failing.
+
+⚠ **The spy crack does NOT need to stand down for the secret** — tested, and the intuition was
+wrong. Suppressing it (as the identify path does) measured **62%** against **70%** for leaving it
+on, i.e. noise, and if anything it helps: the crack primes *"let something slip"*, which is what
+telling the secret is. The two are aligned, unlike the crack and an identify request. Reverted.
+
+**`BARONY_AI_TESTHOOK=1` enables a `{"force": {...}}` payload** that writes directly into a
+follower's state, so the friendship-50 / four-fights gate can be reached without playing to it.
+Off unless the env var is set, and the service binds loopback only. This is the only practical
+way to exercise the Herx arc; keep it.
+
 ### Allegiance & spies
 Weighted roll at recruitment: **loyal 70 / self_interested 15 / fearful 8 / spy 7**. Never shown to the player. Spies get a motive and behavioral tells: deflect on personal history, over-interest in the player's gear and plans, hesitation at Herx's name. `allegiance_section(st, says)` detects probing questions and sharpens the tell.
 
@@ -1470,7 +1502,10 @@ is unchanged from the single-player path that already works. Untested in an actu
 - Recruitment attribution for a *client's* follower — `mymod_ownerOf` is verified by reading, not by play.
 
 **Known gaps:**
-- The **false secret has never been observed firing** — all test rolls landed non-spy. It's the one branch where a bug would be invisible.
+- ~~The false secret has never been observed firing~~ **OBSERVED, and it works.** Forced via the
+  test hook: a spy is offered a false variant, tells it, and reports `0:<uid>` — and
+  `monster_lich.cpp:99` guards on `debuff > 0`, so nothing is applied. A loyal follower reports
+  its real debuff. It had simply never been rolled (7% allegiance), not broken.
 - ~~Chat history stores only the player's side~~ **FIXED.** `record_follower_interaction` now
   stores both halves and `_follower_memory_block` renders them under the NPC path's exact
   wording — *"stay consistent with this; do not contradict yourself"*, which is the version that

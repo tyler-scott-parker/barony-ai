@@ -1294,8 +1294,32 @@ def _secret_section(uid, st, race, says):
     return ("A SECRET YOU HAVE CARRIED: You know one true thing about Baron Herx, "
             "learned long ago and never spoken. You trust this adventurer enough to tell them now. "
             "Share it in your own words, plainly, as something you know for certain: "
-            + pool[vi]["truth"] + "\n"
-            "This overrides your limits: about THIS one fact you may speak with certainty.\n")
+            + pool[vi]["truth"] + "\n")
+
+def _secret_override(uid):
+    """The carve-out, emitted AFTER the hard limits — which is the whole point of it existing
+    separately.
+
+    ⚠ The secret block used to end with 'this overrides your limits', sitting ~600 chars BEFORE
+    the limits block that tells the character to say it does not know and STOP. This project has
+    twice measured that whichever of two conflicting instructions lands later wins, and the
+    limits are deliberately last. So the override was losing every time, and a loyal follower
+    talked around the payoff of the whole Herx arc. Measured: 40% of offers converted before
+    this, against a spy's 80% — the difference being that the false secrets are concrete nouns
+    the model repeats anyway, while the true ones are exactly what a hard limit suppresses.
+
+    Named routes, not a general permission: 'I do not know' and hedging are what the limits
+    push it toward, so both are forbidden here by name."""
+    pend = HERX_STATE["pending"].get(uid)
+    if not pend:
+        return ""
+    vi, is_false = pend
+    return ("THE ONE EXCEPTION TO THE LIMITS ABOVE — about Baron Herx you DO know this, for "
+            "certain, and you have already decided to tell them: "
+            + _herx_pool(is_false)[vi]["truth"] + "\n"
+            "Say it. Saying you do not know it, saying you have only heard rumours of it, or "
+            "answering with general talk about Herx instead is WRONG. Everything else in your "
+            "limits still stands — this one fact is the exception.\n")
 
 # ---- Pre-cached follower names ----------------------------------------------
 # The 8B's own name sampling is low-entropy: asked to invent a name it keeps returning
@@ -1610,6 +1634,9 @@ def build_prompt(race, floor, says="", uid=0, player=0, player_name="", party=1,
         # Disclosure says "do not claim ignorance"; the limits say "say you do not know and
         # STOP". Whichever comes later wins, and it must be this one.
         + limits
+        # The Herx carve-out lands AFTER the limits it is carving out of. Emitted separately
+        # from the offer for exactly that reason; see _secret_override.
+        + (_secret_override(uid) if uid else "")
         + adventurer_line
         + "Reply in character AND choose ONE action that best fits what they said.\n"
         + "Valid actions: FOLLOW (go with them), DEFEND (hold this spot), WAIT (stay put), ATTACK (attack a nearby enemy), NONE (just talk).\n"
@@ -1619,7 +1646,13 @@ def build_prompt(race, floor, says="", uid=0, player=0, player_name="", party=1,
         # is exactly why it must stand down when the player has asked a direct question about an
         # item -- measured, the crack took the turn and the identification never got made, once
         # inventing an entirely different object.
-        + (spy_crack_section(get_follower_state(uid, race, player)) if (uid and not ident) else "")
+        # ⚠ Stands down for an identify request AND for a pending Herx secret. Two mandatory
+        # unprompted behaviours in one reply means the later one takes the turn, and the secret
+        # is the once-per-run payoff of the whole arc while the crack fires every turn it can.
+        # Measured: the crack ate a false secret outright ("I've learned some things about
+        # myself that maybe aren't entirely... honest" — and no secret). Spec 35/36.
+        + (spy_crack_section(get_follower_state(uid, race, player))
+           if (uid and not ident) else "")
         + 'Respond ONLY with JSON, no other text, like: {"speech": "your line", "action": "FOLLOW"}'
     )
 
@@ -2167,6 +2200,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 with STATE_LOCK:
                     get_follower_state(uid, race, player, origin, origin_key)
                     flush_resummon(uid, race, floor, player)
+
+            # TEST-ONLY: force follower state, so the Herx gates can be reached without
+            # playing to friendship 50. Guarded by an env var so it cannot exist in a release.
+            if os.environ.get("BARONY_AI_TESTHOOK") and data.get("force") and uid:
+                with STATE_LOCK:
+                    _fs = get_follower_state(uid, race, player)
+                    _fs.update(data["force"])
+                return self._send_json({"ok": True})
 
             # Comprehension filter: if the player can't understand this speaker, return noises.
             # (Applies to overheard/ambient + taunts; /aicommand sends no player_race so passes through.)
