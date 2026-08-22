@@ -1,9 +1,12 @@
 import os, time, queue, numpy as np, sounddevice as sd
+import tempfile
 from faster_whisper import WhisperModel
 
 MODEL_SIZE, SAMPLE_RATE = "small.en", 16000
-SIGNAL = "/tmp/mymod_ptt.signal"
-RESULT = "/tmp/mymod_voice_text.txt"
+# Must match mymod_tmpPath() on the C++ side: both read TMPDIR/TEMP/TMP,
+# so the game and this bridge agree on Linux and on Windows.
+SIGNAL = os.path.join(tempfile.gettempdir(), "mymod_ptt.signal")
+RESULT = os.path.join(tempfile.gettempdir(), "mymod_voice_text.txt")
 
 print("[VOICE] loading faster-whisper...")
 model = WhisperModel(MODEL_SIZE, device="cuda", compute_type="float16")

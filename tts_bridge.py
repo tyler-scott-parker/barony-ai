@@ -24,9 +24,11 @@ Try voices without launching the game:
     python3 tts_bridge.py --list                  # the casting table
 """
 import argparse, hashlib, json, os, re, shutil, subprocess, sys, time
+import os, tempfile
 
 HERE       = os.path.dirname(os.path.abspath(__file__))
-SPOOL      = os.environ.get("BARONY_AI_TTSDIR", "/tmp/mymod_tts")
+SPOOL      = os.environ.get("BARONY_AI_TTSDIR",
+                            os.path.join(tempfile.gettempdir(), "mymod_tts"))
 BACKEND    = os.environ.get("BARONY_AI_TTS_BACKEND", "auto").lower()
 VOICE_DIR  = os.environ.get("BARONY_AI_TTS_VOICES", os.path.join(HERE, "voices"))
 VENV       = os.environ.get("BARONY_AI_TTS_VENV", os.path.join(HERE, ".venv-tts"))

@@ -28,7 +28,50 @@ Fetch upstream with `git fetch origin`; push your work with `git push mine mymod
 - Service: `~/barony-ai/service.py` (port 5001), plus `barony_lore_full.json` (449KB, 45 sections), `barony_lore.json` (**only** source of `world.setting` — its wording differs from the full file's, so they are not interchangeable), `race_lore.json`, `race_books.json`, `comprehension.json`, `follower_names.json`, `voice_bridge.py`, `tts_bridge.py` (optional voice output, off by default; its `.venv-tts/` and `voices/` are gitignored)
 - Data files are resolved relative to `service.py`, so the repo can live anywhere
 - Dev binary: `~/.local/share/Steam/steamapps/common/Barony/barony-modded`
-- IPC via `/tmp/mymod_*.json` (Linux-specific; needs a portability pass before release)
+- IPC is a **direct TCP POST via SDL_net** (`src/mymod/mymod_net.hpp`) — no curl, no python3,
+  no temp files, no shell. Scratch files that remain (push-to-talk, `/aiserver` config) go
+  through `mymod_tmpPath()`, which reads `TMPDIR`/`TEMP`/`TMP`
+
+## Windows portability
+
+⚠ **The shell-out transport was the single root cause of most of the Windows blockers.** Every
+request used to be `popen("curl ... > /tmp/x.json; python3 -c 'import json...'")`, which fails on
+Windows for five separate reasons at once: `/tmp` does not exist, `cmd.exe` does not honour
+`'...'` quoting, `python3` is `python` or `py`, `popen` is `_popen` under MSVC, and each call
+flashes up a console window. One replacement fixed all five.
+
+**`src/mymod/mymod_net.hpp`** — a direct TCP POST over **SDL_net**, which the game already links
+(`main.hpp` includes it), so this costs no new dependency and no winsock `#ifdef`s. Plus a small
+reply reader for exactly what the service emits: `mymod_jsonField`, `mymod_jsonStringArray`, and
+the escapes `json.dumps` produces (`\"`, `\\`, `\n`, `\uXXXX` → UTF-8).
+
+⚠ **It also removed a whole failure mode.** The old extractor printed the reply and split it on
+`::ACTION::`/`::NAME::`/`::SECRET::` markers — so a follower who happened to *say* `::ACTION::`
+would corrupt everything after it. Field lookup cannot do that; there is a regression test for it.
+
+| Was | Now |
+|---|---|
+| 5 `popen`/`system` shell-outs | 0 |
+| 9 hardcoded `/tmp/mymod_*` paths | 0 — `mymod_tmpPath()` reads `TMPDIR`/`TEMP`/`TMP` |
+| `curl` + `python3` required by the *game* | neither |
+| `BOOKS_DIR` = one hardcoded Linux Steam path | `_find_books_dir()` searches Linux/flatpak/Windows/macOS/GOG |
+| bridges hardcoded `/tmp` | `tempfile.gettempdir()` — reads the same variables the C++ does |
+
+**Test it with `g++ -o httptest httptest.cpp $(pkg-config --cflags --libs SDL2_net) && ./httptest`**
+— 26 assertions covering URL parsing, field extraction, the real escapes, the marker regression,
+the heckle array, a live POST, and a dead port failing cleanly instead of hanging. Not in the
+build (`CMakeLists.txt` lists sources explicitly), same arrangement as `packtest.cpp`.
+
+**Still open, and none of it verifiable from Linux:**
+- **Nobody has compiled the mod with MSVC.** GCC accepts things MSVC rejects; expect a round of
+  small fixes. `getenv` may need `_CRT_SECURE_NO_WARNINGS`.
+- **How the mod is distributed on Windows** is undecided — a patched binary is a much bigger ask
+  of a non-technical friend than Barony's own mod format would be.
+- The **service** still needs Python 3 on the host; on Windows the launch command is `python`,
+  not `python3`. Documentation, not code.
+- **Voice and TTS bridges** need sox / espeak-ng / piper. Both optional and off by default.
+- `mymod_tmpPath` joins with `/`. Windows accepts forward slashes in `fopen`, so this is fine —
+  noted because it looks wrong at a glance.
 
 ## Upstream hooks (verify these after any upstream merge)
 

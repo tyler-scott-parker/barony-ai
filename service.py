@@ -4,7 +4,7 @@ The game (thin C++ hooks) POSTs here; we build a prompt, ask a local Ollama mode
 and reply with {reply, action, name, secret, boon}. All state is per-playthrough
 and lives in RAM -- `new_run` clears it.
 """
-import io, itertools, sys, traceback
+import io, itertools, sys, tempfile, traceback
 import json, http.server, socketserver, urllib.request, os, random, re, threading, time
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -17,8 +17,40 @@ def _load_json(name):
 OLLAMA_URL = os.environ.get("BARONY_AI_OLLAMA", "http://localhost:11434/api/generate")
 MODEL      = os.environ.get("BARONY_AI_MODEL", "llama3.1:8b")
 PORT       = int(os.environ.get("BARONY_AI_PORT", "5001"))
-BOOKS_DIR  = os.environ.get("BARONY_AI_BOOKS",
-    "/home/tyler/.local/share/Steam/steamapps/common/Barony/books")
+def _find_books_dir():
+    """Barony's `books/` folder, wherever this machine keeps it.
+
+    The old default was one hardcoded Linux Steam path -- the last portability blocker on this
+    side. Books are enrichment, not a requirement: get_book_lore already survives a missing
+    file, so a machine where none of these exist simply runs with thinner race lore rather
+    than failing to start."""
+    env = os.environ.get("BARONY_AI_BOOKS")
+    if env:
+        return env
+    home = os.path.expanduser("~")
+    candidates = [
+        # Linux / Steam Deck
+        os.path.join(home, ".local/share/Steam/steamapps/common/Barony/books"),
+        os.path.join(home, ".steam/steam/steamapps/common/Barony/books"),
+        os.path.join(home, ".var/app/com.valvesoftware.Steam/.local/share/Steam/"
+                           "steamapps/common/Barony/books"),        # flatpak
+        # Windows
+        r"C:\Program Files (x86)\Steam\steamapps\common\Barony\books",
+        r"C:\Program Files\Steam\steamapps\common\Barony\books",
+        os.path.join(os.environ.get("ProgramFiles(x86)", ""), "Steam", "steamapps",
+                     "common", "Barony", "books"),
+        # macOS
+        os.path.join(home, "Library/Application Support/Steam/steamapps/common/Barony/books"),
+        # GOG / DRM-free / running the service from inside the game folder
+        os.path.join(BASE_DIR, "books"),
+        "books",
+    ]
+    for c in candidates:
+        if c and os.path.isdir(c):
+            return c
+    return candidates[0]
+
+BOOKS_DIR  = _find_books_dir()
 
 LORE          = _load_json("barony_lore.json")        # world.setting only; see FULL for the rest
 RACE_LORE     = _load_json("race_lore.json")
@@ -66,7 +98,8 @@ except Exception:
 #   * the spool is written HOST-side, so in co-op only the machine running the
 #     bridge hears anything; a client bridge would need a relay first
 TTS_ENABLED = os.environ.get("BARONY_AI_TTS", "0").strip().lower() in ("1", "true", "on", "yes")
-TTS_SPOOL   = os.environ.get("BARONY_AI_TTSDIR", "/tmp/mymod_tts")
+TTS_SPOOL   = os.environ.get("BARONY_AI_TTSDIR",
+                            os.path.join(tempfile.gettempdir(), "mymod_tts"))
 # If the bridge is dead or has fallen behind, drop the OLDEST pending lines. A line
 # arriving forty seconds after the conversation moved on is worse than silence.
 TTS_MAX_PENDING = int(os.environ.get("BARONY_AI_TTSQUEUE", "6"))
