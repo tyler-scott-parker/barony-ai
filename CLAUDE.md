@@ -753,10 +753,33 @@ business knowing who the spy is and its log is visible, so the recruitment respo
 `"fearful"` and nothing else — sent because cowardice has to trigger on HP, which only the engine
 sees.
 
-**Not built — `self_interested` (15%).** ⚠ **Do NOT give them the loot-grabbing behaviour**
-(`monsterAllyPickupItems`), tempting as it is: items are one of the main ways the player
-progresses, and a follower hoovering up the floor takes that away rather than colouring it.
-Their price should be paid in favours and information, not in your gear.
+### The mercenary (self_interested, 15%)
+
+**Not a worse loyal follower — a different deal.** They will not give you things, because things
+are worth money; but they know what things are worth, and they get you a better price.
+
+⚠ **NO loot-grabbing** (`monsterAllyPickupItems`), tempting as it is: items are one of the main
+ways the player progresses, and a follower hoovering up the floor takes that away rather than
+colouring it. Their price is paid in favours and information, never in your gear.
+
+| | |
+|---|---|
+| **They never gift the good item** | boons skew to **information at 85%** (60% for everyone else); the once-per-run good item is off entirely — they would sell it |
+| **They know what they are holding** | identify accuracy **+20%**, capped at 95%. Outside their species' expertise this is the big one; inside it the cap bites |
+| **They talk merchants down** | a mercenary escorting you doubles the haggle step, 1% → **2%**. Measured: −2/−4/−5 across three shops against −1/−2/−3 with a loyal companion |
+| **Favours cost more** | +20 friendship on Sokoban, +20 trust on the minotaur guard — helping has to be worth their while |
+
+**The engine sends only an `escort` uid** with the shop payload — never an allegiance. The
+service already knows what that follower is; the engine has no business knowing, same rule as
+the `traits` string.
+
+⚠ **A removed instruction, and why not to re-add it.** The merchant used to be told to credit the
+mercenary for the price. Measured **0/10** with a plain *"mention them"*, and only **2/10** after
+naming the forbidden route the way the spy crack does — with 2/10 explicitly taking the credit
+anyway. Sixty tokens in an already-crowded section for noise. The price movement *is* the
+feature and lands 100% of the time; the player reads the number, not a line about it.
+
+
 
 ### Allegiance & spies
 Weighted roll at recruitment: **loyal 70 / self_interested 15 / fearful 8 / spy 7**. Never shown to the player. Spies get a motive and behavioral tells: deflect on personal history, over-interest in the player's gear and plans, hesitation at Herx's name. `allegiance_section(st, says)` detects probing questions and sharpens the tell.

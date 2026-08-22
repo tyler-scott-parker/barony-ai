@@ -556,6 +556,18 @@ ALLEGIANCE_FEEL = {
     "fearful": {"fear": 1.5, "resentment": 0.5},
 }
 
+# ---- The mercenary (self_interested, 15%) -------------------------------------------------
+# Not a worse loyal follower -- a different deal. They will not give you things, because things
+# are worth money; but they know what things are worth, and they will get you a better price.
+#
+# ⚠ NO loot-grabbing (monsterAllyPickupItems), tempting as it is. Items are one of the main ways
+# the player progresses, and a follower hoovering up the floor takes that away rather than
+# colouring it. Their price is paid in favours and information, never in your gear.
+MERC_INFO_SHARE   = 0.85    # their boons are information, not goods (0.60 for everyone else)
+MERC_IDENT_BONUS  = 0.20    # they handle goods for a living; they know what they are holding
+MERC_HAGGLE_STEP  = 1       # a mercenary at your shoulder talks the merchant down one more step
+MERC_FAVOUR_TAX   = 20      # favours cost more friendship: helping has to be worth their while
+
 def adjust(st, **deltas):
     """Move relationship dimensions, clamped to 0..100. The only way any of them change."""
     feel = ALLEGIANCE_FEEL.get(st.get("allegiance", ""), {})
@@ -1426,11 +1438,15 @@ def favour_roll(kind, st):
         if st.get("allegiance") == "fearful":
             need = GUARD_FEARFUL_TRUST
             chance = GUARD_FEARFUL_CHANCE
+        elif st.get("allegiance") == "self_interested":
+            need = GUARD_MIN_TRUST + MERC_FAVOUR_TAX
         if st.get("trust", 0) < need or random.random() >= chance:
             return False
     elif kind == "sokoban":
-        if (st.get("friendship", 0) < SOKOBAN_MIN_FRIENDSHIP
-                or random.random() >= SOKOBAN_CHANCE):
+        need_f = SOKOBAN_MIN_FRIENDSHIP
+        if st.get("allegiance") == "self_interested":
+            need_f += MERC_FAVOUR_TAX     # they will do it, once you are clearly worth it
+        if st.get("friendship", 0) < need_f or random.random() >= SOKOBAN_CHANCE:
             return False
     else:
         return False
@@ -1510,6 +1526,14 @@ def boon_roll(st, floor, player=0):
     # rarest: trap disarm, only for mechanically-minded kinds at real trust
     if race in BOON_TRAP_RACES and f >= 30 and random.random() < 0.15:
         return ("traps", "")
+    # ⚠ A mercenary never hands over the good item -- they would sell it. What they trade in is
+    # what they know, so their boons skew hard to information instead.
+    merc = st.get("allegiance") == "self_interested"
+    if merc:
+        if random.random() < MERC_INFO_SHARE:
+            return ("info", "")
+        it, ct = random.choice(BOON_MUNDANE)
+        return ("item", "%s:%d" % (it, ct))
     # one genuinely good item per run, per player
     if player not in BOON_STATE["good_used"] and f >= 40 and random.random() < 0.20:
         BOON_STATE["good_used"].add(player)
@@ -2003,7 +2027,12 @@ def identify_attempt(st, race, category, real_name, decoys):
     if st.get("allegiance") == "spy" and wrong and random.random() < IDENT_SPY_LIE_CHANCE:
         return ("lie", wrong, False)
     expert = race_l in IDENT_EXPERTISE.get(category, ())
-    if random.random() < (IDENT_EXPERT_ACCURACY if expert else IDENT_LAY_ACCURACY):
+    acc = IDENT_EXPERT_ACCURACY if expert else IDENT_LAY_ACCURACY
+    # Handling goods is the job. They are rarely wrong about what something is, whatever their
+    # species would otherwise know -- this is the mercenary's genuine edge.
+    if st.get("allegiance") == "self_interested":
+        acc = min(0.95, acc + MERC_IDENT_BONUS)
+    if random.random() < acc:
         return ("correct", real_name, True)
     return ("mistaken", wrong or real_name, wrong == "")
 
@@ -2100,14 +2129,19 @@ def merchant_tone(st, says):
             return name
     return ""
 
-def haggle_attempt(st, floor):
+def haggle_attempt(st, floor, escort=None):
     """Resolve a negotiation. One per merchant per floor -- asking twice in the same shop is
-    exactly the behaviour that should not be rewarded. Returns (outcome, new_deal_pct)."""
+    exactly the behaviour that should not be rewarded. Returns (outcome, new_deal_pct).
+
+    ⚠ `escort` is the follower standing behind you, and a MERCENARY is the one thing that
+    changes the arithmetic. Knowing what things are worth is their whole character, so they get
+    you an extra step off — the only place in the mod where a follower affects a price."""
     if st.get("haggle_floor") == floor:
         return "already", st.get("deal_pct", 0)
     st["haggle_floor"] = floor
     regard = st.get("regard", 0)
     deal = st.get("deal_pct", 0)
+    merc = (escort or {}).get("allegiance") == "self_interested"
     if regard > 0:
         outcome = "better"
     elif regard < 0:
@@ -2115,7 +2149,7 @@ def haggle_attempt(st, floor):
     else:
         outcome = "better" if random.random() < 0.5 else "refused"
     if outcome == "better":
-        deal = max(-HAGGLE_CAP, deal - HAGGLE_STEP)
+        deal = max(-HAGGLE_CAP, deal - HAGGLE_STEP - (MERC_HAGGLE_STEP if merc else 0))
     elif outcome == "worse":
         deal = min(HAGGLE_CAP, deal + HAGGLE_STEP)
     st["deal_pct"] = deal
@@ -2149,7 +2183,7 @@ HAGGLE_MARKUP_ANGLES = (
     "You are icily polite about it, which is worse than being rude.",
 )
 
-def haggle_section(outcome, deal):
+def haggle_section(outcome, deal, merc=False):   # merc: see the note in the "better" branch
     """Tell the model what already happened so it only has to say it. Each branch names the
     route that would contradict the resolved outcome, because the 8B will otherwise be
     agreeable in words while the engine charges full price."""
@@ -2169,6 +2203,12 @@ def haggle_section(outcome, deal):
              "it does not mean repeating the sentence. Say it a different way this time.\n")
     if outcome == "better":
         angle = "HOW YOU PLAY IT: " + random.choice(HAGGLE_GRANT_ANGLES) + "\n"
+        # ⚠ There was an instruction here telling the merchant to credit the mercenary for the
+        # price. It was cut after measuring: 0/10 with a plain "mention them", and only 2/10
+        # after naming the forbidden route the way the spy crack does -- with 2/10 explicitly
+        # taking the credit anyway. Sixty tokens in an already-crowded section for noise. The
+        # price movement IS the feature and it lands 100% of the time; the player reads the
+        # number, not a line about it. Do not re-add it without a better measurement.
         return ("THE PLAYER HAS JUST ASKED YOU FOR A BETTER PRICE, AND YOU HAVE DECIDED TO GIVE "
                 "THEM ONE. It is a small one and it is the last of your margin. Say so in "
                 "character, grudgingly or warmly as suits you, and make clear it is a little "
@@ -2573,8 +2613,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
                             st_m = get_npc_state(uid, race, npc_name, npc_role, npc_shop, floor)
                             tone = merchant_tone(st_m, says)
                             if wants_to_haggle(says):
-                                outcome, deal = haggle_attempt(st_m, floor)
-                                haggle_sec = haggle_section(outcome, deal)
+                                _esc = follower_state.get(int(data.get("escort", 0) or 0), {})
+                                outcome, deal = haggle_attempt(st_m, floor, _esc)
+                                haggle_sec = haggle_section(outcome, deal,
+                                                            merc=(_esc.get("allegiance")
+                                                                  == "self_interested"))
                                 haggle_field = "%u:%d" % (uid, deal)
                                 print(f"[SERVICE-DBG] haggle {uid}: {outcome} "
                                       f"(regard {st_m.get('regard', 0)}, deal {deal:+d}%)")
