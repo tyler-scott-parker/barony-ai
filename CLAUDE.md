@@ -891,11 +891,22 @@ The hidden boulder-and-pits puzzle is optional content, and a player who dislike
 able to hand it to a companion. Gated on **friendship ≥20** rather than trust — this is a chore
 done out of fondness, not a judgement call — at 75%.
 
-⚠ **Nothing is spawned by us.** Remove the boulders and call the game's own
-`boulderSokobanOnDestroy(false)`: it destroys 5–8 gold bags (a follower is not as careful as you
-would be), then finds no boulders, declares the puzzle solved and reveals the artifact gloves,
-which sit **invisible on the map** until then (`actboulder.cpp:2408`). The surviving gold
-un-hides itself the next frame on its own (`actgold.cpp:44`).
+⚠ **Nothing is spawned by us.** The artifact gloves already sit **invisible on the map**
+(`actboulder.cpp:2408`); the game's own `boulderSokobanOnDestroy(false)` reveals them once no
+boulders remain, and the surviving gold un-hides itself the next frame (`actgold.cpp:44`).
+
+⚠ **Boulders are broken ONE AT A TIME**, ~0.25s apart, with the game's own crumble sound (67)
+and rock particles. The first version removed them all in a single frame, which emptied the room
+instantly and silently and read as a glitch rather than as a companion doing something.
+Staggering also lets their line land first: they say they will deal with it, then you hear it
+happen.
+
+⚠ **Breaking, not pushing** — and the mod must NOT let the game's own boulder-destroyed path run
+here. On Sokoban that path spawns a scorpion or insectoid **per boulder** (`actboulder.cpp:609`).
+Removing the node ourselves and calling `boulderSokobanOnDestroy` once at the end skips it.
+Making them *fall* instead would match the game's real solve (`actboulder.cpp:876`, which costs
+no gold) but would drop them wherever they stand rather than into a pit, which looks worse than
+breaking them — and breaking is what justifies the gold cost.
 
 That gives the intended trade: you get the gloves and ~34 of the 40 gold bags, and you do **not**
 get the perfect-solve credit, which needs ≥39. You skipped the puzzle; you do not also get the
