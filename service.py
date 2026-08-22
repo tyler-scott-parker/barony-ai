@@ -220,7 +220,7 @@ def _book_block(race_l):
     lore = get_book_lore(race_l)
     return ("RELEVANT LORE (what your kind knows):\n" + lore + "\n") if lore else ""
 
-def _persona(race, grounded, floor, map_name="", npc_name=""):
+def _persona(race, grounded, floor, map_name="", npc_name="", books=True, budget=16):
     """The opening every prompt shares: setting, character guidance and canonical grounding.
 
     Returns (head, body, limits). The HARD LIMITS come back SEPARATELY so callers can place
@@ -239,24 +239,43 @@ def _persona(race, grounded, floor, map_name="", npc_name=""):
     tail = f"CHARACTER GUIDANCE: {slice_}\n"
     limits = ""
     if grounded:
-        facts, constraints = build_lore_context(race_l, floor, map_name=map_name, npc_name=npc_name)
+        facts, constraints = build_lore_context(race_l, floor, budget=budget,
+                                                map_name=map_name, npc_name=npc_name)
         tail += _grounding_block(facts)
         limits = _limits_block(constraints)
-    return head, tail + _book_block(race_l), limits
+    # ⚠ `books` is what the prompt-size swing was made of. Only FOUR races have book text at
+    # all, and for a human it is ~1680 of the ~1875 tokens of an ambient prompt -- paid in full
+    # to produce four words of muttering. The swing was never a grounding gap (race_lore and
+    # the denizen profiles cover all 49); it was an uneven cost. Conversation keeps the books,
+    # which is where a follower actually draws on them; the short forms do not.
+    return head, tail + (_book_block(race_l) if books else ""), limits
 
-def build_taunt_prompt(race, floor):
-    head, body, limits = _persona(race, True, floor)
+def build_taunt_prompt(race, floor, map_name=""):
+    # Grounded, but on a short budget and without books: this produces a handful of shouted
+    # words, and a 2400-token prompt for "Die, worm!" is pure GPU contention with the
+    # conversation the player is actually having.
+    head, body, limits = _persona(race, True, floor, map_name, books=False, budget=6)
+    where = place_name(floor, map_name)
     return (
         head
-        + f"YOU ARE: a {race} on dungeon floor {floor}, locked in COMBAT right now.\n"
+        + (f"YOU ARE: a {race} in {where}, on dungeon floor {floor}, locked in COMBAT right now.\n"
+           if where else
+           f"YOU ARE: a {race} on dungeon floor {floor}, locked in COMBAT right now.\n")
         + body
         + "You are fighting an enemy this very moment. Shout ONE short, aggressive taunt or battle-cry, in character.\n"
         + "Respond with ONLY the spoken line (a few words). No narration, no quotes, no JSON."
     )
 
-def build_ambient_prompt(race, floor, relation="hostile"):
-    # NOTE: ambient babble is deliberately ungrounded (no canon, no hard limits).
-    head, body, limits = _persona(race, False, floor)
+def build_ambient_prompt(race, floor, relation="hostile", map_name=""):
+    # ⚠ Babble used to be told only "dungeon floor 25" -- so a shopkeeper standing in the town
+    # of Hamlet muttered about the dungeon. Exactly the bug place_name() was written to fix for
+    # conversation, still live here because the ambient payload never carried the map name.
+    #
+    # Still ungrounded (no canon facts, no hard limits): a four-word mutter has no room to make
+    # a claim worth constraining, and the measured lines never fabricated. What it lacked was
+    # somewhere to BE.
+    head, body, limits = _persona(race, False, floor, map_name, books=False)
+    where = place_name(floor, map_name)
     if relation == "follower":
         situation = ("You are the adventurer's companion, wandering the dungeon together. "
                      "Mutter a short idle remark to yourself or your companion.")
@@ -265,7 +284,8 @@ def build_ambient_prompt(race, floor, relation="hostile"):
                      "Mutter a short idle line to yourself, unaware you are overheard.")
     return (
         head
-        + f"YOU ARE: a {race} on dungeon floor {floor}.\n"
+        + (f"YOU ARE: a {race} in {where}, on dungeon floor {floor}.\n" if where else
+           f"YOU ARE: a {race} on dungeon floor {floor}.\n")
         + body
         + situation + "\n"
         + "Respond with ONLY one short spoken line (a few words), in character. No narration, no quotes, no JSON. Just the line."
@@ -2222,9 +2242,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             # lock; the generation that follows deliberately runs outside it.
             with STATE_LOCK:
                 if taunt:
-                    prompt = build_taunt_prompt(race, floor)
+                    prompt = build_taunt_prompt(race, floor, map_name)
                 elif ambient:
-                    prompt = build_ambient_prompt(race, floor, data.get("relation", "hostile"))
+                    prompt = build_ambient_prompt(race, floor, data.get("relation", "hostile"),
+                                                  map_name)
                 elif npc:
                     if uid:
                         get_npc_state(uid, race, npc_name, npc_role, npc_shop, floor)["met"] += 1

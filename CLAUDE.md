@@ -539,6 +539,39 @@ that produced the sharpest behavioural separation of anything tested so far.
 
 **Generalize this:** at 8B, forbidding a *conclusion* without forbidding the *evasion pattern* gets routed around. Name the specific pattern. Verified to generalize — 9-10/10 across 5 races, 3 regions, and topics not in the limits block at all.
 
+### The short forms: ambient babble and taunts
+
+⚠ **Babble did not know where it stood.** The ambient payload never carried `map.name`, so the
+prompt said *"YOU ARE: a shopkeeper on dungeon floor 25"* — to a shopkeeper standing in the town
+of Hamlet. Exactly the bug `place_name()` was written to fix for conversation, still live here
+because the fix was made service-side and this payload was never updated. Taunts had it too.
+Both payloads now send the map.
+
+Measured before → after, same lines:
+*"Still a lot of junk." / "Another dull night."* → *"Another fine day for inventory." / "Running
+low on candles."*; a demon in Hell went from *"Foolish mortals will never find this level"* (game
+speak) to *"Fools still think they can escape"*; a human in the Mines now says *"Another day,
+another coal seam."*
+
+⚠ **The book block was the ENTIRE prompt-size swing**, and it is not a grounding gap. Only **four
+races have book text at all** — human, skeleton, goblin, automaton — and for a human it was
+**~1680 of ~1875 ambient tokens**, paid in full to produce four words of muttering. `race_lore`
+and the denizen profiles already cover all 49 races, so the thin races were never less grounded;
+they were just cheaper. `_persona(..., books=False, budget=N)` now drops books from the short
+forms and keeps them in conversation, where a follower actually draws on them.
+
+| | ambient | taunt |
+|---|---|---|
+| human | 1875 → **198** | 2404 → **406** |
+| shopkeeper | 202 → 208 | 635 → **380** |
+| demon | 189 → 191 | 520 → **334** |
+| **spread across all 49 races** | 189–1875 → **175–215** | — |
+
+Ambient stays **deliberately ungrounded** (no canon, no hard limits): a four-word mutter has no
+room to make a claim worth constraining, and the measured lines never fabricated. What it lacked
+was somewhere to be. Taunts keep their canon but on a budget of 6 rather than 16. 16 assertions
+in `test_prompts.py`.
+
 ### Event memory
 Structured records: `{type, floor, claim, importance, provenance}`. `IMPORTANCE_WEIGHT = {routine:0, notable:3, major:8, world_changing:20}` seeds friendship. Handler has an early fire-and-forget branch: any POST with an `"event"` field records and returns `{"ok":true}` with no generation.
 
@@ -1514,8 +1547,8 @@ is unchanged from the single-player path that already works. Untested in an actu
   shown / 140 chars of reply so a long conversation cannot inflate the prompt, and old
   string-format entries from a run already in flight are skipped rather than crashed on.
   16 assertions in `test_memory.py`.
-- Grounding is only in the main `build_prompt` and `build_taunt_prompt`; ambient babble has none.
-- Prompt sizes vary wildly by race (652 rat → 3100 human) because book-lore injection is uneven. Thin races are where fabrication would reappear first.
+- ~~Grounding is only in the main `build_prompt`~~ / ~~prompt sizes vary wildly by race~~ **BOTH
+  FIXED, and they were the same problem.** See *The short forms* below.
 
 **Designed, not built — the peaceful Herx route.** `actWinningPortal` already contains the answer: the portal **exists on the boss floor, invisible**, and reveals itself when its per-tick scan finds no `LICH` or `DEVIL` alive. So a spared-Herx ending needs only (a) a flag excluding a pacified Herx from that scan and (b) clearing his hostility. No new entity, no replaced code path. The chain that *earns* it — merchants, testimony, leverage — is the real project and is undesigned. Design the failure mode first: a half-fired peaceful path could strand the player with a non-hostile boss and no exit.
 
