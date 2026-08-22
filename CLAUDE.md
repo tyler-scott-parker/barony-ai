@@ -1242,6 +1242,45 @@ answered Bram by name without being told to.
 *if* that player chooses to run `voice_bridge.py` (Python + faster-whisper) — transcribed text goes
 out over the same `MYAI` path. Optional extra, never a requirement.
 
+### Push-to-talk: capture moved into the mod
+
+The microphone is recorded by the **mod** now (SDL, in C++), not by a Python helper. That
+matters most for a co-op client: their machine needs the mod and a transcriber, not
+`sounddevice`, `numpy` and PortAudio as well.
+
+⚠ **Audio must never cross the wire, and this is not a preference.** `NET_PACKET_SIZE` is
+**512 bytes** (`game.hpp:38`), so three seconds of speech is ~200 UDP packets. A private TCP
+socket to the host is *worse*: with a **Steam lobby there is no port at all** — Steam relays
+everything — so a raw socket would not reach the host in exactly the mode a non-technical friend
+would use. Whoever speaks transcribes on their own machine; only text travels, over the `MYAI`
+path that already exists.
+
+⚠ **Barony never initialises SDL audio.** `init_flags` is `VIDEO | EVENTS | JOYSTICK |
+GAMECONTROLLER | HAPTIC` (`game.cpp:7288`) — sound goes through FMOD/OpenAL. The mod brings the
+subsystem up **lazily on first use** (`SDL_InitSubSystem`), so a player who never holds the key
+pays nothing, and a machine with no microphone complains once rather than every frame.
+
+Capture opens with `SDL_AUDIO_ALLOW_FREQUENCY_CHANGE` — a device that only does 44100 is common,
+and resampling one short clip is cheaper than having no voice at all. Guards: 15s cap so a stuck
+key cannot eat memory, 300ms floor so brushing the key is not an utterance, and **write-then-
+rename** on the clip so the transcriber never reads a half-written file.
+
+**`mymod_transcribeClip()` is one seam, deliberately.** Today it hands the WAV to
+`voice_bridge.py`; embedding whisper.cpp means replacing that function body and nothing else —
+capture, key handling and the delivery path above and below it all stay put.
+
+`voice_bridge.py` is correspondingly simpler: it watches for the clip instead of recording, so
+it no longer needs `sounddevice` or `numpy`. It also **auto-detects CUDA and falls back to CPU
+int8**, which the old hardcoded `device="cuda"` did not — a co-op client is not required to own
+a spare GPU.
+
+**Tests.** `g++ -o wavtest wavtest.cpp $(sdl2-config --cflags --libs) && ./wavtest` — 24
+assertions on WAV framing and the resampler, both invisible failures (a bad header transcribes
+as silence, a bad resample as gibberish), with **SDL itself as the reference decoder**. The pure
+functions live in `mymod_voice.hpp` so the test exercises the real ones. Verified end to end by
+synthesising speech with espeak-ng, dropping it in as a clip, and reading back
+*"Stay behind me and watch the left corridor."*; a silent clip correctly produced nothing.
+
 ### Text-to-speech (optional, OFF by default)
 
 Voices for followers, townsfolk, merchants and monsters. **Off unless explicitly turned on**, and
