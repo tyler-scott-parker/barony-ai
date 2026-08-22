@@ -877,6 +877,41 @@ moving soon, though."*
 throws. Caught by the test, and it would have thrown the first time the feature ever fired in a
 real run.
 
+### A trusted follower heading off the minotaur
+
+The **positive counterpart to sabotage**. Before this, the best a loyal follower could do was
+hand you a healing potion once a run, while a spy had four separate ways to cost you the run.
+
+⚠ **One mechanism covers both sources, because it watches for the TIMER rather than hooking the
+sabotage.** A spy's sabotage and a naturally-generated minotaur floor create the same
+`actMinotaurTimer` entity, so a trusted companion heads off a betrayal and a designed encounter
+with the same code, in the same beat. Cancelling is the game's own move: the timer ends itself
+with `list_RemoveNode` when it is done (`monster_minotaur.cpp:819`).
+
+⚠ **Gated on TRUST, not friendship** — trust ≥40. Trust is otherwise read only by the disclosure
+tiers and the obedience formula, and this is exactly what it means: not *"do they like you"* but
+*"will they act on your behalf when it matters"*. Being adored at friendship 100 with no trust
+does nothing, which is tested.
+
+| | |
+|---|---|
+| who | any non-spy follower, nearest to their player, alive; never a bot (a turret notices nothing) or a summon |
+| chance | **70%** — even the right companion can miss it, so the minotaur stays a threat |
+| budget | **once per run**, and the engine asks at most once per floor |
+
+**The engine owns the mechanism, the model owns only the reaction.** The prompt never names a
+minotaur and forbids explaining *how* — asking an 8B to invent a method produces a set-piece.
+They just sound like someone who has noticed something and dealt with it. Measured live:
+a trusted companion caught it **3/4**, an unearned one **0/3**, and none of the seven replies
+named a minotaur.
+
+> trust 55: *"We've got another one quiet, at least for now."*
+> trust 10: *"Storm in the walls. Not stopping nothing."*
+
+When the guard cancels a **sabotage**, the spy's once-per-run minotaur is still spent — it tried
+and was foiled — and the pending Herx warning is cleared too, so nothing gloats about a threat
+that is gone.
+
 ### Killing a spy costs you nothing
 
 ⚠ **`ally_died` used to fire for the survivors whatever the deceased had been doing**, so

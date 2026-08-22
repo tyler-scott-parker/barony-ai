@@ -1097,6 +1097,7 @@ def reset_run():
     BOON_STATE["good_used"].clear()
     SABOTAGE_STATE["used"] = False
     SABOTAGE_STATE["trap_floors"].clear()
+    GUARD_STATE["used"] = False
     LAST_BOON.clear()
     npc_state.clear()
     PERSISTENT_IDENTITY.clear()
@@ -1368,6 +1369,60 @@ def sabotage_section(tell):
             "Do NOT hint that anything is about to happen, do NOT sound nervous, ominous, "
             "regretful or apologetic, and do NOT warn them. You are not confessing and you are "
             "not cracking — you are making small talk.\n")
+
+# ---- Heading off the minotaur ------------------------------------------------------------
+# The positive counterpart to sabotage. The best a loyal follower could previously do was hand
+# you a healing potion once a run, while a spy had four separate ways to cost you the run.
+#
+# One mechanism covers both sources: the engine watches for the countdown TIMER, which a spy's
+# sabotage and a naturally-generated minotaur floor both create. So a trusted companion can head
+# off a betrayal and a designed encounter alike.
+#
+# ⚠ Gated on TRUST, not friendship. Trust is otherwise only read by the disclosure tiers and the
+# obedience formula, and this is exactly what it means: not "do they like you" but "will they act
+# on your behalf when it matters". A follower you fought beside and never lied to is the one who
+# notices.
+GUARD_MIN_TRUST = 40
+GUARD_CHANCE    = 0.7           # even the right companion can miss it
+GUARD_STATE     = {"used": False}    # once per run, run-global
+
+def guard_roll(st):
+    """Does this follower head off the countdown? Server-side, once per run."""
+    if GUARD_STATE["used"]:
+        return False
+    if st.get("allegiance") == "spy":
+        return False            # obviously not the one who called it
+    if st.get("origin") in NO_SECRET_ORIGINS:
+        return False            # a conjuration has no history here to be suspicious of
+    if st.get("trust", 0) < GUARD_MIN_TRUST:
+        return False
+    if random.random() >= GUARD_CHANCE:
+        return False
+    GUARD_STATE["used"] = True
+    return True
+
+def build_guard_prompt(race, floor, map_name, caught):
+    """Their line. Not told HOW they stopped it -- the engine owns the mechanism, and asking an
+    8B to invent one produces a set-piece. They only have to sound like someone who has just
+    noticed something and dealt with it, or noticed and could not."""
+    head, body, limits = _persona(race, False, floor, map_name, books=False)
+    where = place_name(floor, map_name)
+    situation = (
+        "Something is badly wrong on this floor — you can feel it, the way an animal feels a "
+        "storm coming. " +
+        ("You have just dealt with it. Say so, shortly, in your own words: that you found "
+         "something and put a stop to it. Do NOT explain the mechanism, do NOT name a minotaur, "
+         "and do NOT make a speech — you are reporting, not boasting.\n"
+         if caught else
+         "You cannot do anything about it. Say so, shortly — tell them something is coming and "
+         "that you cannot stop it. Do NOT name a minotaur and do NOT explain what it is.\n"))
+    return (head
+            + (f"YOU ARE: a {race} in {where}, on dungeon floor {floor}, this adventurer's "
+               "companion.\n" if where else
+               f"YOU ARE: a {race} on dungeon floor {floor}, this adventurer's companion.\n")
+            + body
+            + situation
+            + "Respond with ONLY one short spoken line. No narration, no quotes, no JSON.")
 
 # ---- Follower boons: flavor-scale gifts, friendship-gated, one per follower per floor ----
 
@@ -2350,6 +2405,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 logrec("heckle", race=race, floor=floor, asked=count, got=len(lines),
                        gen_ms=int((time.time() - _t0) * 1000), sample=lines[:3])
                 return self._send_json({"lines": lines})
+
+            # A countdown has started on this floor and the engine is asking whether this
+            # follower heads it off. Answered before any conversation state is touched.
+            if data.get("minotaur_guard"):
+                with STATE_LOCK:
+                    st_g = get_follower_state(uid, race, player) if uid else {}
+                    caught = guard_roll(st_g) if st_g else False
+                raw_g = ask_ollama(build_guard_prompt(race, floor, map_name, caught))
+                line = (raw_g or "").strip().strip('"').split("\n")[0][:200]
+                print(f"[SERVICE] -> guard: {race} {'STOPPED it' if caught else 'could not'}: {line}")
+                logrec("guard", uid=uid, race=race, floor=floor, player=player,
+                       caught=caught or None, trust=st_g.get("trust") if st_g else None,
+                       reply=line[:200])
+                tts_emit(line, race, uid, "guard", "", player)
+                return self._send_json({"reply": line, "guard": "1" if caught else "0"})
 
             evt = data.get("event", "")
             if evt:
