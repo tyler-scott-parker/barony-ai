@@ -4,7 +4,11 @@ Points BARONY_AI_NAMEHIST at a temp dir first, so running this never touches the
 name_history.json -- a test that burned live names would be worse than no test.
 """
 import os, sys, tempfile, json
-os.environ["BARONY_AI_NAMEHIST"] = os.path.join(tempfile.mkdtemp(), "nh.json")
+_tmp = tempfile.mkdtemp()
+# Also redirect the session log: logreview reads the NEWEST session file, so a test
+# run writing into logs/ would masquerade as the last playtest.
+os.environ["BARONY_AI_LOGDIR"] = _tmp
+os.environ["BARONY_AI_NAMEHIST"] = os.path.join(_tmp, "nh.json")
 sys.path.insert(0, "/home/tyler/barony-ai")
 import service as S
 

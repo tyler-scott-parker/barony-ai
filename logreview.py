@@ -90,6 +90,20 @@ def main():
                 spy = "  <-- SPY" if r.get("allegiance") == "spy" else ""
                 mot = f"  motive: {r['motive']}" if r.get("motive") else ""
                 print(f"   uid {r.get('uid')} ({r.get('race','?')}) {r.get('allegiance')}{spy}{mot}")
+        reb = [r for r in recs if r["kind"] == "rebind"]
+        if reb:
+            print("\nCOMPANION CONTINUITY (summons and bots that came back)")
+            by_id = {}
+            for r in reb:
+                by_id[r.get("identity")] = r
+            for ident, r in by_id.items():
+                who = (" as '%s'" % r["name"]) if r.get("name") else ""
+                # The count is the interesting number: it says how much of the run this
+                # creature spent dead, and it is what the resummoned claim tells the model.
+                n = r.get("bodies", 1) - 1
+                print(f"   {ident}{who}: {r.get('bodies', 1)} bodies "
+                      f"({n} recall{'' if n == 1 else 's'})")
+
         named = [r for r in recs if r["kind"] == "named"]
         if named:
             print("\nNAMES REVEALED")

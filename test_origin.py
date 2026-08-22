@@ -1,7 +1,11 @@
 """Origin-gated companion logic: persistence across bodies, and the systems that must not
 apply to a conjuration or a machine."""
 import os, sys, tempfile
-os.environ["BARONY_AI_NAMEHIST"] = os.path.join(tempfile.mkdtemp(), "n.json")
+_tmp = tempfile.mkdtemp()
+# Also redirect the session log: logreview reads the NEWEST session file, so a test
+# run writing into logs/ would masquerade as the last playtest.
+os.environ["BARONY_AI_LOGDIR"] = _tmp
+os.environ["BARONY_AI_NAMEHIST"] = os.path.join(_tmp, "n.json")
 sys.path.insert(0, "/home/tyler/barony-ai")
 import service as S
 

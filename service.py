@@ -448,6 +448,10 @@ def get_follower_state(uid, race, player=0, origin="", origin_key=""):
             follower_state[uid] = st          # the body is new; the creature is not
             st["uid"] = uid
             st["bodies"] = st.get("bodies", 1) + 1
+            st["resummons"] = st.get("resummons", 0) + 1
+            # The rebind is the only place that KNOWS this happened, but it has no floor to
+            # record against -- so it leaves a note for the first caller that does.
+            st["pending_resummon"] = True
             print(f"[SERVICE-DBG] follower {uid} IS {pid} again "
                   f"(body #{st['bodies']}, {dims_summary(st)})")
             logrec("rebind", uid=uid, race=race, player=player, identity=pid,
@@ -891,6 +895,15 @@ EVENT_DIMENSIONS = {
     "left_behind":      {"trust": -6, "fear": 5, "resentment": 10},
     # Watched one of your OTHER followers die. Fired for the survivors, not the casualty.
     "ally_died":        {"trust": -3, "fear": 10, "resentment": 4},
+    # --- unmade and called back (summons and bots only) ---
+    # Deliberately NOT friendship, resentment or fear, even though all three are tempting.
+    # This fires as ORDINARY use of the class -- a conjurer recasts SUMMON dozens of times in a
+    # run -- so anything it grants is farmable and anything it costs accrues for playing the
+    # class correctly. Dependence is the one axis that is simply TRUE: the creature exists at
+    # this adventurer's pleasure and has now been shown it. Dependence is also absent from the
+    # `compliant` formula, so a saturated one is pure characterisation and cannot warp obedience.
+    # Resentment stays something the player earns by actual mistreatment.
+    "resummoned":       {"dependence": 3, "curiosity": 1},
 }
 
 # How strongly an event is remembered (ranking + what gets replayed into the prompt).
@@ -899,7 +912,7 @@ EVENT_DIMENSIONS = {
 EVENT_IMPORTANCE = {
     "recruitment": "notable", "fought_alongside": "notable", "healed_by_player": "notable",
     "hurt_by_player": "major", "wounded": "notable", "left_behind": "major",
-    "ally_died": "major",
+    "ally_died": "major", "resummoned": "notable",
 }
 IMPORTANCE_ORDER = {"world_changing": 3, "major": 2, "notable": 1, "routine": 0}
 
@@ -913,7 +926,23 @@ EVENT_CLAIMS = {
     "ally_died":        "On floor {floor} you watched another of this adventurer's companions die.",
 }
 
-def _event_claim(etype, floor, race):
+# `resummoned` is the one claim that carries a running count, because the count IS the memory:
+# the first unmaking and the twentieth are not the same experience, and a flat claim would say
+# nothing a summon could not have guessed. Phrased by origin -- a bot is not "unmade".
+RESUMMON_CLAIMS = {
+    "summon": ("This adventurer has unmade you and called you back {n}, "
+               "most recently on floor {floor}. You exist at their word."),
+    "bot":    ("This adventurer has shut you down and set you out again {n}, "
+               "most recently on floor {floor}."),
+}
+
+def _times(n):
+    return "once" if n == 1 else ("twice" if n == 2 else f"{n} times")
+
+def _event_claim(etype, floor, race, st=None):
+    if etype == "resummoned":
+        tpl = RESUMMON_CLAIMS.get((st or {}).get("origin", ""), RESUMMON_CLAIMS["summon"])
+        return tpl.format(n=_times(max(1, (st or {}).get("resummons", 1))), floor=floor)
     tpl = EVENT_CLAIMS.get(etype)
     if tpl:
         return tpl.format(floor=floor)
@@ -932,17 +961,41 @@ def reset_run():
     _NAMES_TAKEN.clear()   # names actually revealed are held by name_history.json instead
     print(f"[SERVICE-DBG] NEW RUN: cleared {n} follower(s), all boon latches, and the Herx secret")
 
+def flush_resummon(uid, race, floor, player=0):
+    """Record a pending unmaking-and-recall now that a floor is known.
+
+    Safe to call anywhere: the flag is popped first, and by the time this runs the uid is
+    already in `follower_state`, so the record_event below cannot re-enter the rebind."""
+    st = follower_state.get(uid)
+    if not st or not st.pop("pending_resummon", False):
+        return
+    record_event(uid, race or st.get("race", ""), "resummoned", floor, player)
+
 def record_event(uid, race, etype, floor, player=0, origin="", origin_key=""):
     st = get_follower_state(uid, race, player, origin, origin_key)
+    if etype != "resummoned":
+        flush_resummon(uid, race, floor, player)   # the recall happened first
     st.setdefault("event_log", [])
     # dedup: a follower can only be recruited once
     if etype == "recruitment" and any(e["type"] == "recruitment" for e in st["event_log"]):
         return
     importance = EVENT_IMPORTANCE.get(etype, "notable")
-    st["event_log"].append({
-        "type": etype, "floor": floor, "claim": _event_claim(etype, floor, race),
+    record = {
+        "type": etype, "floor": floor, "claim": _event_claim(etype, floor, race, st),
         "importance": importance, "provenance": "participated",
-    })
+    }
+    # `resummoned` COALESCES rather than appending. It fires as routine use of the class, and
+    # thirty separate records would drown the six-slot memory block in the one thing the
+    # creature already knows about itself -- exactly the noise spec 35/36 warns against. One
+    # record whose claim carries the running count says strictly more in a sixth of the space.
+    if etype == "resummoned":
+        prior = next((e for e in st["event_log"] if e["type"] == "resummoned"), None)
+        if prior:
+            prior.update(record)
+        else:
+            st["event_log"].append(record)
+    else:
+        st["event_log"].append(record)
     # Known events carry their own explicit deltas (including friendship); anything unknown
     # falls back to the old importance-driven friendship bump.
     deltas = EVENT_DIMENSIONS.get(etype)
@@ -1764,6 +1817,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if uid and not npc:
                 with STATE_LOCK:
                     get_follower_state(uid, race, player, origin, origin_key)
+                    flush_resummon(uid, race, floor, player)
 
             # Comprehension filter: if the player can't understand this speaker, return noises.
             # (Applies to overheard/ambient + taunts; /aicommand sends no player_race so passes through.)

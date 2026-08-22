@@ -430,6 +430,7 @@ so a typo can't silently create a dimension that nothing reads.
   | `hurt_by_player` | `updateEntityOnHit` — their own leader struck them | **−friendship, −trust, +fear, +resentment** |
   | `left_behind` | >25 tiles adrift for 25s | −trust, fear, resentment |
   | `ally_died` | a watched follower vanishes; fired for the **survivors** | −trust, fear, resentment |
+  | `resummoned` | a persistent identity binds to a new body (summons/bots) | dependence, curiosity — see below |
 
   Only friendly fire needed a new upstream hook. Everything else rides the follower scan
   `mymod_ambientTick` already runs each frame (`mymod_watch`). Two traps handled there:
@@ -880,13 +881,38 @@ strings for an ordinary recruit, so normal play is unchanged. 30 assertions in `
 plus an end-to-end check that a recast knight keeps its name, friendship and event log across a
 new uid while an ordinary recruit's path is untouched.
 
+#### `resummoned` — being unmade and called back
+
+The event that makes the persistence *sayable*. Fires on rebind, for summons and bots alike.
+
+⚠ **It COALESCES rather than appending.** This fires as ordinary use of the class — a conjurer
+recasts SUMMON dozens of times in a run — and thirty separate records would drown the six-slot
+memory block in the one thing the creature already knows about itself. One record whose claim
+carries the running count says strictly more in a sixth of the space, and the count *is* the
+memory: the first unmaking and the twentieth are not the same experience.
+
+⚠ **It grants nothing and costs nothing** — no friendship, no resentment, no fear, though all
+three are tempting. Anything it grants is farmable by recasting, and anything it costs accrues for
+playing the class *correctly*. `dependence` is the one axis that is simply true (the creature
+exists at this adventurer's pleasure and has now been shown it) and is also **absent from the
+`compliant` formula**, so a saturated one is pure characterisation and cannot warp obedience.
+Resentment stays something the player earns by actual mistreatment.
+
+The rebind is the only place that knows it happened but has no floor to record against, so it
+leaves `pending_resummon` for the first caller that does (`flush_resummon`, called from the
+handler's up-front bind and from `record_event`). Wording is origin-aware — a bot is not "unmade".
+
+Measured: after 3 recasts, asked *"how many times have you died for me?"* — **3/3 correct**, one
+reply picking up the claim's own phrasing (*"You unmade me and called me back each time"*). After
+10, it answered 10. 26 assertions in `test_resummon.py`, including that friendship and resentment
+are still exactly zero after 31 recasts. `logreview` prints a **COMPANION CONTINUITY** section
+(`summon:0:skeleton_knight: 4 bodies (3 recalls)`).
+
 **Designed, not built — the rest of the class-companion work.** Charm as a *hidden compulsion*
 state (charmed followers start resentful, tiers shut, and the charm "slips" the way a spy cracks —
-reusing the best-measured prompt block in the project); bots on the **NPC state model** rather than
-the follower vector, since `npc_state` is already "light per-run memory, both sides of the exchange,
-no ladder, no boons, no allegiance", which is exactly what a machine wants; and a `resummoned`
-event type so a knight can say *"you have called me back eleven times"* — `bodies` is already
-counted on the state row but is not in the prompt yet.
+reusing the best-measured prompt block in the project); and bots on the **NPC state model** rather
+than the follower vector, since `npc_state` is already "light per-run memory, both sides of the
+exchange, no ladder, no boons, no allegiance", which is exactly what a machine wants.
 
 ### Multiplayer (host-authoritative)
 
