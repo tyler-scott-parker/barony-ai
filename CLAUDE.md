@@ -1180,6 +1180,38 @@ Workaround if ever building without the fix: the HUMAN row of `monsterally`
 (`actmonster.cpp:101`) is 1 for HUMAN, SHOPKEEPER, AUTOMATON and the bot family, so a Human client
 can recruit a **human or automaton** with `/friendly` off entirely.
 
+**A client can join and play with NO MOD INSTALLED.** Three engine facts make this work, and
+all three were verified by reading rather than assumed:
+
+1. **The version handshake passes.** `lobbyPlayerJoinRequest` compares `VERSION`
+   (`net.cpp:1531`), and the mod never touches it — `game.hpp:28` still says `"v5.0.2"`. A stock
+   Steam client and a modded host agree.
+2. **Unknown packets are ignored, not fatal.** `clientPacketHandlers.find()` misses print
+   *"Got a mystery packet"* and carry on (`net.cpp:6832`). `MYNM`/`MYSH`/`MYFR`/`MYHG` arriving at
+   a vanilla client are inert — no crash, no desync, no disconnect.
+3. **It can already hear everything**, because `messagePlayerColor` and `createDialogueTooltip`
+   self-replicate as vanilla `MSGS`/`BUBL` — the finding that made host→client dialogue free in
+   the first place.
+
+⚠ **The only thing it could not do was SPEAK**, since `MYAI` is client→host and vanilla cannot
+send it. Fixed by reading ordinary chat: the host receives every client's chat line in
+`serverPacketHandlers['MSGS']` **with the sender's player number** (`net.cpp:7685`), so
+`mymod_clientChat()` treats a line starting with `@` as an utterance and routes it into the same
+`mymod_requestFromPlayer` the packet path uses. The line is still relayed to the party — swallowing
+it would hide half the conversation from everyone else.
+
+**What an unmodded client gives up** — all of it graceful, none of it broken:
+
+| Missing | Effect |
+|---|---|
+| `MYNM` | party HUD shows "goblin" rather than the name it chose. Cosmetic; the name is still used in speech |
+| `MYSH` | merchant lines don't appear inside the shop window (they still arrive as chat) |
+| `MYID`/`MYIV` | `/aiidentify` unavailable to them |
+| `MYHG` | haggled prices don't apply. ⚠ NOT a display/charge mismatch: `buyItemFromShop` runs **client-side** (`shopgui.cpp:1246`) and the client prices and charges itself, then tells the host which item left the shelf. They simply pay vanilla prices |
+
+Everything host-side is unaffected: their follower still has a full relationship, still accrues
+events, still names itself, still keeps secrets.
+
 **Per-player state.** `mymod_convo[MAXPLAYERS + 1]` — one conversation slot per player, plus
 `MYMOD_WORLD_SLOT` for ambient/taunts. Everything that was a global singleton (inflight, ready,
 reply, action, name, boon, follower_uid) is now per-slot, so four players never stomp each other.
