@@ -182,8 +182,8 @@ not guessed — `LICH_ICE` is `"frosty lich"`, `BAT_SMALL` is `"bat"`, `EARTH_EL
 | `race_lore.json` | **6** | **49** | `CHARACTER GUIDANCE:` — every prompt, grounded or not |
 | `race_profiles` | **11** | **49** | `YOUR OUTLOOK CENTERS ON:` + `TYPICAL TEMPERAMENT:` |
 | comprehension groups | 12 | 49 | see above |
-| `individual_denizen_research` | 34 | 34 | `CANON:` / `YOU MAY PLAUSIBLY HAVE:` |
-| `denizen_context_profiles` | 33 | 33 | `YOU ARE (category): baseline` |
+| `individual_denizen_research` | 34 | **49** | `CANON:` / `YOU MAY PLAUSIBLY HAVE:` |
+| `denizen_context_profiles` | 33 | **49** | `YOU ARE (category): baseline` |
 | TTS casting | 30 | 30 | voice band + sox chain |
 
 ⚠ **`race_lore.json` was the highest-leverage file in the project and the thinnest.** It is a flat
@@ -205,12 +205,25 @@ matters to me. I seek to remove the heat from this place."; *gremlin* — "Can't
 but I can show you how it came apart." Prompts land at **~850–1000 tokens**, so the additions are
 nearly free against the 3.5k warning line.
 
-**Still open:** the same 15 races have no `individual_denizen_research` entry — `crab, lich, devil,
-frosty_lich, fiery_lich, dryad, myconid, salamander, gremlin, minimimic, adorcised_possession,
-flame_elemental, hologram, moth, duck`. They now have race lore, a worldview and axes, so they are
-no longer generic; they just lack `canon_facts`. Note `lich` and `devil` are **Herx and Baphomet**,
-which resolve through their named-individual entries only when `npc_name` is passed. 19 races are
-still uncast for TTS.
+⚠ **The generic-vs-named split is what `lich` and `devil` needed.** They are the archetypes, not
+Baron Herx and Baphomet — those have their own entries and are chosen by `npc_name`, never by race.
+Both new entries say so in `knowledge_boundary` by name, because the model will otherwise happily
+promote itself to the boss. Verified 3/3: *"I am not the Baron, but his... associate."*
+
+Authored to the file's own `mechanics_rule` — mechanics inform behaviour but cannot establish
+culture, history or morality — so `canon_facts` stay observable and personality lives in
+`safe_inferences`. Where real canon is thin (dryad, myconid, hologram, adorcised_possession) the
+entries say little and forbid inventing more, rather than padding: `adorcised_possession` is told
+to leave the bound spirit's origin unknown *because that unknown is the point*. Sources are honestly
+marked `Gameplay behavior` / `Compendium` rather than citing books that may not exist.
+
+Two boundary probes after: a duck asked for stairs and guards gave no real information; a hologram
+asked what projects it did not name a machine.
+
+`gyrobot` turned out to have a denizen entry but **no** `denizen_context_profiles` entry — a
+pre-existing hole nothing had noticed, now filled.
+
+**Still open:** 19 races are uncast for TTS.
 
 ### Comprehension — polymorph only (was dead code)
 
