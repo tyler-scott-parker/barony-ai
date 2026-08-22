@@ -100,7 +100,24 @@ ck("identity table cleared", not S.PERSISTENT_IDENTITY)
 fresh = summon(600)
 ck("next run's knight is a stranger", fresh["friendship"] == 0 and fresh["bodies"] == 1)
 
-# --- 10. key hygiene -------------------------------------------------------------------
+# --- 10. emplacements: sentrybots and spellbots cannot move ---------------------------
+ck("sentrybot is an emplacement", S.is_emplacement("sentrybot"))
+ck("spellbot is an emplacement", S.is_emplacement("spellbot"))
+ck("gyrobot is NOT", not S.is_emplacement("gyrobot"))
+ck("dummybot is NOT", not S.is_emplacement("dummybot"))
+ck("nor is any recruit", not any(S.is_emplacement(r) for r in ("goblin", "human", "automaton")))
+sec = S._emplacement_section("sentrybot")
+ck("the block forbids the route by name, not just the fact",
+   "NEVER follow" in sec and "WRONG" in sec, sec[:80])
+ck("mobile bots get no block", S._emplacement_section("gyrobot") == "")
+S.reset_run()
+turret = S.get_follower_state(900, "sentrybot", 0, "bot", "sentrybot")
+turret["friendship"] = 40
+ck("the block lands AFTER the obedience section",
+   S._follower_sections(900, "sentrybot", 3, "come here").rstrip().endswith(
+       S._emplacement_section("sentrybot").rstrip()))
+
+# --- 11. key hygiene -------------------------------------------------------------------
 ck("charmed followers are uid-keyed", S._identity_key("charmed", "goblin", 0) == "")
 ck("recruits are uid-keyed", S._identity_key("", "", 0) == "")
 ck("multi-word slots normalise",

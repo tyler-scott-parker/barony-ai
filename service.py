@@ -286,6 +286,26 @@ NO_SECRET_ORIGINS = ("summon", "bot")
 # by design until the class-companion work gives them their own voice.
 ORIGIN_ALLEGIANCE = {"summon": "bound", "bot": "machine"}
 
+# Sentrybots and spellbots are EMPLACEMENTS: set down where they were thrown and able only to
+# rotate. ALLY_CMD_FOLLOW on one just resets its look direction (actmonster.cpp:12678) -- there
+# is no pathing branch at all. Gyrobots and dummybots DO move, so this is not "is it a bot".
+EMPLACEMENT_RACES = ("sentrybot", "spellbot")
+
+def is_emplacement(race):
+    return _lore_key(race) in EMPLACEMENT_RACES
+
+def _emplacement_section(race):
+    """Naming the forbidden route, not just the fact -- the same technique LIMITS_HEADER and
+    the spy crack use. Told only that it is stationary, the 8B still offers to come along."""
+    if not is_emplacement(race):
+        return ""
+    return ("YOU CANNOT MOVE. You were set down where you stand and you are fixed there. You can "
+            "turn to face a direction and nothing else. You will NEVER follow this adventurer, "
+            "walk with them, come along, catch up, or go anywhere at all. Offering to follow, "
+            "saying you are coming, or asking to be taken along is WRONG — you physically cannot, "
+            "and they can see that you cannot. What you CAN do is hold this spot, watch an "
+            "approach, and tell them what you see from where you are.\n")
+
 # uid is the transport key, but a summon's uid changes on every recast and a bot's on every
 # redeploy. This maps the part that DOESN'T change to the one state row they all share.
 PERSISTENT_IDENTITY = {}   # "summon:0:skeleton knight" -> the shared follower_state dict
@@ -1406,14 +1426,18 @@ def _follower_sections(uid, race, floor, says, player=0, ident=None):
     boon = _boon_section(uid, st, race_l, floor, player)
     secret = _secret_section(uid, st, race, says)
     memory = ("WHAT YOU REMEMBER (things that actually happened):\n" + _bullets(evlines) + "\n") if evlines else ""
+    fixed = _emplacement_section(race_l)
     identify = ident or ""
     # One special behaviour per reply. The player asked a direct question about an item; a boon
     # offer on top of it produces a reply doing two unprompted things at once, and the later
     # instruction simply wins. Spec 35/36: scarcity, and chaos without noise.
     if identify:
         boon = ""
+    # `fixed` lands AFTER the obedience section on purpose: that block is about carrying out
+    # orders, and at 8B whatever follows an instruction competes with it. An emplacement told
+    # to obey and then told it cannot move gets the order of those two the right way round.
     return (history + memory + relations + _name_section(st) + secret + boon + identify + alleg
-            + _obedience_section(st))
+            + _obedience_section(st) + fixed)
 
 def build_prompt(race, floor, says="", uid=0, player=0, player_name="", party=1, map_name="",
                  ident=None):
@@ -1871,6 +1895,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if not speech or not speech.strip():
                 speech = "..."  # model declined; show a beat, not nothing
             if action not in VALID_ACTIONS:
+                action = "NONE"
+            # A turret cannot take a movement order however it phrases the reply. Forced here
+            # as well as forbidden in the prompt, because the action drives a real ALLY_CMD.
+            if is_emplacement(race):
                 action = "NONE"
 
             # NPCs keep their own light memory and never touch follower state.

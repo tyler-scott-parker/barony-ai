@@ -881,6 +881,37 @@ strings for an ordinary recruit, so normal play is unchanged. 30 assertions in `
 plus an end-to-end check that a recast knight keeps its name, friendship and event log across a
 new uid while an ordinary recruit's path is untouched.
 
+#### The four bots are not one thing — emplacements vs mobile helpers
+
+| Bot | Moves? | Vanilla role |
+|---|---|---|
+| `sentrybot` | **no** — bolted where thrown, rotates only | fixed gun |
+| `spellbot` | **no** — same | fixed caster |
+| `gyrobot` | yes, flies | carries items, lights, detects; four dedicated `ALLY_CMD_GYRO_*` |
+| `dummybot` | yes, walks | decoy — its whole purpose is to be shot at |
+
+⚠ **`ALLY_CMD_FOLLOW` on a sentrybot does not make it follow.** There is no pathing branch for
+these two anywhere: follow resets `monsterSentrybotLookDir` and defend sets a facing
+(`actmonster.cpp:12660-12690`). They are emplacements that rotate.
+
+⚠ **So a deployed turret resented the player for being a turret.** It sits in
+`ALLY_STATE_DEFAULT`, cannot walk, and holding a corridor while you move on is *the entire point
+of the class* — so it drifted past the 25-tile line and fired `left_behind` (−trust, +fear,
++resentment) every two minutes. The same failure as the DEFEND case the watch already guards,
+except this one cannot even disobey. `mymod_isEmplacement()` now excludes them.
+
+**`is_emplacement()` also forces the action to NONE and adds a prompt block**, because the action
+drives a real `ALLY_CMD` and because the model will otherwise offer to come along. Written the way
+`LIMITS_HEADER` and the spy crack are — naming the forbidden route, not just the fact (*"you will
+NEVER follow this adventurer… offering to follow is WRONG — you physically cannot, and they can
+see that you cannot"*), and placed **after** `_obedience_section`, since that block is about
+carrying out orders and position is a lever. Measured 5/5 refusals with the action NONE, against a
+gyrobot control that follows normally 2/2.
+
+⚠ **Vanilla gives follower interact dialogue to `HUMAN` only** (`actmonster.cpp:13421`) — every
+bot, every summon and every recruited monster is silent in the base game. There is no canned bot
+voice to match or fall back to, so whatever these say is entirely ours.
+
 #### `resummoned` — being unmade and called back
 
 The event that makes the persistence *sayable*. Fires on rebind, for summons and bots alike.
