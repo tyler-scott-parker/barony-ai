@@ -1,13 +1,196 @@
 {
-  "_comment": "Comprehension groups. If the player's current race and the speaker's race share a group, the player understands real dialogue. Otherwise they hear noises. 'noises' maps a race to its untranslated sound. Edit freely; restart service.",
-  "groups": {
-    "beast": ["rat", "spider", "scorpion", "scarab", "cave crawler", "insectoid"],
-    "humanoid": ["human", "goblin", "skeleton", "goatman", "gnome", "automaton", "shopkeeper"]
-  },
-  "noises": {
-    "rat": ["*Squeak!*", "*skreee...*", "*chitter chitter*", "*angry squeaking*"],
-    "spider": ["*chk-chk-chk*", "*hissing clicks*", "*a dry rattle of fangs*"],
-    "scorpion": ["*clacking pincers*", "*a venomous hiss*"],
-    "default_beast": ["*an animal snarl*", "*guttural chittering*", "*a low growl*"]
-  }
+ "_comment": "Comprehension groups. If the player's current race and the speaker's race share a group, the player understands real dialogue. Otherwise they hear noises. 'noises' maps a race to its untranslated sound; a race with no entry falls back to 'default_<group>', then to 'default_beast'. player_race is the POLYMORPH form only -- the engine sends it just when effectShapeshift != NOTHING -- so a player's chosen race never gates comprehension and normal play is unaffected. Every race the game can report is in exactly one group; a race in none would understand nobody, since _group_of returns None. Edit freely; restart service.",
+ "groups": {
+  "humanoid": [
+   "human",
+   "goblin",
+   "skeleton",
+   "goatman",
+   "gnome",
+   "automaton",
+   "shopkeeper",
+   "troll",
+   "kobold",
+   "bugbear"
+  ],
+  "beast": [
+   "rat",
+   "spider",
+   "scorpion",
+   "scarab",
+   "cave crawler",
+   "insectoid",
+   "bat",
+   "crab",
+   "cockatrice",
+   "minotaur",
+   "moth",
+   "duck"
+  ],
+  "undead": [
+   "ghoul",
+   "lich",
+   "frosty lich",
+   "fiery lich",
+   "revenant skull",
+   "vampire",
+   "shadow"
+  ],
+  "demonic": [
+   "demon",
+   "devil",
+   "imp",
+   "succubus",
+   "incubus"
+  ],
+  "construct": [
+   "crystal golem",
+   "sentrybot",
+   "spellbot",
+   "gyrobot",
+   "dummybot",
+   "hologram",
+   "adorcised possession"
+  ],
+  "fey": [
+   "dryad",
+   "myconid",
+   "salamander",
+   "gremlin",
+   "earth sprite",
+   "flame elemental"
+  ],
+  "amorphous": [
+   "slime",
+   "mimic",
+   "minimimic"
+  ]
+ },
+ "noises": {
+  "rat": [
+   "*Squeak!*",
+   "*skreee...*",
+   "*chitter chitter*",
+   "*angry squeaking*"
+  ],
+  "spider": [
+   "*chk-chk-chk*",
+   "*hissing clicks*",
+   "*a dry rattle of fangs*"
+  ],
+  "scorpion": [
+   "*clacking pincers*",
+   "*a venomous hiss*"
+  ],
+  "bat": [
+   "*a shrill chirp*",
+   "*leathery flapping*"
+  ],
+  "crab": [
+   "*a wet clicking*",
+   "*claws scrape stone*"
+  ],
+  "duck": [
+   "*Quack.*",
+   "*an unimpressed quack*"
+  ],
+  "moth": [
+   "*papery wingbeats*",
+   "*a soft flutter against the dark*"
+  ],
+  "cockatrice": [
+   "*a rasping crow*",
+   "*a hiss like a kettle*"
+  ],
+  "minotaur": [
+   "*a bellowing snort*",
+   "*hooves grind the floor*"
+  ],
+  "slime": [
+   "*a wet gurgle*",
+   "*glorp*",
+   "*something viscous shifting*"
+  ],
+  "mimic": [
+   "*wood creaks where no wood should*",
+   "*a hungry clack of hinges*"
+  ],
+  "minimimic": [
+   "*a small, eager rattle*",
+   "*tiny hinges snapping*"
+  ],
+  "ghoul": [
+   "*a rattling moan*",
+   "*wet, hitching breath*"
+  ],
+  "shadow": [
+   "*a whisper with no mouth behind it*",
+   "*the cold sound of nothing*"
+  ],
+  "revenant skull": [
+   "*teeth chatter with no jaw to hold them*",
+   "*a dry, hollow laugh*"
+  ],
+  "myconid": [
+   "*a puff of spores*",
+   "*something fibrous unfurling*"
+  ],
+  "dryad": [
+   "*bark splitting softly*",
+   "*a rustle with no wind*"
+  ],
+  "gremlin": [
+   "*a spiteful cackle*",
+   "*metal being worried at*"
+  ],
+  "salamander": [
+   "*a sputtering hiss*",
+   "*embers popping*"
+  ],
+  "flame elemental": [
+   "*a roar of updraft*",
+   "*the crackle of something feeding*"
+  ],
+  "earth sprite": [
+   "*grinding stone*",
+   "*a low subterranean rumble*"
+  ],
+  "hologram": [
+   "*a burst of static*",
+   "*the same syllable, looping*"
+  ],
+  "dummybot": [
+   "*a flat mechanical chime*"
+  ],
+  "default_beast": [
+   "*an animal snarl*",
+   "*guttural chittering*",
+   "*a low growl*"
+  ],
+  "default_humanoid": [
+   "*speech in a tongue you do not share*",
+   "*a clipped, unfamiliar phrase*",
+   "*words, plainly meant for you, and utterly opaque*"
+  ],
+  "default_undead": [
+   "*a dry rattle from somewhere behind the teeth*",
+   "*a moan that shapes almost-words*"
+  ],
+  "default_demonic": [
+   "*a syllable that hurts to hear*",
+   "*low infernal muttering*"
+  ],
+  "default_construct": [
+   "*servos and a burst of clicking*",
+   "*a flat synthetic tone*"
+  ],
+  "default_fey": [
+   "*a sound like green wood bending*",
+   "*chittering that might be laughter*"
+  ],
+  "default_amorphous": [
+   "*a wet, formless burble*",
+   "*something shifting that has no mouth*"
+  ]
+ }
 }

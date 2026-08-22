@@ -127,8 +127,14 @@ def can_understand(player_race, speaker_race):
     return pg is not None and pg == sg
 
 def noise_for(speaker_race):
+    """Race pool -> that race's GROUP default -> default_beast. The group step matters:
+    without it a lich and a duck both fell back to '*an animal snarl*'."""
     noises = COMPREHENSION.get("noises", {})
-    pool = noises.get(speaker_race.lower()) or noises.get("default_beast", ["*unintelligible noises*"])
+    r = speaker_race.lower()
+    grp = _group_of(r)
+    pool = (noises.get(r)
+            or (noises.get("default_" + grp) if grp else None)
+            or noises.get("default_beast", ["*unintelligible noises*"]))
     return random.choice(pool)
 
 _book_cache = {}

@@ -167,7 +167,38 @@ Verified: 5.9 GB, **100% GPU**, CONTEXT 16384, warm replies ~2-4s. Prompts run *
 ## Systems built (all verified in-game unless noted)
 
 ### Foundation
-Async via detached `std::thread` + shared globals + `mymod_pollAI()` per frame (no freeze). Two-way command loop: `/aicommand` finds the player's follower via `Stat->leader_uid`, service returns `{speech, action}` ∈ FOLLOW/DEFEND/WAIT/ATTACK/NONE. **ATTACK is diegetic only** — Barony's combat AI handles fighting. Push-to-talk voice (hold V → faster-whisper small.en, cuda/float16). Speech bubbles via `createDialogueTooltip(uid, DIALOGUE_NPC, "%s", reply)` — **the `"%s"` guard is required**. Polymorph-as-comprehension. 34 canonical books injected per race. `/aiserver <url>` for BYO-model.
+Async via detached `std::thread` + shared globals + `mymod_pollAI()` per frame (no freeze). Two-way command loop: `/aicommand` finds the player's follower via `Stat->leader_uid`, service returns `{speech, action}` ∈ FOLLOW/DEFEND/WAIT/ATTACK/NONE. **ATTACK is diegetic only** — Barony's combat AI handles fighting. Push-to-talk voice (hold V → faster-whisper small.en, cuda/float16). Speech bubbles via `createDialogueTooltip(uid, DIALOGUE_NPC, "%s", reply)` — **the `"%s"` guard is required**. Polymorph-as-comprehension (see below — it was dead code until Aug 21 2026). 34 canonical books injected per race. `/aiserver <url>` for BYO-model.
+
+
+### Comprehension — polymorph only (was dead code)
+
+⚠ **The filter never fired once, in any session.** `can_understand` opens with
+`if not player_race: return True`, and **no payload the mod built ever contained
+`player_race`** — the only two callers are the taunt and ambient payloads
+(`mymod.cpp:541`/`560` as they were), and `mymod_payloadHead` sends `player_name`, not race.
+Documented as a built feature, voiced in the TTS section, and inert the whole time. Found by
+auditing race coverage, not by anything failing.
+
+**`player_race` is the SHAPESHIFT form, never the chosen race** (`mymod_polymorphRace`, reading
+`effectShapeshift` = `skill[53]`, empty when `NOTHING`). This is the load-bearing decision. Sending
+the chosen race would mean a **vampire, succubus or incubus player understands nobody** — none of
+them are in a group, `_group_of` returns `None`, and `pg is not None` fails — and DLC pack 1/2 make
+exactly those races playable. Omitting the field when not polymorphed means normal play is
+bit-for-bit unchanged, whatever race you picked.
+
+**All 49 races the game can report are now in exactly one group** — `humanoid, beast, undead,
+demonic, construct, fey, amorphous`. Coverage matters structurally, not cosmetically: a race in
+*no* group understands nobody but its own kind, so a missing entry is a silent muting. Existing
+memberships were preserved exactly; the change is purely additive.
+
+`noise_for` now falls back **race pool → `default_<group>` → `default_beast`**. Without the group
+step a lich and a duck both came back `*an animal snarl*`. 30 noise pools now, up from 4.
+
+Verified live by curl: not polymorphed → real dialogue from a lich; rat hearing a human →
+*"\*speech in a tongue you do not share\*"*; rat hearing a spider → real dialogue; duck hearing a
+lich → *"\*a dry rattle from somewhere behind the teeth\*"*; lich hearing a vampire → real dialogue.
+
+⚠ **Untested in game** — the C++ half compiles but polymorph has not been exercised in a real run.
 
 ### Relationship-based disclosure (design spec §32)
 
