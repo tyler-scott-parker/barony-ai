@@ -41,8 +41,9 @@ st = spy(3)
 first = fires(st, 10)
 ck("it fires at all", first)
 S.SABOTAGE_STATE["used"] = True                 # pretend the minotaur is spent
-S.SABOTAGE_STATE["trap_floors"] = {5, 6, 7}     # and the trap budget too
-ck("with both budgets spent, nothing fires",
+S.SABOTAGE_STATE["trap_floors"] = {5, 6, 7}     # and the trap budget
+S.SABOTAGE_STATE["fog_floors"] = {5, 6}         # and the fog budget
+ck("with every budget spent, nothing fires",
    not any(S.sabotage_roll(st, 10) for _ in range(2000)))
 S.reset_run()
 ck("a new run re-arms it", not S.SABOTAGE_STATE["used"])
@@ -82,7 +83,8 @@ for i in range(3):
     st = S.get_follower_state(2000 + i, "human", 0)
     st.update(allegiance="spy", friendship=30, saboteur=True)
     party.append(st)
-fired = {"minotaur": 0, "traps": 0}
+import collections
+fired = collections.Counter()   # a Counter, so adding a fourth kind cannot break this
 for floor in range(5, 20):
     for st in party:
         for _ in range(200):
@@ -130,7 +132,7 @@ for floor in range(5, 20):
             kinds.add(r[0])
             if r[0] == "traps": floors_rigged.add(floor)
 ck("the roll returns (kind, tell)", all(isinstance(k, str) for k in kinds), kinds)
-ck("both kinds can happen", kinds == {"minotaur", "traps"}, kinds)
+ck("every kind can happen", kinds == {"minotaur", "traps", "fog"}, kinds)
 ck("the minotaur is still once per run", S.SABOTAGE_STATE["used"])
 ck("traps are capped per run", len(floors_rigged) <= S.SABOTAGE_TRAPS_PER_RUN, floors_rigged)
 ck("and never twice on the same floor",
@@ -144,6 +146,42 @@ ck("a new run clears both budgets",
 ck("one tell pool, so the kind is not readable from the line",
    not any("trap" in t.lower() or "boulder" in t.lower() or "arrow" in t.lower()
            for t in S.SABOTAGE_TELLS))
+
+# --- 4e. clouding the map: the mirror of the map boon ----------------------------------
+S.reset_run()
+st = S.get_follower_state(5000, "human", 0)
+st.update(allegiance="spy", friendship=30, saboteur=True)
+kinds, fog_floors = set(), set()
+for floor in range(5, 20):
+    for _ in range(300):
+        r = S.sabotage_roll(st, floor)
+        if r:
+            kinds.add(r[0])
+            if r[0] == "fog": fog_floors.add(floor)
+ck("fog is one of the kinds", "fog" in kinds, kinds)
+ck("all three can happen", kinds == {"minotaur", "traps", "fog"}, kinds)
+# The mildest of the three -- a pure setback rather than a danger -- so the smallest budget.
+ck("fog is capped per run", len(fog_floors) <= S.SABOTAGE_FOG_PER_RUN, fog_floors)
+ck("and is rarer than rigged traps", S.SABOTAGE_FOG_PER_RUN < S.SABOTAGE_TRAPS_PER_RUN)
+ck("never twice on the same floor",
+   len(fog_floors) == len(S.SABOTAGE_STATE["fog_floors"]), S.SABOTAGE_STATE["fog_floors"])
+
+# The three budgets are independent: spending one must not silently spend another.
+S.reset_run()
+st = S.get_follower_state(5001, "human", 0)
+st.update(allegiance="spy", friendship=30, saboteur=True)
+S.SABOTAGE_STATE["fog_floors"] = {5, 6}          # fog exhausted
+S.SABOTAGE_STATE["used"] = True                  # minotaur spent
+got = set()
+for floor in range(7, 20):
+    for _ in range(300):
+        r = S.sabotage_roll(st, floor)
+        if r: got.add(r[0])
+ck("with fog and the minotaur spent, traps still fire", got == {"traps"}, got)
+S.reset_run()
+ck("a new run clears all three budgets",
+   not S.SABOTAGE_STATE["used"] and not S.SABOTAGE_STATE["trap_floors"]
+   and not S.SABOTAGE_STATE["fog_floors"])
 
 # --- 5. it does not stack with the other unprompted behaviours -------------------------
 S.reset_run()

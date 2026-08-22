@@ -854,6 +854,18 @@ can cost you the run, rigged traps cost you a health bar.
 |---|---|---|
 | `minotaur` | once per **run** | starts the countdown; see below |
 | `traps` | once per **floor**, 3 per run | every boulder and arrow trap on the floor fires **twice** |
+| `fog` | once per **floor**, 2 per run | wipes what you have explored of this floor's map |
+
+**Clouding the map** is the mirror of the map boon, and the mildest of the three — a pure setback
+rather than a danger, so it gets the smallest budget. A **cursed** scroll of magic mapping already
+does exactly this: wipes `minimap[][]` and says *"Huh? What? Where am I?"*
+(`item_usage_funcs.cpp:3914`, Language 869). The effect and the message are both the game's own,
+and the message is ideal here — disorienting, and it does not say who did it.
+
+⚠ **Unlike revealing, this needs a packet.** `spell_magicMap` sends `MMAP` to a remote client, but
+there is no vanilla equivalent for un-mapping, and the cursed-scroll path bails out entirely for a
+remote player (`if (multiplayer == SERVER && player > 0) return;`) because the client runs its own
+copy. `MYFG` is the eighth mod packet.
 
 **Rigged traps** re-fire ~2s after they go off — a second boulder out of the same hole once you
 have stepped clear and stopped worrying about it. No new firing code: `skill[28]` is Barony's
@@ -1532,6 +1544,7 @@ So the only new netcode is **three packets** (`MYID`/`MYIV` for identify aside):
 | `MYNM` | host → clients | `[4..7]`=uid, `[8..]`=name | vanilla fills a follower's `clientStats->name` **only at recruit time** (`LEAD`); a later rename needs its own packet or the party HUD never updates |
 | `MYFR` | host → clients | `[4]`=everybodyfriendly | `/friendly` is host-local and vanilla never networks it, which silently made the whole test harness single-player-only — see below |
 | `MYHG` | host → clients | `[4..7]`=shopkeeper uid, `[8]`=percent+100 | clients compute shop prices themselves, so a haggle the client does not know about shows one price and charges another |
+| `MYFG` | host → client | `[4]`=pnum | wiping a minimap is client-local and has no vanilla packet, unlike revealing one |
 
 ⚠ **`/friendly` was never replicated, and it silently broke co-op recruiting for the entire
 project.** Monsters behaved correctly for clients — pacified, non-hostile — because monster AI is

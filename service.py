@@ -1121,6 +1121,7 @@ def reset_run():
     BOON_STATE["map_used"].clear()
     SABOTAGE_STATE["used"] = False
     SABOTAGE_STATE["trap_floors"].clear()
+    SABOTAGE_STATE["fog_floors"].clear()
     GUARD_STATE.update({"minotaur": False, "sokoban": False})
     LAST_BOON.clear()
     npc_state.clear()
@@ -1313,8 +1314,13 @@ def herx_detect(uid, raw, speech, player=0):
 #   minotaur -- once per RUN, run-global.
 #   traps    -- once per FLOOR, capped per run. A rigged trap fires TWICE: a second boulder from
 #               the same hole a couple of seconds after the first, once you have stepped clear.
-SABOTAGE_STATE = {"used": False, "trap_floors": set()}
+#   fog      -- wipes what the player has explored of this floor's map. The mirror of the map
+#               boon, and the mildest of the three: a pure setback rather than a danger, so it
+#               gets the smallest budget. Losing your bearings is annoying in a way that does
+#               not need to happen often to be remembered.
+SABOTAGE_STATE = {"used": False, "trap_floors": set(), "fog_floors": set()}
 SABOTAGE_TRAPS_PER_RUN = 3
+SABOTAGE_FOG_PER_RUN   = 2
 SABOTAGE_MIN_FLOOR = 5               # not the opening mines: a minotaur at level 2 is not a
 SABOTAGE_MAX_FLOOR = 19              # betrayal, it is a mugging. And never on a boss floor,
                                      # in Hell, or in the town.
@@ -1348,8 +1354,10 @@ SABOTAGE_TELLS = [
 def sabotage_roll(st, floor):
     """Decide whether this spy sabotages, and how. Server-side; the model is only ever told to
     say the tell, never that it is doing anything. Returns (kind, tell) or None."""
-    if SABOTAGE_STATE["used"] and len(SABOTAGE_STATE["trap_floors"]) >= SABOTAGE_TRAPS_PER_RUN:
-        return None      # both budgets spent
+    if (SABOTAGE_STATE["used"]
+            and len(SABOTAGE_STATE["trap_floors"]) >= SABOTAGE_TRAPS_PER_RUN
+            and len(SABOTAGE_STATE["fog_floors"]) >= SABOTAGE_FOG_PER_RUN):
+        return None      # every budget spent
     if st.get("allegiance") != "spy":
         return None
     if st.get("origin") in NO_SECRET_ORIGINS:      # a conjuration has no outside to signal to
@@ -1371,15 +1379,25 @@ def sabotage_roll(st, floor):
     # Which one? The minotaur is the once-per-run headline; rigging traps is the everyday
     # version and carries the roll whenever the big one is spent or this floor is already
     # rigged. Returns (kind, tell).
-    floors = SABOTAGE_STATE["trap_floors"]
-    can_traps = floor not in floors and len(floors) < SABOTAGE_TRAPS_PER_RUN
+    traps = SABOTAGE_STATE["trap_floors"]
+    fog = SABOTAGE_STATE["fog_floors"]
+    can_traps = floor not in traps and len(traps) < SABOTAGE_TRAPS_PER_RUN
+    can_fog = floor not in fog and len(fog) < SABOTAGE_FOG_PER_RUN
     can_mino = not SABOTAGE_STATE["used"]
-    if can_mino and (not can_traps or random.random() < 0.35):
+    # The minotaur is the once-per-run headline; the other two carry the roll otherwise, with
+    # traps favoured because clouding the map is a pure setback and wants to stay rare.
+    if can_mino and random.random() < 0.35:
         SABOTAGE_STATE["used"] = True
         kind = "minotaur"
-    elif can_traps:
-        floors.add(floor)
+    elif can_traps and (not can_fog or random.random() < 0.65):
+        traps.add(floor)
         kind = "traps"
+    elif can_fog:
+        fog.add(floor)
+        kind = "fog"
+    elif can_mino:
+        SABOTAGE_STATE["used"] = True
+        kind = "minotaur"
     else:
         return None
     return kind, random.choice(SABOTAGE_TELLS)
