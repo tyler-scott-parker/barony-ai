@@ -170,6 +170,48 @@ Verified: 5.9 GB, **100% GPU**, CONTEXT 16384, warm replies ~2-4s. Prompts run *
 Async via detached `std::thread` + shared globals + `mymod_pollAI()` per frame (no freeze). Two-way command loop: `/aicommand` finds the player's follower via `Stat->leader_uid`, service returns `{speech, action}` ∈ FOLLOW/DEFEND/WAIT/ATTACK/NONE. **ATTACK is diegetic only** — Barony's combat AI handles fighting. Push-to-talk voice (hold V → faster-whisper small.en, cuda/float16). Speech bubbles via `createDialogueTooltip(uid, DIALOGUE_NPC, "%s", reply)` — **the `"%s"` guard is required**. Polymorph-as-comprehension (see below — it was dead code until Aug 21 2026). 34 canonical books injected per race. `/aiserver <url>` for BYO-model.
 
 
+
+### Race coverage — what every creature knows about being itself
+
+Audited against all 49 races `getMonsterLocalizedName` can return (resolved from `lang/en.txt`,
+not guessed — `LICH_ICE` is `"frosty lich"`, `BAT_SMALL` is `"bat"`, `EARTH_ELEMENTAL` is
+`"earth sprite"`).
+
+| Source | Before | After | What it feeds |
+|---|---|---|---|
+| `race_lore.json` | **6** | **49** | `CHARACTER GUIDANCE:` — every prompt, grounded or not |
+| `race_profiles` | **11** | **49** | `YOUR OUTLOOK CENTERS ON:` + `TYPICAL TEMPERAMENT:` |
+| comprehension groups | 12 | 49 | see above |
+| `individual_denizen_research` | 34 | 34 | `CANON:` / `YOU MAY PLAUSIBLY HAVE:` |
+| `denizen_context_profiles` | 33 | 33 | `YOU ARE (category): baseline` |
+| TTS casting | 30 | 30 | voice band + sox chain |
+
+⚠ **`race_lore.json` was the highest-leverage file in the project and the thinnest.** It is a flat
+`race -> one short string` map injected as `CHARACTER GUIDANCE` on **every** conversation, taunt and
+babble. 43 of 49 races were falling through to `default` — *"A creature of the dungeon depths
+beneath Hamlet. Crude and wary of intruders."* — which is precisely the shapeless prompt that
+invites fabrication. Style to match when adding more: **what they are, how they talk, what they
+care about**, in 1–3 sentences.
+
+⚠ **`RACE_LORE.get(race.lower())` had the multi-word bug `_lore_key()` exists to prevent.** It never
+bit only because all six original keys were single words; `crystal golem` would have silently
+missed an underscored entry. The lookup now tries `_lore_key()` first and the raw form second, so
+either convention resolves.
+
+Measured after, same question to each, races that previously had nothing at all:
+*dryad* — "Roots are patient, Ada. I care for growth in seasons to come."; *myconid* — "dampness
+and darkness are important to us" (the plural voice is authored); *frosty lich* — "Stillness
+matters to me. I seek to remove the heat from this place."; *gremlin* — "Can't fix what's broke,
+but I can show you how it came apart." Prompts land at **~850–1000 tokens**, so the additions are
+nearly free against the 3.5k warning line.
+
+**Still open:** the same 15 races have no `individual_denizen_research` entry — `crab, lich, devil,
+frosty_lich, fiery_lich, dryad, myconid, salamander, gremlin, minimimic, adorcised_possession,
+flame_elemental, hologram, moth, duck`. They now have race lore, a worldview and axes, so they are
+no longer generic; they just lack `canon_facts`. Note `lich` and `devil` are **Herx and Baphomet**,
+which resolve through their named-individual entries only when `npc_name` is passed. 19 races are
+still uncast for TTS.
+
 ### Comprehension — polymorph only (was dead code)
 
 ⚠ **The filter never fired once, in any session.** `can_understand` opens with

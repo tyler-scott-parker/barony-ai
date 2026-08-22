@@ -197,7 +197,11 @@ def _persona(race, grounded, floor, map_name="", npc_name=""):
     after them, anti-fabrication fell from 9-10/10 to ~4/10 -- the model split the difference
     and produced exactly the hedged answer the limits block was written to kill."""
     race_l = race.lower()
-    slice_ = RACE_LORE.get(race_l, RACE_LORE.get("default", "A creature of the dungeon."))
+    # Same silent-miss trap _lore_key() was written for: the game hands back display names
+    # with spaces ("crystal golem"), so a raw .get() would never match an underscored key.
+    # Try both so either convention works and no race quietly falls to the default.
+    slice_ = (RACE_LORE.get(_lore_key(race_l)) or RACE_LORE.get(race_l)
+              or RACE_LORE.get("default", "A creature of the dungeon."))
     head = f"SETTING: {WORLD}\n"
     tail = f"CHARACTER GUIDANCE: {slice_}\n"
     limits = ""

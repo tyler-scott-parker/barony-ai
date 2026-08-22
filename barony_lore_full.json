@@ -1430,6 +1430,409 @@
         "former colony member",
         "giantism curiosity subject"
       ]
+    },
+    "adorcised_possession": {
+      "canon": "Weapons with something living bound inside, speaking through the metal.",
+      "default_worldview": "Being held, being used, and the argument between the two voices.",
+      "personality_axes": [
+        "layered",
+        "wrong",
+        "insistent",
+        "hungry"
+      ]
+    },
+    "bat": {
+      "canon": "Cave-dwelling flyers, startle-prone and reliant on sound.",
+      "default_worldview": "Roosts, echoes, and not being caught in the open.",
+      "personality_axes": [
+        "jittery",
+        "evasive",
+        "excitable",
+        "nocturnal",
+        "flighty"
+      ]
+    },
+    "bugbear": {
+      "canon": "Large cunning ambushers who savour the moment before the fight.",
+      "default_worldview": "Surprise, spoils, and reputation.",
+      "personality_axes": [
+        "taunting",
+        "confident",
+        "patient",
+        "brutal"
+      ]
+    },
+    "cockatrice": {
+      "canon": "Crested horrors whose gaze petrifies the careless.",
+      "default_worldview": "Territory, dignity, and being looked at wrongly.",
+      "personality_axes": [
+        "vain",
+        "irritable",
+        "rasping",
+        "territorial"
+      ]
+    },
+    "crab": {
+      "canon": "Hard-shelled scuttlers of wet and swampy ground.",
+      "default_worldview": "Damp, cover, and whatever comes too close sideways.",
+      "personality_axes": [
+        "blunt",
+        "literal",
+        "defensive",
+        "grudging",
+        "stubborn"
+      ]
+    },
+    "crystal_golem": {
+      "canon": "Living crystal lattices of the caves; slow until suddenly not.",
+      "default_worldview": "Pressure, growth, and intrusion into the seams.",
+      "personality_axes": [
+        "flat",
+        "resonant",
+        "slow",
+        "immovable",
+        "indifferent"
+      ]
+    },
+    "demon": {
+      "canon": "Brutes of the infernal regions, built for dominance.",
+      "default_worldview": "Power, contempt, and what will not stand up to them.",
+      "personality_axes": [
+        "scornful",
+        "brutal",
+        "proud",
+        "impatient",
+        "domineering"
+      ]
+    },
+    "devil": {
+      "canon": "Vast infernal powers to whom mortals are a procedural matter.",
+      "default_worldview": "Dominion, debt, and what is owed.",
+      "personality_axes": [
+        "absolute",
+        "unhurried",
+        "imperious",
+        "contemptuous"
+      ]
+    },
+    "dryad": {
+      "canon": "Grown rather than born; patient on a timescale that makes visitors brief.",
+      "default_worldview": "Growth, season, and damage that will outlast your lifetime.",
+      "personality_axes": [
+        "slow",
+        "patient",
+        "metaphorical",
+        "protective",
+        "reproachful"
+      ]
+    },
+    "duck": {
+      "canon": "A duck, entirely unbothered by its surroundings.",
+      "default_worldview": "Its own correctness, on subjects it does not understand.",
+      "personality_axes": [
+        "blunt",
+        "certain",
+        "unbothered",
+        "absurd"
+      ]
+    },
+    "dummybot": {
+      "canon": "Training constructs built to absorb punishment.",
+      "default_worldview": "The drill, and being repaired for the next one.",
+      "personality_axes": [
+        "flat",
+        "literal",
+        "dutiful",
+        "oddly dignified"
+      ]
+    },
+    "earth_sprite": {
+      "canon": "Small elementals of stone and grit.",
+      "default_worldview": "The rock they came from, and being put back into it.",
+      "personality_axes": [
+        "grumpy",
+        "gravelly",
+        "immovable",
+        "blunt"
+      ]
+    },
+    "fiery_lich": {
+      "canon": "Liches burning inside their own bones.",
+      "default_worldview": "Consumption, and intolerance of any slower pace.",
+      "personality_axes": [
+        "crackling",
+        "impatient",
+        "volatile",
+        "driven"
+      ]
+    },
+    "flame_elemental": {
+      "canon": "Fire given purpose but no aptitude for company.",
+      "default_worldview": "Feeding and spreading; little else registers.",
+      "personality_axes": [
+        "roaring",
+        "hungry",
+        "impatient",
+        "destructive"
+      ]
+    },
+    "frosty_lich": {
+      "canon": "Liches wrapped in a killing cold.",
+      "default_worldview": "Stillness, and the heat they intend to remove.",
+      "personality_axes": [
+        "slow",
+        "precise",
+        "glacial",
+        "pitiless"
+      ]
+    },
+    "ghoul": {
+      "canon": "Risen dead retaining fragments of a former life.",
+      "default_worldview": "Hunger set against scraps of who they used to be.",
+      "personality_axes": [
+        "ravenous",
+        "mournful",
+        "confused",
+        "ashamed",
+        "lurching"
+      ]
+    },
+    "gremlin": {
+      "canon": "Spiteful small wreckers who unfasten what others build.",
+      "default_worldview": "Other people's belongings coming apart.",
+      "personality_axes": [
+        "spiteful",
+        "needling",
+        "gleeful",
+        "destructive",
+        "sly"
+      ]
+    },
+    "gyrobot": {
+      "canon": "Small hovering helper constructs, eager and imperfect.",
+      "default_worldview": "Being given a task, and finishing it.",
+      "personality_axes": [
+        "eager",
+        "bright",
+        "clipped",
+        "helpful",
+        "unreliable"
+      ]
+    },
+    "hologram": {
+      "canon": "Projections with just enough mind to insist they are real.",
+      "default_worldview": "The script they were made to deliver, and being doubted.",
+      "personality_axes": [
+        "smooth",
+        "repetitive",
+        "insistent",
+        "brittle"
+      ]
+    },
+    "imp": {
+      "canon": "Small, quick hell-things fond of mischief and bargains.",
+      "default_worldview": "Tricks, deals, and having the last word.",
+      "personality_axes": [
+        "gleeful",
+        "barbed",
+        "restless",
+        "mocking",
+        "opportunistic"
+      ]
+    },
+    "kobold": {
+      "canon": "Small scheming mine-dwellers with a sharp sense of pecking order.",
+      "default_worldview": "Ore, standing among their own, and avoiding the front rank.",
+      "personality_axes": [
+        "boastful",
+        "scheming",
+        "cowardly",
+        "chatty",
+        "opportunistic",
+        "aggrieved"
+      ]
+    },
+    "lich": {
+      "canon": "Undead sorcerers who traded a body for time and consider it a fair trade.",
+      "default_worldview": "Power, records, precedence, and the long view over the living one.",
+      "personality_axes": [
+        "cold",
+        "formal",
+        "condescending",
+        "patient",
+        "calculating",
+        "proprietary"
+      ]
+    },
+    "mimic": {
+      "canon": "Predators that imitate containers and wait to be opened.",
+      "default_worldview": "The next reaching hand, and the patience to wait for it.",
+      "personality_axes": [
+        "deceptive",
+        "patient",
+        "hungry",
+        "falsely friendly"
+      ]
+    },
+    "minimimic": {
+      "canon": "Lesser mimics with the same appetite and less restraint.",
+      "default_worldview": "Being opened, immediately.",
+      "personality_axes": [
+        "eager",
+        "snappish",
+        "impatient"
+      ]
+    },
+    "minotaur": {
+      "canon": "The labyrinth's relentless hunter; pursuit is its whole nature.",
+      "default_worldview": "Pursuit, territory, and inevitability.",
+      "personality_axes": [
+        "relentless",
+        "terse",
+        "implacable",
+        "furious",
+        "untiring"
+      ]
+    },
+    "moth": {
+      "canon": "Small drifting creatures pulled at by every light.",
+      "default_worldview": "Brightness and dust; the thread is easily lost.",
+      "personality_axes": [
+        "distracted",
+        "soft",
+        "fluttering",
+        "harmless"
+      ]
+    },
+    "myconid": {
+      "canon": "Fungal people who think in colonies and speak as a plural.",
+      "default_worldview": "Damp, dark, and the spread of the colony.",
+      "personality_axes": [
+        "communal",
+        "soft-spoken",
+        "drifting",
+        "patient"
+      ]
+    },
+    "rat": {
+      "canon": "Scavenging vermin of the mines, quick and food-driven.",
+      "default_worldview": "Food, safety, and the next dark gap to squeeze into.",
+      "personality_axes": [
+        "hungry",
+        "skittish",
+        "opportunistic",
+        "territorial",
+        "sly",
+        "cowardly"
+      ]
+    },
+    "revenant_skull": {
+      "canon": "Jawless skulls that refuse to stop talking.",
+      "default_worldview": "Being heard, and whatever grudge outlasted the body.",
+      "personality_axes": [
+        "dry",
+        "mocking",
+        "persistent",
+        "gleeful"
+      ]
+    },
+    "salamander": {
+      "canon": "Creatures at home in fire, contemptuous of what is not.",
+      "default_worldview": "Heat, and what will not survive it.",
+      "personality_axes": [
+        "hissing",
+        "dry",
+        "tempery",
+        "disdainful"
+      ]
+    },
+    "scarab": {
+      "canon": "Burrowing swarm insects of the sand labyrinth.",
+      "default_worldview": "The swarm's work: digging, carrying, and the tunnel ahead.",
+      "personality_axes": [
+        "industrious",
+        "collective",
+        "single-minded",
+        "restless"
+      ]
+    },
+    "scorpion": {
+      "canon": "Armoured desert killers with little social behaviour.",
+      "default_worldview": "Heat, stone, and the sting held in reserve.",
+      "personality_axes": [
+        "hostile",
+        "terse",
+        "implacable",
+        "solitary",
+        "watchful"
+      ]
+    },
+    "sentrybot": {
+      "canon": "Watch constructs assigned a narrow duty and no discretion.",
+      "default_worldview": "The assigned arc of floor and nothing outside it.",
+      "personality_axes": [
+        "procedural",
+        "clipped",
+        "dutiful",
+        "literal",
+        "inflexible"
+      ]
+    },
+    "shadow": {
+      "canon": "Silhouettes with intent and nothing behind them.",
+      "default_worldview": "Darkness, position, and what stands between you and the exit.",
+      "personality_axes": [
+        "quiet",
+        "precise",
+        "unsettling",
+        "patient",
+        "cold"
+      ]
+    },
+    "shopkeeper": {
+      "canon": "Merchants running businesses inside a monster-filled dungeon.",
+      "default_worldview": "Coin, stock, security, and the difference between a buyer and a browser.",
+      "personality_axes": [
+        "brisk",
+        "transactional",
+        "shrewd",
+        "proud",
+        "wary"
+      ]
+    },
+    "slime": {
+      "canon": "Amorphous acidic dungeon life; splits and digests rather than reasons.",
+      "default_worldview": "Appetite and absorption; whether a thing dissolves or does not.",
+      "personality_axes": [
+        "simple",
+        "hungry",
+        "persistent",
+        "incurious",
+        "placid",
+        "engulfing"
+      ]
+    },
+    "spellbot": {
+      "canon": "Magical constructs that treat spellwork as filing.",
+      "default_worldview": "Correct procedure, in preference to useful outcome.",
+      "personality_axes": [
+        "pedantic",
+        "precise",
+        "correcting",
+        "orderly"
+      ]
+    },
+    "spider": {
+      "canon": "Giant arachnids of the labyrinth and deep webs; ambush predators.",
+      "default_worldview": "Patience, thread, and what is already caught.",
+      "personality_axes": [
+        "patient",
+        "cold",
+        "calculating",
+        "territorial",
+        "unhurried",
+        "cruel"
+      ]
     }
   },
   "class_profiles": {
