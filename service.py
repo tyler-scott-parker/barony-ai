@@ -1097,7 +1097,7 @@ def reset_run():
     BOON_STATE["good_used"].clear()
     SABOTAGE_STATE["used"] = False
     SABOTAGE_STATE["trap_floors"].clear()
-    GUARD_STATE["used"] = False
+    GUARD_STATE.update({"minotaur": False, "sokoban": False})
     LAST_BOON.clear()
     npc_state.clear()
     PERSISTENT_IDENTITY.clear()
@@ -1384,22 +1384,56 @@ def sabotage_section(tell):
 # notices.
 GUARD_MIN_TRUST = 40
 GUARD_CHANCE    = 0.7           # even the right companion can miss it
-GUARD_STATE     = {"used": False}    # once per run, run-global
 
-def guard_roll(st):
-    """Does this follower head off the countdown? Server-side, once per run."""
-    if GUARD_STATE["used"]:
+# Solving the boulder puzzle for you. Gated on friendship rather than trust: this is a favour,
+# not a matter of judgement -- they are doing you a tedious errand because they like you.
+# Generous on purpose: the puzzle is optional content a player may simply not enjoy, and a
+# follower who can spare you it should usually do so.
+SOKOBAN_MIN_FRIENDSHIP = 20
+SOKOBAN_CHANCE         = 0.75
+
+GUARD_STATE = {"minotaur": False, "sokoban": False}   # once per run each
+
+def favour_roll(kind, st):
+    """Does this follower do it? Server-side, once per run per kind."""
+    if GUARD_STATE.get(kind):
         return False
     if st.get("allegiance") == "spy":
-        return False            # obviously not the one who called it
+        return False            # obviously not the one who caused the problem
     if st.get("origin") in NO_SECRET_ORIGINS:
-        return False            # a conjuration has no history here to be suspicious of
-    if st.get("trust", 0) < GUARD_MIN_TRUST:
+        return False            # a conjuration has no history here, and no hands to spare
+    if kind == "minotaur":
+        # Trust, not friendship: not "do they like you" but "will they act for you".
+        if st.get("trust", 0) < GUARD_MIN_TRUST or random.random() >= GUARD_CHANCE:
+            return False
+    elif kind == "sokoban":
+        if (st.get("friendship", 0) < SOKOBAN_MIN_FRIENDSHIP
+                or random.random() >= SOKOBAN_CHANCE):
+            return False
+    else:
         return False
-    if random.random() >= GUARD_CHANCE:
-        return False
-    GUARD_STATE["used"] = True
+    GUARD_STATE[kind] = True
     return True
+
+def build_sokoban_prompt(race, floor, map_name, did):
+    """Their line after clearing the boulder puzzle. The engine owns the mechanism; they only
+    have to sound like someone who has just done a tedious job so you did not have to."""
+    head, body, limits = _persona(race, False, floor, map_name, books=False)
+    situation = (
+        "This chamber is full of heavy boulders and pits, and a great deal of gold sitting "
+        "where nobody can reach it. It is a stupid puzzle and it would take the adventurer an "
+        "age. " +
+        ("You have just shoved the lot of them into the pits yourself. Say so, shortly and "
+         "plainly, the way you would mention any chore you have finished. Mention that you "
+         "knocked a bit of the gold in by accident. Do NOT boast and do NOT make a speech.\n"
+         if did else
+         "You have looked at it and you are not going to attempt it. Say so, shortly.\n"))
+    return (head
+            + f"YOU ARE: a {race} in a hidden chamber beneath the dungeon, this adventurer's "
+              "companion.\n"
+            + body
+            + situation
+            + "Respond with ONLY one short spoken line. No narration, no quotes, no JSON.")
 
 def build_guard_prompt(race, floor, map_name, caught):
     """Their line. Not told HOW they stopped it -- the engine owns the mechanism, and asking an
@@ -2408,18 +2442,22 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
             # A countdown has started on this floor and the engine is asking whether this
             # follower heads it off. Answered before any conversation state is touched.
-            if data.get("minotaur_guard"):
+            favour = (data.get("favour") or "").strip()
+            if favour:
                 with STATE_LOCK:
                     st_g = get_follower_state(uid, race, player) if uid else {}
-                    caught = guard_roll(st_g) if st_g else False
-                raw_g = ask_ollama(build_guard_prompt(race, floor, map_name, caught))
+                    did = favour_roll(favour, st_g) if st_g else False
+                prompt_g = (build_guard_prompt(race, floor, map_name, did)
+                            if favour == "minotaur"
+                            else build_sokoban_prompt(race, floor, map_name, did))
+                raw_g = ask_ollama(prompt_g)
                 line = (raw_g or "").strip().strip('"').split("\n")[0][:200]
-                print(f"[SERVICE] -> guard: {race} {'STOPPED it' if caught else 'could not'}: {line}")
-                logrec("guard", uid=uid, race=race, floor=floor, player=player,
-                       caught=caught or None, trust=st_g.get("trust") if st_g else None,
-                       reply=line[:200])
-                tts_emit(line, race, uid, "guard", "", player)
-                return self._send_json({"reply": line, "guard": "1" if caught else "0"})
+                print(f"[SERVICE] -> favour {favour}: {race} {'DID it' if did else 'did not'}: {line}")
+                logrec("favour", uid=uid, race=race, floor=floor, player=player, what=favour,
+                       did=did or None, trust=st_g.get("trust") if st_g else None,
+                       friendship=st_g.get("friendship") if st_g else None, reply=line[:200])
+                tts_emit(line, race, uid, "favour", "", player)
+                return self._send_json({"reply": line, "act": "1" if did else "0"})
 
             evt = data.get("event", "")
             if evt:

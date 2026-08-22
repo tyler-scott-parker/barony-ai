@@ -877,7 +877,36 @@ moving soon, though."*
 throws. Caught by the test, and it would have thrown the first time the feature ever fired in a
 real run.
 
-### A trusted follower heading off the minotaur
+### Follower favours
+
+The **positive counterpart to sabotage**. Before these, the best a loyal follower could do was
+hand you a healing potion once a run, while a spy had four separate ways to cost you the run.
+One async slot serves them all: the engine notices a situation, asks whether the nearest suitable
+follower acts, and applies the answer. Independent once-per-run budgets, so spending one does not
+cost you the other.
+
+#### Solving Sokoban for you
+
+The hidden boulder-and-pits puzzle is optional content, and a player who dislikes it should be
+able to hand it to a companion. Gated on **friendship ≥20** rather than trust — this is a chore
+done out of fondness, not a judgement call — at 75%.
+
+⚠ **Nothing is spawned by us.** Remove the boulders and call the game's own
+`boulderSokobanOnDestroy(false)`: it destroys 5–8 gold bags (a follower is not as careful as you
+would be), then finds no boulders, declares the puzzle solved and reveals the artifact gloves,
+which sit **invisible on the map** until then (`actboulder.cpp:2408`). The surviving gold
+un-hides itself the next frame on its own (`actgold.cpp:44`).
+
+That gives the intended trade: you get the gloves and ~34 of the 40 gold bags, and you do **not**
+get the perfect-solve credit, which needs ≥39. You skipped the puzzle; you do not also get the
+prize for doing it flawlessly.
+
+Measured: friendship 35 solved it **4/5**, friendship 5 refused **2/2**.
+
+> *"Got 'em all shifted into the pits now, sorry about knockin' some extra gold loose."*
+> *"Leave that mess for someone else, eh? I've got better things to do."*
+
+#### A trusted follower heading off the minotaur
 
 The **positive counterpart to sabotage**. Before this, the best a loyal follower could do was
 hand you a healing potion once a run, while a spy had four separate ways to cost you the run.
