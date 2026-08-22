@@ -1095,6 +1095,7 @@ def reset_run():
     HERX_STATE.update({"revealed": False, "variant": None, "uid": 0, "pending": {},
                        "is_false": False, "player": 0})
     BOON_STATE["good_used"].clear()
+    SABOTAGE_STATE["used"] = False
     LAST_BOON.clear()
     npc_state.clear()
     PERSISTENT_IDENTITY.clear()
@@ -1234,6 +1235,69 @@ def herx_detect(uid, raw, speech, player=0):
         logrec("herx", stage="revealed", uid=uid, player=player, is_false=is_false,
                debuff=v["debuff"], truth=v["truth"][:120])
 
+# ---- Spy sabotage: calling the minotaur -------------------------------------------------
+# The first thing a follower can do that actively spends the player's run against them.
+# Everything else is additive -- gifts, information, trap disarms -- and the false Herx secret
+# only misleads. This takes.
+#
+# The engine does the work: createMinotaurTimer() is a plain call already used by level
+# generation and by the /minotaur cheat, so starting a countdown on a floor that was not a
+# minotaur level is a supported operation rather than a hack. Arrival is
+# getMinotaurTimeToArrive() -- 150s, or 210s below floor 5, on 10-14, and 25+.
+#
+# ⚠ Starting the timer mid-floor is SILENT: the minotaur warning speech fires on level ENTRY
+# (actplayer.cpp:8089), so nothing announces it. That silence is the point -- the consequence
+# arrives two and a half minutes later and the player has to work backwards.
+
+SABOTAGE_STATE = {"used": False}     # once per run, run-global like the Herx secret
+SABOTAGE_MIN_FLOOR = 5               # not the opening mines: a minotaur at level 2 is not a
+SABOTAGE_MAX_FLOOR = 19              # betrayal, it is a mugging. And never on a boss floor,
+                                     # in Hell, or in the town.
+SABOTAGE_MIN_FRIENDSHIP = 15         # they have to be embedded first; a stranger sabotaging
+                                     # you is not a betrayal either
+SABOTAGE_CHANCE = 0.12
+
+# The tell. Chosen server-side, like the spy crack's concrete details and for the same measured
+# reason: left to invent one the 8B produces the same line every run. Each has to be innocuous
+# in the moment and obvious in hindsight -- it must NOT hint that anything is about to happen,
+# or the player simply leaves.
+SABOTAGE_TELLS = [
+    "You have just asked them, as if idly, which way the stairs back up are.",
+    "You mention that you need to see to something and drift a few steps away from them.",
+    "You ask how much longer they mean to spend on this floor. You sound merely tired.",
+    "You have been watching the far door for a while now, and you look away when they notice.",
+    "You suggest, lightly, that this floor has been quiet enough to rest on.",
+    "You ask whether they would hear you if you called from the other end of the hall.",
+]
+
+def sabotage_roll(st, floor):
+    """Decide whether this spy calls the minotaur down on the party. Server-side and once per
+    run; the model is only told to say the tell, never that it is doing anything."""
+    if SABOTAGE_STATE["used"]:
+        return None
+    if st.get("allegiance") != "spy":
+        return None
+    if st.get("origin") in NO_SECRET_ORIGINS:      # a conjuration has no outside to signal to
+        return None
+    if not (SABOTAGE_MIN_FLOOR <= floor <= SABOTAGE_MAX_FLOOR):
+        return None
+    if st.get("friendship", 0) < SABOTAGE_MIN_FRIENDSHIP:
+        return None
+    if random.random() >= SABOTAGE_CHANCE:
+        return None
+    SABOTAGE_STATE["used"] = True
+    return random.choice(SABOTAGE_TELLS)
+
+def sabotage_section(tell):
+    """⚠ Names what NOT to do, because everything else in this prompt pushes the other way.
+    The model knows it is playing a traitor and will happily foreshadow; a tell that telegraphs
+    is not a tell, it is a warning, and the player just leaves the floor."""
+    return ("SOMETHING YOU ARE DOING, WITHOUT REMARKING ON IT: " + tell + "\n"
+            "Work it into your reply as an ordinary aside. It must sound like nothing at all. "
+            "Do NOT hint that anything is about to happen, do NOT sound nervous, ominous, "
+            "regretful or apologetic, and do NOT warn them. You are not confessing and you are "
+            "not cracking — you are making small talk.\n")
+
 # ---- Follower boons: flavor-scale gifts, friendship-gated, one per follower per floor ----
 
 BOON_MIN_FRIENDSHIP = 10
@@ -1244,6 +1308,7 @@ BOON_TRAP_RACES = ("gnome", "automaton", "kobold", "goblin")
 # what your own follower is willing to give you. The Herx secret stays run-global.
 BOON_STATE = {"good_used": set()}   # set of player indices that have had their good item
 LAST_BOON = {}   # uid -> "item:TYPE:N" or "traps:" pending delivery to C++
+LAST_SABOTAGE = {}   # uid -> "minotaur", pending delivery to C++
 
 def boon_roll(st, floor, player=0):
     """One boon per follower per floor, chance scaling with friendship.
@@ -1611,6 +1676,22 @@ def _follower_sections(uid, race, floor, says, player=0, ident=None):
     alleg = allegiance_section(st, says)
     boon = _boon_section(uid, st, race_l, floor, player)
     secret = _secret_section(uid, st, race, says)
+    # ⚠ Not while a secret is being told: two unprompted behaviours in one reply and the later
+    # one takes the turn. Unlike the Herx/crack pair -- which measured as ALIGNED, both being
+    # "let something slip" -- the tell and the crack pull opposite ways. The crack wants
+    # visible strain; the tell only works if it sounds like nothing.
+    sabotage = ""
+    if not secret and not ident:
+        tell = sabotage_roll(st, floor)
+        if tell:
+            sabotage = sabotage_section(tell)
+            LAST_SABOTAGE[uid] = "minotaur"
+            print(f"[SERVICE-DBG] SABOTAGE: spy {uid} calls the minotaur on floor {floor}")
+            # NOTE: not kind= -- logrec's first positional parameter is named `kind`, so a
+            # kind= keyword collides and throws. It would have thrown the first time this
+            # ever fired in a real run.
+            logrec("sabotage", uid=uid, player=player, floor=floor, what="minotaur",
+                   race=race, tell=tell)
     memory = ("WHAT YOU REMEMBER (things that actually happened):\n" + _bullets(evlines) + "\n") if evlines else ""
     fixed = _emplacement_section(race_l)
     identify = ident or ""
@@ -1623,7 +1704,7 @@ def _follower_sections(uid, race, floor, says, player=0, ident=None):
     # orders, and at 8B whatever follows an instruction competes with it. An emplacement told
     # to obey and then told it cannot move gets the order of those two the right way round.
     return (history + memory + relations + _name_section(st) + secret + boon + identify + alleg
-            + _obedience_section(st) + fixed)
+            + _obedience_section(st) + fixed + sabotage)
 
 def build_prompt(race, floor, says="", uid=0, player=0, player_name="", party=1, map_name="",
                  ident=None):
@@ -1672,7 +1753,7 @@ def build_prompt(race, floor, says="", uid=0, player=0, player_name="", party=1,
         # Measured: the crack ate a false secret outright ("I've learned some things about
         # myself that maybe aren't entirely... honest" — and no secret). Spec 35/36.
         + (spy_crack_section(get_follower_state(uid, race, player))
-           if (uid and not ident) else "")
+           if (uid and not ident and uid not in LAST_SABOTAGE) else "")
         + 'Respond ONLY with JSON, no other text, like: {"speech": "your line", "action": "FOLLOW"}'
     )
 
@@ -2325,7 +2406,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                         "player": player, "secret": "", "boon": "",
                                         "haggle": haggle_field})
 
-            name, secret, boon = "", "", ""
+            name, secret, boon, sabotage_field = "", "", "", ""
             with STATE_LOCK:
                 if uid:
                     st = get_follower_state(uid, race, player)
@@ -2344,6 +2425,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     herx_detect(uid, raw, speech, player)
                     record_follower_interaction(uid, says, floor, player, speech)
                     boon = LAST_BOON.pop(uid, "")
+                    sabotage_field = LAST_SABOTAGE.pop(uid, "")
                     print(f"[SERVICE-DBG] follower {uid} (player{player}) {dims_summary(st)}")
                 secret = herx_secret_field()
             print(f"[SERVICE] -> action={action} speech={speech}")
@@ -2363,7 +2445,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                    recovered=(True if _recovered else None),
                    dims={d: _st.get(d, 0) for d in DIMENSIONS} if _st else None)
             self._send_json({"reply": speech, "action": action, "name": name, "player": player,
-                             "secret": secret, "boon": boon,
+                             "secret": secret, "boon": boon, "sabotage": sabotage_field,
                              # "1" ONLY when the claim was both correct and honest -- this is what
                              # actually sets item->identified engine-side.
                              "identify": ("1" if (ident_req and ident_truthful) else "0")})

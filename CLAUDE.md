@@ -750,6 +750,57 @@ Gating is unit-tested: silent for loyal/self_interested/fearful at any friendshi
 
 **Spies reveal FALSE weaknesses** from `HERX_FALSE_VARIANTS` (running water / silver / true name — all plausible undead lore, all wrong). Reported as `debuff 0`, so `initLich` applies nothing. Discovered through consequences, never announced — per the design doc's core rule.
 
+### Spy sabotage: calling the minotaur
+
+**The first thing a follower can do that actively spends the player's run against them.**
+Everything else is additive — gifts, information, trap disarms — and the false Herx secret only
+misleads. This takes.
+
+The engine does the work: `createMinotaurTimer()` is a plain call already used by level
+generation (`maps.cpp:7200`) and the `/minotaur` cheat (`consolecommand.cpp:2544`), so starting a
+countdown on a floor that was **not** a minotaur level is a supported operation, not a hack.
+Arrival is `getMinotaurTimeToArrive()` — **150s**, or 210s below floor 5, on 10–14 and 25+. There
+is also a 1-in-5 chance the **ZAP Brigade** (nine humans) spawns 30s before arrival
+(`monster_minotaur.cpp:694`).
+
+⚠ **Starting the timer mid-floor is SILENT.** The minotaur warning speech fires on level ENTRY
+(`actplayer.cpp:8089`), so nothing announces it. That silence is the design: the consequence
+arrives two and a half minutes later and the player has to work backwards.
+
+**Gating** — every bound is about the difference between a betrayal and a mugging:
+
+| | |
+|---|---|
+| allegiance | `spy` only; never a summon or bot (a conjuration has no outside to signal to) |
+| floors | **5–19**. Not the opening mines, not a boss floor, not Hell, not the town |
+| friendship | ≥15 — they have to be embedded first; a stranger sabotaging you is not betrayal |
+| frequency | **once per run**, run-global like the Herx secret; 12% per eligible reply |
+
+**The tell** is chosen server-side from `SABOTAGE_TELLS` — the spy-crack lesson again, since left
+to invent one the 8B repeats the same line every run. Each has to be innocuous in the moment and
+obvious in hindsight.
+
+⚠ **The block spends most of its words on what NOT to do.** Everything else in the prompt tells
+this character it is a traitor, so it will happily foreshadow — and a tell that telegraphs is a
+warning, at which point the player simply leaves the floor. It forbids sounding nervous, ominous,
+regretful or apologetic by name, and says outright *"you are not confessing and you are not
+cracking — you are making small talk."*
+
+⚠ **The spy crack stands down for a sabotage** — the opposite call from the Herx secret, and for
+a reason that is worth keeping straight. Herx and the crack measured as *aligned*: both are "let
+something slip". The crack and a tell pull opposite ways — the crack wants visible strain, the
+tell only works if it sounds like nothing.
+
+Measured with a **neutral** question ("what did you do before all this?"): **0/6 telegraphed**.
+A first pass showed 2/4 and that was a bad probe — asking "anything worth knowing here?" invites
+hazard talk, so the regex was catching the follower answering the question. Sample:
+*"I'm doing all right, I guess… the air's not too bad here on this floor. We should probably get
+moving soon, though."*
+
+⚠ **`logrec`'s first positional parameter is named `kind`**, so `logrec("sabotage", kind=...)`
+throws. Caught by the test, and it would have thrown the first time the feature ever fired in a
+real run.
+
 ### Boons
 `boon_roll(st, floor)`: friendship ≥10, one per follower per floor, `chance = min(0.35, (f-10)/200)`. Measured: none at f9, ~2% at f15, ~9% at f30, ~19% at f45, ~25% at f60.
 
