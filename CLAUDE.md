@@ -184,7 +184,7 @@ not guessed — `LICH_ICE` is `"frosty lich"`, `BAT_SMALL` is `"bat"`, `EARTH_EL
 | comprehension groups | 12 | 49 | see above |
 | `individual_denizen_research` | 34 | **49** | `CANON:` / `YOU MAY PLAUSIBLY HAVE:` |
 | `denizen_context_profiles` | 33 | **49** | `YOU ARE (category): baseline` |
-| TTS casting | 30 | 30 | voice band + sox chain |
+| TTS casting | 30 | **49** | voice band + sox chain |
 
 ⚠ **`race_lore.json` was the highest-leverage file in the project and the thinnest.** It is a flat
 `race -> one short string` map injected as `CHARACTER GUIDANCE` on **every** conversation, taunt and
@@ -223,7 +223,25 @@ asked what projects it did not name a machine.
 `gyrobot` turned out to have a denizen entry but **no** `denizen_context_profiles` entry — a
 pre-existing hole nothing had noticed, now filled.
 
-**Still open:** 19 races are uncast for TTS.
+⚠ **`"sentry bot"` was keyed with a space and the game says `sentrybot`** — so that cast was
+authored, listed, and **never once reachable**; it fell through to `DEFAULT_VOICE` silently. Exactly
+the `_norm()` trap the file already warns about, sitting in the file that warns about it. There is
+now a check that every VOICES key is normalisation-stable (`_norm(key) == key`), which would have
+caught it.
+
+18 casts added — lesser beasts, fey, elementals, the two elemental liches, and the remaining
+constructs (bandpass on the constructs, since a robotic result is *correct* there). **All 57 casts
+— 49 races plus 8 named characters — were validated by actually rendering**, on both tiers: piper
+synthesis at the cast speaker id and length-scale, then the `fx` chain pushed through sox; then
+espeak-ng at the cast variant/speed/pitch with the `efx` chain. Sox writes to `-n` (null sink), so
+validation renders without playing anything. All 33 referenced espeak variants confirmed present in
+`/usr/share/espeak-ng-data/voices/!v`.
+
+The validator lives in the scratchpad rather than the repo; it is worth re-running after any cast
+edit, because a bad sox chain fails for exactly one race and nothing else notices.
+
+**Still open:** `cave crawler`, `cyclops` and `dwarf` are VOICES keys that match no race the game
+can return — harmless, but they are cast for creatures that never arrive.
 
 ### Comprehension — polymorph only (was dead code)
 
