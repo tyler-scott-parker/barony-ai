@@ -261,7 +261,44 @@ PROBING_PHRASES = (
     "do you trust", "would you die", "are you loyal", "whose side", "lying",
     "hiding", "the truth", "believe in", "what do you want")
 
-def roll_allegiance():
+# ---- Follower origin: how this creature came to be following you ---------------------
+# Conjurer summons, mesmer charms and machinist bots are followers created and destroyed as
+# ordinary use of the class. The engine tells us which is which (mymod_originOf); the C++
+# side sends `origin` plus an `origin_key` that outlives this particular body.
+#
+# ⚠ Gate on ORIGIN, never on the player's class. Any caster can learn SPELL_SUMMON, a charm
+# scroll works for anybody, and a found sentrybot can be thrown by a barbarian. Shaman
+# earth-elemental summons carry a summon rank too, so origin covers them for free.
+
+# Origins whose relationship survives the body: the creature comes back, so the state must
+# find its way to the new uid.
+PERSISTENT_ORIGINS = ("summon", "bot")
+
+# Origins that are not independent creatures with a life outside this party. A summon was
+# called out of nothing minutes ago and a bot is a machine -- neither has a prior handler to
+# report to, possessions to give away, or knowledge of the Baron predating its own existence.
+NO_BOON_ORIGINS   = ("summon", "bot")
+NO_SECRET_ORIGINS = ("summon", "bot")
+
+# Allegiances outside the spy machinery -- and the way the spy roll is suppressed for these
+# origins, since every spy gate keys off allegiance == "spy". allegiance_section and
+# spy_crack_section both return "" for anything they do not recognise, so these are silent
+# by design until the class-companion work gives them their own voice.
+ORIGIN_ALLEGIANCE = {"summon": "bound", "bot": "machine"}
+
+# uid is the transport key, but a summon's uid changes on every recast and a bot's on every
+# redeploy. This maps the part that DOESN'T change to the one state row they all share.
+PERSISTENT_IDENTITY = {}   # "summon:0:skeleton knight" -> the shared follower_state dict
+
+def _identity_key(origin, origin_key, player):
+    """The key a relationship is remembered under across bodies, or '' for uid-keyed."""
+    if origin not in PERSISTENT_ORIGINS or not origin_key:
+        return ""
+    return "%s:%d:%s" % (origin, player, _lore_key(origin_key))
+
+def roll_allegiance(origin=""):
+    if origin in ORIGIN_ALLEGIANCE:
+        return ORIGIN_ALLEGIANCE[origin]
     total = sum(w for _, w in ALLEGIANCE_WEIGHTS)
     r = random.randrange(total)
     upto = 0
@@ -392,21 +429,46 @@ def adjust(st, **deltas):
         st[d] = max(0, min(100, st.get(d, 0) + v))
     return st
 
-def get_follower_state(uid, race, player=0):
+def get_follower_state(uid, race, player=0, origin="", origin_key=""):
     """State is keyed by follower UID, which Barony assigns server-side and replicates,
     so it is already unique across every player in a multiplayer run. `player` is the
-    owning player index (0 = host); it scopes per-player latches like boons."""
+    owning player index (0 = host); it scopes per-player latches like boons.
+
+    ⚠ A summon's uid changes on EVERY recast and a bot's on every redeploy, so for those
+    the uid is only the current address. The row itself is found by `_identity_key` and the
+    new uid is pointed at the SAME dict -- every uid-keyed call site downstream then works
+    unchanged and the relationship simply continues. This mirrors what the engine already
+    does with the creature's stats: playerSummon*LVLHP carries LVL/HP/STR.. per summon slot
+    through any death, so the next knight is statistically the same creature and now
+    socially the same one too."""
     if uid not in follower_state:
-        al = roll_allegiance()
+        pid = _identity_key(origin, origin_key, player)
+        if pid and pid in PERSISTENT_IDENTITY:
+            st = PERSISTENT_IDENTITY[pid]
+            follower_state[uid] = st          # the body is new; the creature is not
+            st["uid"] = uid
+            st["bodies"] = st.get("bodies", 1) + 1
+            print(f"[SERVICE-DBG] follower {uid} IS {pid} again "
+                  f"(body #{st['bodies']}, {dims_summary(st)})")
+            logrec("rebind", uid=uid, race=race, player=player, identity=pid,
+                   bodies=st["bodies"], name=st.get("name") or None)
+            return dims_init(st)
+        al = roll_allegiance(origin)
         follower_state[uid] = dims_init({"events": [], "event_log": [], "name": "", "race": race,
                                "allegiance": al, "owner": player,
+                               "origin": origin, "origin_key": origin_key,
+                               "uid": uid, "bodies": 1,
                                # Reserved now, revealed only once friendship unlocks the nudge.
                                "assigned_name": reserve_name(race),
                                "motive": random.choice(SPY_MOTIVES) if al == "spy" else ""})
-        print(f"[SERVICE-DBG] follower {uid} allegiance={al} owner=player{player}")
+        if pid:
+            PERSISTENT_IDENTITY[pid] = follower_state[uid]
+        print(f"[SERVICE-DBG] follower {uid} allegiance={al} owner=player{player}"
+              + (f" origin={origin} identity={pid}" if origin else ""))
         # The single most important line for reading a playthrough back: everything a follower
         # does is uninterpretable without knowing whether they were a spy.
         logrec("allegiance", uid=uid, race=race, player=player, allegiance=al,
+               origin=origin or None, identity=pid or None,
                motive=follower_state[uid].get("motive") or None)
     return dims_init(follower_state[uid])
 
@@ -866,11 +928,12 @@ def reset_run():
     BOON_STATE["good_used"].clear()
     LAST_BOON.clear()
     npc_state.clear()
+    PERSISTENT_IDENTITY.clear()
     _NAMES_TAKEN.clear()   # names actually revealed are held by name_history.json instead
     print(f"[SERVICE-DBG] NEW RUN: cleared {n} follower(s), all boon latches, and the Herx secret")
 
-def record_event(uid, race, etype, floor, player=0):
-    st = get_follower_state(uid, race, player)
+def record_event(uid, race, etype, floor, player=0, origin="", origin_key=""):
+    st = get_follower_state(uid, race, player, origin, origin_key)
     st.setdefault("event_log", [])
     # dedup: a follower can only be recruited once
     if etype == "recruitment" and any(e["type"] == "recruitment" for e in st["event_log"]):
@@ -931,7 +994,11 @@ def _fight_count(st):
     return sum(1 for e in st.get("event_log", []) if e.get("type") == "fought_alongside")
 
 def herx_eligible(st, race):
+    # ⚠ A conjurer's skeleton knight reports race "skeleton" -- getMonsterLocalizedName does
+    # not distinguish it -- so without this a creature conjured ninety seconds ago could hold
+    # the Baron's secret weakness. A machine cannot have learned it either.
     return (not HERX_STATE["revealed"]
+            and st.get("origin") not in NO_SECRET_ORIGINS
             and race.lower() in HERX_ELIGIBLE_RACES
             and bool(st.get("name"))
             and st["friendship"] >= HERX_MIN_FRIENDSHIP
@@ -989,6 +1056,10 @@ def boon_roll(st, floor, player=0):
     """One boon per follower per floor, chance scaling with friendship.
     Types resolve in strict priority order; the first match wins."""
     f = st.get("friendship", 0)
+    # A summon owns nothing -- it was called out of nothing and leaves with nothing -- and a
+    # bot has no pockets. Neither can hand you bread.
+    if st.get("origin") in NO_BOON_ORIGINS:
+        return None
     if f < BOON_MIN_FRIENDSHIP or st.get("last_boon_floor") == floor:
         return None
     if random.random() >= min(0.35, (f - BOON_MIN_FRIENDSHIP) / 200.0):
@@ -1656,6 +1727,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             player_name = (data.get("player_name") or "").strip()
             party = max(1, int(data.get("party", 1) or 1))
             map_name = (data.get("map") or "").strip()
+            # How this follower came to be, and the part of its identity that outlives this
+            # body (see the origin section). Empty for an ordinary recruit.
+            origin = (data.get("origin") or "").strip()
+            origin_key = (data.get("origin_key") or "").strip()
             # Non-follower NPCs (townsfolk, merchants, named characters). "greeting" is the
             # line they say when a player first walks up and engages them.
             npc = bool(data.get("npc", False))
@@ -1675,12 +1750,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
                         reset_run()
                         logrec("new_run")
                     elif uid:
-                        record_event(uid, race, evt, floor, player)
+                        record_event(uid, race, evt, floor, player, origin, origin_key)
                         st_e = follower_state.get(uid, {})
                         logrec("event", event=evt, uid=uid, race=race, floor=floor,
                                player=player,
                                dims={d: st_e.get(d, 0) for d in DIMENSIONS} if st_e else None)
                 return self._send_json({"ok": True})
+
+            # Resolve the follower's state row BEFORE anything reads it. Every helper below is
+            # uid-keyed, and this is the one place that knows the origin -- so a resummoned
+            # knight gets pointed at its existing relationship here, once, rather than each
+            # call site needing to care.
+            if uid and not npc:
+                with STATE_LOCK:
+                    get_follower_state(uid, race, player, origin, origin_key)
 
             # Comprehension filter: if the player can't understand this speaker, return noises.
             # (Applies to overheard/ambient + taunts; /aicommand sends no player_race so passes through.)

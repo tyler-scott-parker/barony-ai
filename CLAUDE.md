@@ -811,6 +811,83 @@ recently has been exercised in a real run.
 your own follower. Previously the only exits were walking 8 tiles off or clicking someone else,
 neither of which is discoverable.
 
+### Class companions — summons, charms and bots are not recruits
+
+Conjurer summons, Mesmer charms and Machinist bots are all followers, but they arrive by
+mechanisms that **create and destroy them as ordinary use of the class** — and every social
+system here was built for a creature you recruited once and kept.
+
+⚠ **Gate on ORIGIN, never on the player's class.** Any caster can learn `SPELL_SUMMON`, a charm
+scroll works for anybody, and a sentrybot found on the floor can be thrown by a Barbarian.
+Shaman earth-elemental summons carry a summon rank too, so origin covers them for free.
+`mymod_originOf()` reads what the engine already marks:
+
+| Origin | Marker | Where |
+|---|---|---|
+| `summon` | `monsterAllySummonRank != 0` (`skill[50]`, replicated) | `entity_shared.cpp:105` |
+| `charmed` | `Stat->monsterIsCharmed == 1` (`MISC_FLAGS[12]`, host-side) | `stat_shared.cpp:33` |
+| `bot` | `monsterIsTinkeringCreation()` — gyro/dummy/sentry/spellbot, by sprite | `actmonster.cpp:14377` |
+
+**Conjurer persistence was already in the engine — we only had to match it.** A summon's
+LVL/HP/STR..CHR and rank are packed into the *player's* `Stat`: `playerSummonLVLHP` /
+`STRDEXCONINT` / `PERCHR` for slot 1 and the `playerSummon2*` set for slot 2
+(`entity.cpp:4210`), restored on the next spawn (`monster_skeleton.cpp:82`). Slot is decided by
+`special_npc` = `"skeleton knight"` / `"skeleton sentinel"`. So the relationship is keyed by
+**`(origin, player, origin_key)`** and `get_follower_state` points the new uid at the *same*
+state dict — every uid-keyed call site downstream then works unchanged. Bots key on
+`(player, bot type)`: the item carries HP across pickup but `appearance` encodes HP rather than
+an id, so per-type is the honest granularity. Charmed and recruited followers stay uid-keyed —
+they are ordinary dungeon creatures with one body.
+
+Survives a real death as well as a voluntary recast, deliberately: the engine keeps the stats
+through any death, so the next knight is statistically the same creature and is now socially the
+same one too.
+
+**Four things this fixed, all found by reading, none of which had ever surfaced in play:**
+
+1. ⚠ **Every resummon fired `ally_died` for the whole party.** Recasting SUMMON kills the old
+   pair outright (`actmagic.cpp:14288` sets their HP to 0) and retrieving a sentrybot kills it to
+   fold it back into the item (`monster_sentrybot.cpp:521`). Both really leave the world, so the
+   death sweep could not tell them from a death — a Conjurer recasting their signature spell was
+   inflicting −trust/+fear/+resentment on every other follower, silently, every time. The engine
+   draws the same line the other way: it sets `skipObituary` for exactly these
+   (`actmonster.cpp:3905`). The watch now records origin **while the follower is alive** (a corpse
+   cannot be asked) and skips the mourning. A summon genuinely slain in combat is therefore not
+   mourned either — the deliberate trade, and the rarer half by a wide margin.
+2. **Every resummon/redeploy fired `recruitment` and rerolled allegiance** — all three paths call
+   `forceFollower`, which is our hook — so a skeleton knight got a fresh 7% spy roll on every
+   cast. Now the identity key finds the existing row instead.
+3. ⚠ **Renaming a summon corrupted the player's summon progression.**
+   `nameMatchesSpecialNPCName` compares `Stat->name` **directly** (`monster_shared.cpp:569`), and
+   the naming feature `strncpy`s over it. A renamed knight then fails the check at
+   `monster_skeleton.cpp:66`, falls through to `secondarySummon`, and reads *and then overwrites*
+   the **sentinel's** stat slot — both summons collapse onto slot 2 and slot 1's progression is
+   lost. `mymod_nameIsLoadBearing()` (any follower with a `special_npc` attribute) now keeps the
+   engine's copy; the AI name still lives service-side and still shows in speech and bubbles.
+4. **A skeleton knight was Herx-eligible.** `getMonsterLocalizedName` reports it as plain
+   `skeleton`, which is in `HERX_ELIGIBLE_RACES`, so a creature conjured ninety seconds ago could
+   hold the Baron's secret weakness.
+
+**What no longer applies** to `summon`/`bot`: the spy roll (`roll_allegiance` returns `bound` /
+`machine`, and every spy gate keys off `allegiance == "spy"`), boons (a summon owns nothing; a bot
+has no pockets), and the Herx secret. `allegiance_section` and `spy_crack_section` return `""` for
+unrecognised allegiances, so these are **silent by design** until the class-companion work gives
+them their own voice. Charmed followers are untouched so far — they are real dungeon creatures with
+a full history.
+
+`origin` and `origin_key` ride in `mymod_payloadHead` and in the event payload; they are empty
+strings for an ordinary recruit, so normal play is unchanged. 30 assertions in `test_origin.py`,
+plus an end-to-end check that a recast knight keeps its name, friendship and event log across a
+new uid while an ordinary recruit's path is untouched.
+
+**Designed, not built — the rest of the class-companion work.** Charm as a *hidden compulsion*
+state (charmed followers start resentful, tiers shut, and the charm "slips" the way a spy cracks —
+reusing the best-measured prompt block in the project); bots on the **NPC state model** rather than
+the follower vector, since `npc_state` is already "light per-run memory, both sides of the exchange,
+no ladder, no boons, no allegiance", which is exactly what a machine wants; and a `resummoned`
+event type so a knight can say *"you have called me back eleven times"* — `bodies` is already
+counted on the state row but is not in the prompt yet.
+
 ### Multiplayer (host-authoritative)
 
 **The host is the only machine that touches Python, Ollama, or the model.** Clients install the
