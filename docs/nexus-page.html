@@ -546,9 +546,11 @@ BARONY_AI_TTS=1 python3 service.py         # and hear them</code></pre>
     <ul class="check">
       <li>
         <span class="mark todo">Blocker</span>
-        <p><b>Windows support.</b> The mod and the service pass messages through files under
-          <code>/tmp</code>, which is a Linux path, and the book-lore reader still assumes a Linux Steam
-          install. Both need a portability pass before anyone on Windows can run it.</p>
+        <p><b>Windows support.</b> Mostly cleared: the mod now talks to the service over a plain
+          socket rather than shelling out to <code>curl</code> and <code>python3</code> through
+          Linux-only temp paths, and the lore reader finds the game wherever Steam, GOG or a
+          flatpak put it. What remains is that nobody has yet <em>compiled</em> it with the
+          Windows toolchain, and how it gets packaged for a non-technical friend is undecided.</p>
       </li>
       <li>
         <span class="mark todo">Blocker</span>
