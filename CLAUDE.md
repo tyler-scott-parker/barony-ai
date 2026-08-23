@@ -956,6 +956,82 @@ the outputs before believing the number — the same lesson the sabotage-tell pr
 regardless, and the engine prints *"(Skarn wants 140 gold for the layout of this floor. Say yes to
 agree.)"* whether or not the pitch was spoken.
 
+### Remarks — chests, booze, and a chest that was not a chest
+
+Three more of the same short form as the valuable pickup, sharing one system: the engine spots a
+situation on its per-frame scan, the service supplies the **situation** and the allegiance
+supplies the **angle**, and the follower says one line. `REMARK_SITUATION` / `REMARK_ANGLE`,
+~200–270 tokens each, no books, budget 6. No relationship movement, no chat cap, no boon slot —
+a remark is not an exchange.
+
+| kind | fires on | notes |
+|---|---|---|
+| `valuable` | an inventory uid that was not there last frame, ≥1000 gold | see above |
+| `chest` | `openedChest[pnum]` null → non-null | ⚠ **35% of the time**, not every chest |
+| `drunk` | `EFF_DRUNK` false → true on the player | rising edge only; re-drinking extends rather than re-triggers |
+| `mimic` | a `MIMIC`/`MINIMIMIC` flipping to `MIMIC_ACTIVE` within 24 tiles | ⚠ **urgent** — skips the cooldown *and* the combat guard |
+
+⚠ **Chests are common enough that a line each time becomes wallpaper**, hence the 35% on top of
+the shared 20s cooldown. Scarcity is the rule (spec §35/§36).
+
+⚠ **The calm remarks stand down mid-fight** (`mymod_inCombat`); admiring a gemstone while
+something is biting you reads as broken rather than as character. The mimic one deliberately does
+not — it is rare, it is already biting someone, and a warning twenty seconds late is not a warning.
+
+⚠ **A mimic is NOT a chest that transforms.** Map generation *replaces* a chest with a `MIMIC`
+monster entity at the chest's position (`maps.cpp:10893`); it sits in `MIMIC_INERT` looking like
+furniture and flips to `MIMIC_ACTIVE` when disturbed (`monster_mimic.cpp:1053`). So it never
+touches `openedChest` and the two detectors cannot collide — no ordering or delay needed between
+"a chest!" and "it's alive!".
+
+⚠ **It is the ADVENTURER who is drunk, and the prompt has to say so.** Left implicit the model
+writes *itself* as the drunk one.
+
+⚠ **A mercenary invents a gold figure if allowed to.** Measured on an opened chest:
+*"Sixty-five gold pieces, I'm thinkin' that's a decent haul."* He cannot know it, nothing displays
+it, and it is the same error the haggle block exists to stop. `MERC_NO_NUMBERS` is appended for
+`self_interested` only — **0/6** named a figure after, and *"What's the breakdown on our cut?"*
+survives, which is the part worth keeping.
+
+⚠ **A SPY USES THE LOYAL ANGLE** for every kind, as with the introduction and the valuable
+pickup. A spy who reacts differently to your misfortune is a tell handed over for nothing.
+
+Measured, same three situations:
+
+| | chest | drunk | mimic |
+|---|---|---|---|
+| loyal human | *"Good luck lasts till floor 8."* | *"About time someone knows how to drown their demons."* | *"Incoming! Get back!"* |
+| mercenary gnome | *"What's the breakdown on our cut?"* | *"Delightful choice, boss — getting us both killed for cheaper."* | *"…what sorcery is this?"* |
+| fearful goblin | *"Me get share!"* | *"Ugga ugga, stupid human, watcha doin'?"* | *"AHHH, GRUNT! CHES' COME ALIVE! GET IT AWAY!"* |
+| goatman | *"About bloody time we found somethin' worth fightin' over."* | — | *"IT'S A CHEST OF BITTER BONE AND WRATH!"* |
+
+#### ⚠ Naming a forbidden TOPIC primes it; naming a forbidden SPEECH ACT does not
+
+The drunk remark drifted to scenery in a few samples, so the obvious fix was tried — appending
+*"changing the subject to the floor, the route or what lives here instead is WRONG."* It made
+things **much worse**:
+
+| | replies about the player's state |
+|---|---|
+| original wording | ~7/8 |
+| **plus "do not change the subject to the floor…"** | **2/8** — the misses wrote about gators, reeds and cypress knees |
+
+This is the same failure already recorded for **spec §26**, where a provenance carve-out primed
+the very hedge it forbade. The distinction is worth stating plainly, because "name the forbidden
+route" is otherwise the most reliable technique in this project:
+
+- Naming a forbidden **speech act** works — *"saying you do not know"*, *"opening with
+  'Alright'"*, *"'some say…' followed by an answer"*. There is nothing to accidentally supply.
+- Naming a forbidden **topic** backfires — mentioning gators is how gators get into the reply.
+
+Reverted, and there is a test asserting the line stays out.
+
+⚠ **Both drunk measurements were regex artifacts and neither number was trustworthy.** The
+scorer missed *"not to coddle your intoxication"*, *"bad walkin'"*, *"Shamble on"* and *"Stay
+steady"*. The revert was decided by **reading the replies**, not by the counts — the added-line
+set was plainly about the swamp and the original was plainly about the player. Third time this
+project has been misled by its own probe; read the outputs.
+
 ### How far a follower's eye reaches — the legendary tier is nobody's to appraise
 
 ⚠ **Expressed in the GAME'S OWN CURRENCY, not as a blocklist.** Barony gates appraisal on the

@@ -340,15 +340,87 @@ VALUABLE_ANGLE = {
 VALUABLE_DEFAULT = ("React to it plainly and warmly — you are pleased for them, or impressed, "
                     "or wary of what carrying it might mean.")
 
-def build_valuable_prompt(race, floor, map_name, look, category, value, allegiance="loyal"):
+# ---- The other three things worth remarking on ---------------------------------------------
+# Same short-form shape as the valuable pickup, and the same rules: react to what is in front of
+# you, briefly, in character. Each kind supplies the SITUATION; the allegiance supplies the
+# ANGLE. Both are server-side, which is the division of labour every block here that measures
+# well already uses.
+REMARK_SITUATION = {
+    "chest": "They have just got a treasure chest open in front of you, and are going through it.",
+    # ⚠ It is the ADVENTURER who is drunk, not the follower -- worth being explicit, because the
+    # model will otherwise happily write itself as the drunk one.
+    # ⚠ DO NOT add "do not change the subject to the floor or what lives here" to this. It was
+    # tried: naming those routes PRIMED them, and the measured rate fell from ~5-7/8 to 2/8 --
+    # every miss then wrote about gators, reeds and cypress knees. Same failure the project
+    # already recorded for spec 26 (information provenance), where a carve-out phrase primed
+    # the very hedge it forbade. Naming a forbidden route works when the route is a SPEECH ACT
+    # ("saying you do not know", "opening with Alright"); it backfires when the route is a
+    # TOPIC, because naming a topic introduces it.
+    "drunk": ("THEY are drunk — this adventurer, not you. They have been at the booze and it "
+              "shows: the walk, the talk, the timing. You are sober and you are watching it."),
+    "mimic": ("A chest you both walked past has just come alive — legs, teeth, the lot — and it "
+              "is attacking. It was never a chest. This is happening RIGHT NOW."),
+}
+
+# ⚠ A SPY USES THE LOYAL ANGLE for every one of these, as with the introduction and the valuable
+# pickup. The disguise is the point, and a spy who reacts differently to your misfortune is a
+# tell handed over for nothing.
+REMARK_ANGLE = {
+    "chest": {
+        "self_interested": "You are already working out what the take is worth and what your share of it looks like.",
+        "fearful": "You do not like chests. Traps, or worse, and you have heard what some of them turn out to be.",
+        "bound": "The contents mean nothing to you. Note it flatly.",
+        "machine": "The contents mean nothing to you. Note it flatly.",
+        None: "React plainly — curiosity, or a dry opinion about their luck so far.",
+    },
+    "drunk": {
+        "self_interested": "You are being paid to keep this person alive and they have chosen to be drunk in a dungeon. Say so, dryly. You are not their friend and you are not amused.",
+        "fearful": "This frightens you. They are the one keeping you both alive and they are in no state for it.",
+        "bound": "Note the state they are in flatly, without judgement. It is simply a fact about the thing you are bound to.",
+        "machine": "Note the state they are in flatly, as an observation.",
+        None: "React as YOUR kind would to a drunk — amused, disapproving, envious, or wanting some yourself. Let your own nature decide.",
+    },
+    "mimic": {
+        "self_interested": "This was not in the arrangement. Swear, and deal with it.",
+        "fearful": "You are terrified. Shout, and do not pretend otherwise.",
+        "bound": "Register the threat and state it. You do not panic.",
+        "machine": "Register the threat and state it. You do not panic.",
+        None: "Shout a warning. You are startled and you are already moving.",
+    },
+}
+
+def remark_angle(kind, allegiance):
+    table = REMARK_ANGLE.get(kind, {})
+    return table.get(allegiance) or table.get(None, "")
+
+def _remark_head(race, floor, map_name):
     head, body, limits = _persona(race, False, floor, map_name, books=False, budget=6)
     where = place_name(floor, map_name)
-    angle = VALUABLE_ANGLE.get(allegiance, VALUABLE_DEFAULT)
     return (head
             + (f"YOU ARE: a {race} in {where}, on dungeon floor {floor}, this adventurer's "
                "companion.\n" if where else
                f"YOU ARE: a {race} on dungeon floor {floor}, this adventurer's companion.\n")
-            + body
+            + body)
+
+REMARK_TAIL = "Respond with ONLY one short spoken line. No narration, no quotes, no JSON."
+
+def build_remark_prompt(kind, race, floor, map_name, allegiance="loyal"):
+    # ⚠ A mercenary told to think about "what the take is worth" invents a figure -- measured,
+    # he answered an opened chest with "Sixty-five gold pieces, a decent haul". He cannot know
+    # that, nothing displays it, and it is the same error the haggle block exists to stop. He
+    # may talk about worth; he may not put a number on it.
+    numbers = MERC_NO_NUMBERS if allegiance == "self_interested" else ""
+    return (_remark_head(race, floor, map_name)
+            + REMARK_SITUATION.get(kind, "Something has happened.") + "\n"
+            + remark_angle(kind, allegiance) + "\n"
+            + numbers
+            + REMARK_TAIL)
+
+def build_valuable_prompt(race, floor, map_name, look, category, value, allegiance="loyal"):
+    angle = VALUABLE_ANGLE.get(allegiance, VALUABLE_DEFAULT)
+    if allegiance == "self_interested":
+        angle += "\n" + MERC_NO_NUMBERS.rstrip("\n")
+    return (_remark_head(race, floor, map_name)
             + "They have just picked up a " + (look or "thing") + " — a " + (category or "thing")
             + ", and even at a glance it is " + valuable_band(value) + ".\n"
             + angle + "\n"
@@ -356,7 +428,7 @@ def build_valuable_prompt(race, floor, map_name, look, category, value, allegian
               "NOT name it, do NOT guess at its powers, and do NOT say what it might be — you "
               "are looking at it from across the room, not appraising it. Speak only about how "
               "it LOOKS and what that is worth.\n"
-            + "Respond with ONLY one short spoken line. No narration, no quotes, no JSON.")
+            + REMARK_TAIL)
 
 def build_heckle_prompt(race, floor, count):
     return (
@@ -3328,6 +3400,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
             # no conversation state, no boons, no relationship movement -- it is a remark, not
             # an exchange, and it must not consume the chat cap or a boon slot.
             remark = (data.get("remark") or "").strip()
+            if remark in REMARK_SITUATION:
+                with STATE_LOCK:
+                    st_r = get_follower_state(uid, race, player) if uid else {}
+                _al = st_r.get("allegiance", "loyal")
+                if _al == "spy":
+                    _al = "loyal"     # the disguise holds here too
+                prompt_r = build_remark_prompt(remark, race, floor, map_name, _al)
+                raw_r = ask_ollama(prompt_r)
+                line_r = (raw_r or "").strip().strip('"').split("\n")[0][:200]
+                print(f"[SERVICE] -> remark {remark}: {race}: {line_r}")
+                logrec("remark", uid=uid, race=race, floor=floor, player=player, what=remark,
+                       allegiance=st_r.get("allegiance"), reply=line_r[:200])
+                tts_emit(line_r, race, uid, "remark", "", player)
+                return self._send_json({"reply": line_r, "action": "NONE"})
+
             if remark == "valuable":
                 with STATE_LOCK:
                     st_v = get_follower_state(uid, race, player) if uid else {}

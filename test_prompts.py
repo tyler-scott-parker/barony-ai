@@ -89,5 +89,51 @@ ck("and a fearful follower worries about attention",
 ck("the mercenary does not tout for the appraisal here",
    "do NOT offer to do it yourself" in S.VALUABLE_ANGLE["self_interested"])
 
+# --- chest, drunk and mimic -----------------------------------------------------------------
+for k in ("chest", "drunk", "mimic"):
+    pr = S.build_remark_prompt(k, "goblin", 7, "swamp", "loyal")
+    ck("the %s remark is a short form" % k, tok(pr) < 500, tok(pr))
+    ck("the %s remark knows where it is" % k, "Swamp" in pr or "swamp" in pr)
+    ck("the %s remark asks for one spoken line" % k, "ONLY one short spoken line" in pr)
+
+# ⚠ It is the ADVENTURER who is drunk. Left implicit the model writes ITSELF as the drunk one.
+ck("the drunk remark says whose state it is",
+   "not you" in S.REMARK_SITUATION["drunk"])
+# ⚠ A mimic is not a chest that transforms -- map generation replaces the chest with a MIMIC
+# monster (maps.cpp:10893) -- but from the follower's side it is "that was never a chest".
+ck("the mimic remark says it is happening now",
+   "RIGHT NOW" in S.REMARK_SITUATION["mimic"])
+
+# ⚠ A mercenary invents a gold figure if allowed to: measured, he answered an opened chest with
+# "Sixty-five gold pieces, a decent haul". He cannot know it and nothing displays it -- the same
+# error the haggle block exists to stop. 0/6 named a figure after this.
+ck("a mercenary is forbidden numbers in a remark",
+   "Naming any number is WRONG" in S.build_remark_prompt("chest", "gnome", 7, "swamp",
+                                                         "self_interested"))
+ck("and in a valuable-pickup remark too",
+   "Naming any number is WRONG" in S.build_valuable_prompt("gnome", 7, "swamp", "gem stone",
+                                                           "gem", 3000, "self_interested"))
+ck("but nobody else is burdened with that line",
+   "Naming any number is WRONG" not in S.build_remark_prompt("chest", "gnome", 7, "swamp",
+                                                             "loyal"))
+
+# ⚠ DO NOT re-add a "do not change the subject to the floor" line to the drunk situation.
+# Naming those TOPICS primed them: the measured rate fell to 2/8 and the misses all wrote about
+# gators, reeds and cypress knees. Naming a forbidden SPEECH ACT works; naming a forbidden
+# TOPIC introduces it. Same failure the project recorded for spec 26.
+ck("the drunk situation names no topic to avoid",
+   "cypress" not in S.REMARK_SITUATION["drunk"]
+   and "what lives here" not in S.REMARK_SITUATION["drunk"])
+
+# A spy has no reaction of its own for any kind; the handler maps it to loyal.
+for k in ("chest", "drunk", "mimic"):
+    ck("no spy-specific %s angle to leak" % k, "spy" not in S.REMARK_ANGLE[k])
+    ck("every %s angle has a default" % k, S.REMARK_ANGLE[k].get(None))
+ck("a fearful follower dreads chests", "Traps" in S.REMARK_ANGLE["chest"]["fearful"])
+ck("and shouts at a mimic", "terrified" in S.REMARK_ANGLE["mimic"]["fearful"])
+ck("a machine does not panic", "not panic" in S.REMARK_ANGLE["mimic"]["machine"])
+ck("every remark kind has a situation and angles",
+   set(S.REMARK_SITUATION) == set(S.REMARK_ANGLE))
+
 print("\n%d failure(s)" % len(fails), fails)
 sys.exit(1 if fails else 0)
