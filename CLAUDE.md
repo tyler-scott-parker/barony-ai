@@ -1058,6 +1058,57 @@ Measured, same three situations:
 | fearful goblin | *"Me get share!"* | *"Ugga ugga, stupid human, watcha doin'?"* | *"AHHH, GRUNT! CHES' COME ALIVE! GET IT AWAY!"* |
 | goatman | *"About bloody time we found somethin' worth fightin' over."* | — | *"IT'S A CHEST OF BITTER BONE AND WRATH!"* |
 
+#### Four more: a cleared floor, food, water, and an arrow in the ribs
+
+| kind | fires on | notes |
+|---|---|---|
+| `cleared` | hostiles present, then none (scanned 1/s) | ⚠ derived — Barony has no such concept |
+| `food` | a `FOOD`-category item entering the inventory | **12%** — bread is picked up constantly |
+| `swimming` | `isPlayerSwimming()` \|\| `PLAYER_INWATER` rising edge | |
+| `arrowtrap` | HP drop within 6 ticks of a trap-fired arrow being close | **urgent**; see below |
+
+⚠ **Barony has NO concept of a cleared floor** — no flag, no message, no counter — so it is
+derived. Judged with the player's own **`checkEnemy`** rather than by counting `actMonster`,
+which would call Hamlet's townsfolk and your own followers hostile and mean the town could never
+be clear. It also has to have *had* enemies: a floor you walk onto empty was never cleared.
+Scanned once a second, not per frame, and **one line for the party** rather than one per player.
+
+⚠ **The arrow trap is detected without an upstream hook, which is why it is indirect.** An arrow
+fired by a trap carries the trap's uid in `parent` (`actarrowtrap.cpp:238`), so each frame the mod
+notes when such an arrow is within 3 tiles of a player; if that player's HP then drops within 6
+ticks, the trap is what did it. Hooking the damage path would mean adding `entity.cpp` to the
+upstream diff — currently untouched — for a flavour line. The follower is forbidden from claiming
+it saw the trap coming, because it did not.
+
+⚠ **Food needs its own slot in the inventory watch.** It is worth almost nothing, so it can never
+win the value contest the valuable-pickup remark runs; a valuable find still takes the turn if
+there is one, and food is the consolation. The actual item is passed through (`{look}`), so the
+line is about *that* food.
+
+> *"The stillness is a better trap than any."* (skeleton, cleared)
+> *"Silence is payment."* (skeleton, cleared)
+> *"Soft bread, good... want."* (rat, food) — *"Hamlet bread's like eating dust and regret."*
+> *"Bleed quickly, while I search…"* (skeleton, arrow trap)
+> *"What's a hero without dry boots?"* (kobold, swimming)
+
+#### ⚠ The priming trap, twice more — and what actually fixes it
+
+`swimming` made small races **forget they were followers**: a goblin answered *"Go 'way, human
+scum!"* and a rat *"Get outta here, human! This's my swamp!"*, both treating their own adventurer
+as an intruder. The angle *"react as your kind would to water"* had pulled them into ordinary
+monster behaviour.
+
+| attempt | rats/goblins treating the player as an intruder |
+|---|---|
+| *"react as your kind would to water"* | both small races, every time |
+| plus *"…not a stranger in your **territory**"* | 2/6 — ⚠ the word **territory** primed it |
+| plus *"this is YOUR adventurer, the one you follow and travel with"* | 2/6, **rats only** |
+
+Same failure as the drunk line, and the same rule: **naming a forbidden topic supplies it**;
+stating the role positively is what holds. The remaining rat cases (*"Get outta my pool!"*) read
+as a rat griping rather than as hostility, and every other race is clean — stopped there rather
+than risk a third priming round.
+
 #### ⚠ Naming a forbidden TOPIC primes it; naming a forbidden SPEECH ACT does not
 
 The drunk remark drifted to scenery in a few samples, so the obvious fix was tried — appending

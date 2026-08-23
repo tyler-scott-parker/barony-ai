@@ -347,6 +347,17 @@ VALUABLE_DEFAULT = ("React to it plainly and warmly — you are pleased for them
 # well already uses.
 REMARK_SITUATION = {
     "chest": "They have just got a treasure chest open in front of you, and are going through it.",
+    # ⚠ Barony has no concept of a cleared floor -- no flag, no message, no counter -- so the
+    # engine derives it from the player's own checkEnemy going quiet. See mymod_remarkTick.
+    "cleared": ("Nothing hostile is left alive on this floor. It is quiet — properly quiet — "
+                "for the first time since you came down here, and you can both feel it."),
+    "swimming": ("They have waded in and are swimming. You are watching this adventurer paddle "
+                 "about in dungeon water with all their gear on."),
+    "arrowtrap": ("An arrow trap has just gone off and put a shaft in them. They are hurt and "
+                  "there may be more of it. This is happening RIGHT NOW.\n"
+                  "Do NOT claim you warned them and do NOT say you saw it coming — you did not."),
+    # {look} is filled from the engine: the actual food they picked up.
+    "food": ("They have just picked up {look} and stowed it. A small thing, and you noticed."),
     # ⚠ It is the ADVENTURER who is drunk, not the follower -- worth being explicit, because the
     # model will otherwise happily write itself as the drunk one.
     # ⚠ DO NOT add "do not change the subject to the floor or what lives here" to this. It was
@@ -366,6 +377,41 @@ REMARK_SITUATION = {
 # pickup. The disguise is the point, and a spy who reacts differently to your misfortune is a
 # tell handed over for nothing.
 REMARK_ANGLE = {
+    "cleared": {
+        "self_interested": "A finished job is a job you can be paid for. Say what that is worth, or what comes next.",
+        "fearful": "You can breathe again. Say so — and say you would rather not be here when something else wanders in.",
+        "bound": "Report the state of the floor. Nothing more.",
+        "machine": "Report the state of the floor. Nothing more.",
+        None: "React plainly to the quiet — satisfaction, relief, or a dry word about the work.",
+    },
+    "swimming": {
+        "self_interested": "Wet gear rusts and wet coin is still coin, but you are not paid to swim. Say something dry about it.",
+        "fearful": "You do not like this. There is no telling what is under dark water.",
+        "bound": "Note that they are in the water. It is a fact, not a concern.",
+        "machine": "Note that they are in the water. It is a fact, not a concern.",
+        # ⚠ "React as your kind would to water" sent small territorial races off the rails: a
+        # goblin answered "Go 'way, human scum!" and a rat "Get outta here, human! This's my
+        # swamp!" -- both had forgotten they were following this person. Naming the role back
+        # is a subject clarification, the fix that worked for "this adventurer, not you".
+        # ⚠ The first fix said "not a stranger in your territory" and the word TERRITORY primed
+        # it -- a rat still answered "Get outta me water!" twice. Same failure as the drunk
+        # line. Stated positively, with no noun to grab, it holds: 0/6.
+        None: "React as YOUR kind would to water — some creatures love it, some will not go near it. This is YOUR adventurer in there, the one you follow and travel with, and you are speaking to them as their companion.",
+    },
+    "arrowtrap": {
+        "self_interested": "Carelessness costs, and you are the one who has to keep them upright. Say so, shortly.",
+        "fearful": "That could have been you. Say so, and say you want to be away from here.",
+        "bound": "Register the injury and the danger. State it.",
+        "machine": "Register the injury and the danger. State it.",
+        None: "Warn them — there may be more, and they are bleeding. You are already looking for the next one.",
+    },
+    "food": {
+        "self_interested": "It is barely worth the carrying, and you would not have bothered. Say so, mildly.",
+        "fearful": "Food is one less thing to worry about down here.",
+        "bound": "You do not eat. Note it without interest.",
+        "machine": "You do not eat. Note it without interest.",
+        None: "React as YOUR kind would to that particular food — appetite, disgust, or a passing opinion. Keep it small; it is only a scrap of food.",
+    },
     "chest": {
         "self_interested": "You are already working out what the take is worth and what your share of it looks like.",
         "fearful": "You do not like chests. Traps, or worse, and you have heard what some of them turn out to be.",
@@ -466,14 +512,17 @@ def build_hunger_prompt(state, race, floor, map_name, allegiance="loyal", blood=
             + numbers
             + REMARK_TAIL)
 
-def build_remark_prompt(kind, race, floor, map_name, allegiance="loyal"):
+def build_remark_prompt(kind, race, floor, map_name, allegiance="loyal", ctx=None):
     # ⚠ A mercenary told to think about "what the take is worth" invents a figure -- measured,
     # he answered an opened chest with "Sixty-five gold pieces, a decent haul". He cannot know
     # that, nothing displays it, and it is the same error the haggle block exists to stop. He
     # may talk about worth; he may not put a number on it.
     numbers = MERC_NO_NUMBERS if allegiance == "self_interested" else ""
+    situation = REMARK_SITUATION.get(kind, "Something has happened.")
+    if "{look}" in situation:
+        situation = situation.replace("{look}", ((ctx or {}).get("look") or "some food"))
     return (_remark_head(race, floor, map_name)
-            + REMARK_SITUATION.get(kind, "Something has happened.") + "\n"
+            + situation + "\n"
             + remark_angle(kind, allegiance) + "\n"
             + numbers
             + REMARK_TAIL)
@@ -3488,7 +3537,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 _al = st_r.get("allegiance", "loyal")
                 if _al == "spy":
                     _al = "loyal"     # the disguise holds here too
-                prompt_r = build_remark_prompt(remark, race, floor, map_name, _al)
+                prompt_r = build_remark_prompt(remark, race, floor, map_name, _al,
+                                               {"look": (data.get("look") or "").strip()})
                 raw_r = ask_ollama(prompt_r)
                 line_r = (raw_r or "").strip().strip('"').split("\n")[0][:200]
                 print(f"[SERVICE] -> remark {remark}: {race}: {line_r}")

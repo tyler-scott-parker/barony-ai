@@ -90,7 +90,7 @@ ck("the mercenary does not tout for the appraisal here",
    "do NOT offer to do it yourself" in S.VALUABLE_ANGLE["self_interested"])
 
 # --- chest, drunk and mimic -----------------------------------------------------------------
-for k in ("chest", "drunk", "mimic"):
+for k in ("chest", "drunk", "mimic", "cleared", "swimming", "arrowtrap", "food"):
     pr = S.build_remark_prompt(k, "goblin", 7, "swamp", "loyal")
     ck("the %s remark is a short form" % k, tok(pr) < 500, tok(pr))
     ck("the %s remark knows where it is" % k, "Swamp" in pr or "swamp" in pr)
@@ -126,7 +126,7 @@ ck("the drunk situation names no topic to avoid",
    and "what lives here" not in S.REMARK_SITUATION["drunk"])
 
 # A spy has no reaction of its own for any kind; the handler maps it to loyal.
-for k in ("chest", "drunk", "mimic"):
+for k in ("chest", "drunk", "mimic", "cleared", "swimming", "arrowtrap", "food"):
     ck("no spy-specific %s angle to leak" % k, "spy" not in S.REMARK_ANGLE[k])
     ck("every %s angle has a default" % k, S.REMARK_ANGLE[k].get(None))
 ck("a fearful follower dreads chests", "Traps" in S.REMARK_ANGLE["chest"]["fearful"])
@@ -178,6 +178,34 @@ ck("no spy-specific hunger angle to leak", "spy" not in S.HUNGER_ANGLE)
 ck("every hunger state has a situation",
    set(S.HUNGER_SITUATION) == {"hungry", "weak", "starving", "oversatiated",
                                "superheated", "critical"})
+
+# --- cleared / swimming / arrow trap / food -------------------------------------------------
+# ⚠ Barony has NO concept of a cleared floor -- no flag, no message, no counter -- so the engine
+# derives it from the player's own checkEnemy going quiet, which is what stops Hamlet's
+# townsfolk and your own followers from counting as "hostile".
+ck("the cleared remark says the floor is quiet", "quiet" in S.REMARK_SITUATION["cleared"])
+# ⚠ The follower did not see the trap coming and must not claim it did.
+ck("the arrow-trap remark forbids claiming a warning",
+   "Do NOT claim you warned them" in S.REMARK_SITUATION["arrowtrap"])
+ck("and says it is happening now", "RIGHT NOW" in S.REMARK_SITUATION["arrowtrap"])
+
+# The food line carries the actual item, filled from the engine.
+_f = S.build_remark_prompt("food", "rat", 7, "swamp", "loyal", {"look": "loaf of bread"})
+ck("the food remark names what was picked up", "loaf of bread" in _f)
+ck("and falls back cleanly with no context",
+   "some food" in S.build_remark_prompt("food", "rat", 7, "swamp", "loyal"))
+ck("it keeps the moment small", "only a scrap of food" in S.REMARK_ANGLE["food"][None])
+ck("a construct does not eat", "do not eat" in S.REMARK_ANGLE["food"]["machine"])
+
+# ⚠ SWIMMING made small races forget they were followers: a goblin answered "Go 'way, human
+# scum!" and a rat "Get outta here, human! This's my swamp!". Naming the role back fixed the
+# goblins. ⚠ The FIRST attempt said "not a stranger in your territory" and the word TERRITORY
+# primed it -- same failure as the drunk line. Stated positively it holds for every race but
+# rat, which still gets possessive about the water now and then.
+ck("the swimming angle names the follower's role",
+   "the one you follow and travel with" in S.REMARK_ANGLE["swimming"][None])
+ck("and names no territory to grab",
+   "territory" not in S.REMARK_ANGLE["swimming"][None])
 
 print("\n%d failure(s)" % len(fails), fails)
 sys.exit(1 if fails else 0)
