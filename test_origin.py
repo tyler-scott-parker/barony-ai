@@ -126,5 +126,54 @@ ck("multi-word slots normalise",
    S._identity_key("summon", "Skeleton Knight", 0) == S._identity_key("summon", "skeleton_knight", 0))
 ck("a summon with no key falls back to uid", S._identity_key("summon", "", 0) == "")
 
+# --- ⚠ ORDINARY FOLLOWERS ACROSS A STAIRCASE ---------------------------------------------------
+# follower_state is uid-keyed, and Barony RE-CREATES every follower as a new entity on a level
+# change (game.cpp:2438 -> summonMonster, entity_shared.cpp:490). Confirmed in the first real
+# session: floor 1 had skeleton 441 / skeleton 438 / rat 439, floor 2 had 1040 / 1042 / 1043 --
+# same party, new uids, and one skeleton came back self_interested where the pair upstairs were
+# loyal and fearful. Friendship, events and the name all restarted, so every gate above ~5 was
+# unreachable in play.
+S.reset_run()
+S._req_set(persist=7, floor=1, engine_name="")
+_up = S.get_follower_state(441, "skeleton", 0)
+_up.update(allegiance="loyal", name="Metacarpal", friendship=14, trust=12, respect=15)
+_up["event_log"] = [{"type": "fought_alongside", "floor": 1, "claim": "x",
+                     "importance": "notable", "provenance": "participated"}] * 3
+
+# the staircase: same creature, new uid, same token stamped in its Stat
+S._req_set(persist=7, floor=2, engine_name="Metacarpal")
+_down = S.get_follower_state(1040, "skeleton", 0)
+ck("a follower survives a staircase", _down is _up)
+ck("with its friendship", _down["friendship"] == 14)
+ck("its trust", _down["trust"] == 12)
+ck("its name", _down["name"] == "Metacarpal")
+ck("its allegiance, NOT re-rolled", _down["allegiance"] == "loyal")
+ck("and its fights, so the Herx gate is reachable again", S._fight_count(_down) == 3)
+
+# ⚠ It walked down stairs; it was not unmade and called back. The resummon bookkeeping must not
+# run, or an ordinary follower would claim to have died every floor.
+ck("no phantom resummon is recorded", not _down.get("pending_resummon"))
+ck("and it is still one body", _down.get("bodies") == 1)
+
+# A different creature with a different token must not inherit any of it.
+S._req_set(persist=9, floor=2, engine_name="")
+_other = S.get_follower_state(1042, "skeleton", 0)
+ck("a different follower gets its own row", _other is not _up)
+ck("starting from nothing", _other["friendship"] == 0 and not _other["name"])
+
+# ⚠ Without a token there is nothing to key on, so the old uid behaviour must remain -- a
+# stale binary sends no persist field and must not crash or cross-bind.
+S._req_set(persist=0, floor=3, engine_name="")
+_nokey = S.get_follower_state(2001, "rat", 0)
+ck("no token means the old uid-keyed behaviour", _nokey is not _up)
+ck("and _identity_key says so", S._identity_key("", "", 0, 0) == "")
+ck("while a token produces a stable key",
+   S._identity_key("", "", 0, 7) == S._identity_key("", "", 0, 7) != "")
+ck("keys are per player, so two players cannot collide",
+   S._identity_key("", "", 0, 7) != S._identity_key("", "", 1, 7))
+# Summons keep their own key shape, unchanged.
+ck("a summon still keys on its origin",
+   S._identity_key("summon", "skeleton knight", 0, 7).startswith("summon:0:"))
+
 print("\n%d failure(s)" % len(fails), fails)
 sys.exit(1 if fails else 0)

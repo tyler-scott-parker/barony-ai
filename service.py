@@ -1263,11 +1263,24 @@ def _emplacement_section(race):
 # redeploy. This maps the part that DOESN'T change to the one state row they all share.
 PERSISTENT_IDENTITY = {}   # "summon:0:skeleton knight" -> the shared follower_state dict
 
-def _identity_key(origin, origin_key, player):
-    """The key a relationship is remembered under across bodies, or '' for uid-keyed."""
-    if origin not in PERSISTENT_ORIGINS or not origin_key:
-        return ""
-    return "%s:%d:%s" % (origin, player, _lore_key(origin_key))
+def _identity_key(origin, origin_key, player, persist=0):
+    """The key a relationship is remembered under across bodies, or '' for uid-keyed.
+
+    ⚠ ORDINARY FOLLOWERS NEED THIS TOO, and finding that out cost a playtest. follower_state is
+    keyed by uid, and Barony RE-CREATES every follower as a new entity on a level change
+    (game.cpp:2438), so the row was orphaned at every staircase: friendship back to 0, the event
+    log empty, the assigned name gone, and the ALLEGIANCE RE-ROLLED. Confirmed in the first real
+    session -- floor 1 had skeleton 441 / skeleton 438 / rat 439, floor 2 had 1040 / 1042 / 1043,
+    same party, and one skeleton came back self_interested where the pair upstairs were loyal and
+    fearful. Every gate above ~5 friendship was unreachable in play.
+
+    `persist` is a token the ENGINE stamps into the creature's Stat (MISC_FLAGS[22]), which
+    copyStats() carries across the transition exactly as it carries the name."""
+    if origin in PERSISTENT_ORIGINS and origin_key:
+        return "%s:%d:%s" % (origin, player, _lore_key(origin_key))
+    if persist:
+        return "follower:%d:%d" % (player, int(persist))
+    return ""
 
 def roll_allegiance(origin=""):
     if origin in ORIGIN_ALLEGIANCE:
@@ -1510,7 +1523,7 @@ def adjust(st, **deltas):
         st[d] = max(0, min(100, st.get(d, 0) + v))
     return st
 
-def get_follower_state(uid, race, player=0, origin="", origin_key=""):
+def get_follower_state(uid, race, player=0, origin="", origin_key="", persist=0):
     """State is keyed by follower UID, which Barony assigns server-side and replicates,
     so it is already unique across every player in a multiplayer run. `player` is the
     owning player index (0 = host); it scopes per-player latches like boons.
@@ -1522,26 +1535,39 @@ def get_follower_state(uid, race, player=0, origin="", origin_key=""):
     does with the creature's stats: playerSummon*LVLHP carries LVL/HP/STR.. per summon slot
     through any death, so the next knight is statistically the same creature and now
     socially the same one too."""
+    if not persist:
+        persist = int(_req("persist", 0) or 0)
     if uid not in follower_state:
-        pid = _identity_key(origin, origin_key, player)
+        pid = _identity_key(origin, origin_key, player, persist)
         if pid and pid in PERSISTENT_IDENTITY:
             st = PERSISTENT_IDENTITY[pid]
             follower_state[uid] = st          # the body is new; the creature is not
             st["uid"] = uid
-            st["bodies"] = st.get("bodies", 1) + 1
-            st["resummons"] = st.get("resummons", 0) + 1
-            # The rebind is the only place that KNOWS this happened, but it has no floor to
-            # record against -- so it leaves a note for the first caller that does.
-            st["pending_resummon"] = True
-            print(f"[SERVICE-DBG] follower {uid} IS {pid} again "
-                  f"(body #{st['bodies']}, {dims_summary(st)})")
-            logrec("rebind", uid=uid, race=race, player=player, identity=pid,
-                   bodies=st["bodies"], name=st.get("name") or None)
+            if origin in PERSISTENT_ORIGINS:
+                # A summon or a bot really WAS unmade and called back.
+                st["bodies"] = st.get("bodies", 1) + 1
+                st["resummons"] = st.get("resummons", 0) + 1
+                # The rebind is the only place that KNOWS this happened, but it has no floor to
+                # record against -- so it leaves a note for the first caller that does.
+                st["pending_resummon"] = True
+                print(f"[SERVICE-DBG] follower {uid} IS {pid} again "
+                      f"(body #{st['bodies']}, {dims_summary(st)})")
+                logrec("rebind", uid=uid, race=race, player=player, identity=pid,
+                       bodies=st["bodies"], name=st.get("name") or None)
+            else:
+                # ⚠ An ordinary follower did NOT die and was NOT recalled -- it walked down a
+                # staircase and the engine handed it a new uid. Nothing happened to it, so the
+                # resummon bookkeeping must NOT run: no extra body, no `resummoned` event, and
+                # nothing about being unmade. It is simply the same creature, still here.
+                print(f"[SERVICE-DBG] follower {uid} carried over as {pid} "
+                      f"({dims_summary(st)})")
+                logrec("carried", uid=uid, race=race, player=player, identity=pid,
+                       name=st.get("name") or None, floor=_req("floor") or None)
             return dims_init(st)
         al = roll_allegiance(origin)
         follower_state[uid] = dims_init({"events": [], "event_log": [], "name": "", "race": race,
                                "allegiance": al, "owner": player,
-                               "origin": origin, "origin_key": origin_key,
+                               "origin": origin, "origin_key": origin_key, "persist": persist,
                                "uid": uid, "bodies": 1,
                                # Reserved now, revealed only once friendship unlocks the nudge.
                                "assigned_name": reserve_name(race),
@@ -1553,7 +1579,8 @@ def get_follower_state(uid, race, player=0, origin="", origin_key=""):
         # would orphan this row at every staircase. Stat->name survives the transition, so
         # logging it here lets logreview spot the same creature reappearing under a second uid.
         logrec("newfollower", uid=uid, race=race, player=player, allegiance=al,
-               engine_name=(_ENGINE_NAME_HINT or None), floor=_FLOOR_HINT or None)
+               engine_name=(_req("engine_name") or None), floor=_req("floor") or None,
+               persist=persist or None)
         print(f"[SERVICE-DBG] follower {uid} allegiance={al} owner=player{player}"
               + (f" origin={origin} identity={pid}" if origin else ""))
         # The single most important line for reading a playthrough back: everything a follower
@@ -2984,10 +3011,23 @@ def _secret_override(uid):
 # actually spoken in play. Reserved-but-never-revealed names are released back, or a long
 # session would burn the pool for nothing.
 
-# Set by the request handler before it touches follower state, so get_follower_state can log
-# the engine-side name and floor without threading two more parameters through every call site.
-_ENGINE_NAME_HINT = ""
-_FLOOR_HINT = 0
+# ---- Per-request context ---------------------------------------------------------------------
+# Set by the handler before it touches follower state, so the identity token, the engine-side
+# name and the floor are available to get_follower_state without threading three more parameters
+# through a dozen call sites.
+#
+# ⚠ THREAD-LOCAL, not module-level. The service is a ThreadingTCPServer and two players can be
+# mid-request at the same instant -- measured, an event record returns in 0.00s while a 5.3s
+# generation is in flight. A shared global would let player A's follower bind to player B's
+# identity token, which is the one thing this must never do.
+_REQ = threading.local()
+
+def _req_set(**kw):
+    for k, v in kw.items():
+        setattr(_REQ, k, v)
+
+def _req(name, default=None):
+    return getattr(_REQ, name, default)
 
 FOLLOWER_NAMES    = _load_json("follower_names.json")
 NAME_HISTORY_PATH = os.environ.get("BARONY_AI_NAMEHIST",
@@ -4148,9 +4188,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             # ⚠ NOT player_race -- see _kin_section. That field is the shapeshift form and drives
             # the comprehension filter; this is what the adventurer actually is.
             player_kind = (data.get("player_kind") or "").strip()
-            global _ENGINE_NAME_HINT, _FLOOR_HINT
-            _ENGINE_NAME_HINT = (data.get("follower_name") or "").strip()
-            _FLOOR_HINT = floor
+            _req_set(engine_name=(data.get("follower_name") or "").strip(),
+                     floor=floor,
+                     persist=int(data.get("persist", 0) or 0))
             # How this follower came to be, and the part of its identity that outlives this
             # body (see the origin section). Empty for an ordinary recruit.
             origin = (data.get("origin") or "").strip()
