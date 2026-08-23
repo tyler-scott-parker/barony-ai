@@ -376,9 +376,10 @@ REMARK_SITUATION = {
                      "its own is not enough."),
     # ⚠ {look} and {slot} come from the engine: the real item and the real slot it went into.
     "equip": ("They have just put on {look} — it is their {slot} now. You watched them do it."),
-    # Routed to build_skills_prompt, which needs the best/worst pair; this entry exists so the
-    # handler recognises the kind.
-    "skills": "You have taken this adventurer's measure.",
+    # Routed to build_skill_prompt, which needs the skill/tier pair; these exist so the handler
+    # recognises the kinds.
+    "skillbest": "You have seen what this adventurer is good at.",
+    "skillworst": "You have seen where this adventurer falls short.",
     "bossfight": ("{look} is HERE, in front of you, alive and enormous, and the fight is "
                   "starting. This is not another dungeon creature — this is the thing this "
                   "whole floor was built around. It is happening RIGHT NOW."),
@@ -701,38 +702,86 @@ DEATH_ANGLE = {
 # test meaningful.
 REMARK_ANGLE["death"] = DEATH_ANGLE
 
-# ---- What they are good and bad at -----------------------------------------------------------
-# ⚠ The engine sends the game's own SKILL NAME and TIER, never a raw number -- Barony's tiers are
+# ---- What they are good at, and what they are not --------------------------------------------
+# ⚠ TWO SEPARATE REMARKS, deliberately. One line doing both -- "an expert with the axe but
+# hopeless at stealth" -- reads as a performance review rather than as something a companion
+# would say. Praise stands on its own; so does a bit of grief.
+#
+# ⚠ The engine sends the game's own SKILL NAME and TIER, never a raw number. Barony's tiers are
 # NOVICE 1 / BASIC 20 / SKILLED 40 / EXPERT 60 / MASTER 80 / LEGENDARY 100 (stat.hpp:195), and
 # getSkillLangEntry supplies the name. A follower quoting "your axe is 43" would be reading a
-# sheet it cannot see; a follower saying they are skilled with an axe is just watching them work.
-SKILLS_ANGLE = {
-    "self_interested": ("You size people up for a living, and you have been watching them fight. "
-                        "Say what they are worth and where they will get themselves killed."),
-    "fearful": "What they are bad at is what gets you both killed. Say which it is.",
-    "bound": "State what you have observed of their abilities. Nothing more.",
-    "machine": "State what you have observed of their abilities. Nothing more.",
-    None: ("Say it as someone who has watched them work — praise for the one, a dry word about "
-           "the other. You are not reading a list; you have simply noticed."),
+# sheet it cannot see; one saying they are skilled with an axe is just watching them work.
+SKILL_BEST_ANGLE = {
+    "self_interested": ("Credit where it is due, professionally. You have watched a lot of people "
+                        "fight and most of them were worse. Say so without warmth."),
+    "fearful": "This is the thing keeping you both alive, and you are glad of it. Say so.",
+    "bound": "State the ability you have observed. It is a fact, not a compliment.",
+    "machine": "State the ability you have observed. It is a fact, not a compliment.",
+    None: ("Say something genuinely admiring — you have watched them do it and it is worth "
+           "remarking on. Plain praise, not flattery, and no advice."),
 }
 
-REMARK_ANGLE["skills"] = SKILLS_ANGLE
+# ⚠ Teasing is a thing you do to someone you KNOW. A follower who barely knows this adventurer
+# mocking their weakness is not banter, it is contempt -- and it would read as the relationship
+# system being broken. So the tone is chosen from friendship, server-side, and the model is only
+# ever handed one of them.
+SKILL_TEASE_MIN_FRIENDSHIP = 25
+SKILL_WORST_TONE = {
+    "warm": ("Give them a bit of good-natured grief about it — the kind you only give someone "
+             "you actually like. Tease, do not lecture, and make it clear you are not really "
+             "complaining. You would still follow them anywhere."),
+    "cool": ("Note it plainly and without malice. You do not know them well enough to tease "
+             "them about it, so do not try — this is an observation, not a joke."),
+}
+SKILL_WORST_ANGLE = {
+    "self_interested": ("This is where they will get themselves killed and you unpaid. Say it "
+                        "flatly, as a professional noting a liability."),
+    "fearful": "This is the thing that gets you both killed, and it worries you. Say so.",
+    "bound": "State the deficiency you have observed. You are not mocking; you do not mock.",
+    "machine": "State the deficiency you have observed. You do not mock.",
+}
 
-def build_skills_prompt(race, floor, map_name, allegiance="loyal",
-                        best="", best_tier="", worst="", worst_tier=""):
-    if not best or not worst:
+REMARK_ANGLE["skillbest"] = SKILL_BEST_ANGLE
+# The None entry is the relationship-chosen tone; build_skill_prompt picks warm or cool from
+# friendship, so this is only the default for the "every kind has a default" test.
+REMARK_ANGLE["skillworst"] = dict(SKILL_WORST_ANGLE)
+REMARK_ANGLE["skillworst"][None] = SKILL_WORST_TONE["warm"]
+
+def _skill_line(tier, skill, good):
+    # "an expert"/"a master" want "with"; "hopeless"/"a novice" want "at".
+    return "They are " + tier + (" with " if good else " at ") + skill + "."
+
+def build_skill_prompt(kind, race, floor, map_name, allegiance="loyal",
+                       skill="", tier="", friendship=0):
+    if not skill or not tier:
         return ""
+    good = (kind == "skillbest")
+    if good:
+        angle = SKILL_BEST_ANGLE.get(allegiance) or SKILL_BEST_ANGLE[None]
+        head = ("You have travelled with this adventurer long enough to have seen what they can "
+                "do, and one thing stands out.\n")
+    else:
+        angle = SKILL_WORST_ANGLE.get(allegiance)
+        if not angle:
+            warm = int(friendship or 0) >= SKILL_TEASE_MIN_FRIENDSHIP
+            angle = SKILL_WORST_TONE["warm" if warm else "cool"]
+        head = ("You have travelled with this adventurer long enough to have seen where they "
+                "fall short, and one thing stands out.\n")
     numbers = MERC_NO_NUMBERS if allegiance == "self_interested" else ""
     return (_remark_head(race, floor, map_name)
             + _dread_section(floor, map_name)
-            + "You have travelled with this adventurer long enough to have taken their measure.\n"
-            + "They are " + best_tier + " with " + best + " — that is the best of them.\n"
-            + "They are " + worst_tier + " at " + worst + " — that is the worst of them.\n"
-            + (SKILLS_ANGLE.get(allegiance) or SKILLS_ANGLE[None]) + "\n"
-            # ⚠ Those two are the ONLY skills it has been told about. Left open it will invent
-            # a third and be wrong about it, the same way an unanchored place name gets invented.
-            + "Mention only those two things. Do NOT bring up any other ability of theirs — you "
-              "have not been told about any, and inventing one is WRONG.\n"
+            + head
+            + _skill_line(tier, skill, good) + "\n"
+            + angle + "\n"
+            # ⚠ This is the ONLY skill it has been told about. Left open it names a second and is
+            # wrong about it, the same way an unanchored place name gets invented.
+            + "Talk about that one thing only. Do NOT bring up any other ability of theirs, good "
+              "or bad — you have not been told about any, and inventing one is WRONG.\n"
+            # ⚠ Speaking TO them, not about them. The fact above is written in the third person
+            # for your information and the model echoes it back that way -- "They're not exactly
+            # sword-savvy, are they?" -- which sounds like remarking to a bystander.
+            + "You are speaking straight to this adventurer, face to face. Say it TO them, not "
+              "about them.\n"
             + numbers
             + REMARK_TAIL)
 
@@ -3831,13 +3880,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 _al = st_r.get("allegiance", "loyal")
                 if _al == "spy":
                     _al = "loyal"     # the disguise holds here too
-                if remark == "skills":
-                    prompt_r = build_skills_prompt(
-                        race, floor, map_name, _al,
-                        (data.get("best") or "").strip(),
-                        (data.get("besttier") or "").strip(),
-                        (data.get("worst") or "").strip(),
-                        (data.get("worsttier") or "").strip())
+                if remark in ("skillbest", "skillworst"):
+                    prompt_r = build_skill_prompt(
+                        remark, race, floor, map_name, _al,
+                        (data.get("skill") or "").strip(),
+                        (data.get("tier") or "").strip(),
+                        st_r.get("friendship", 0))
                     if not prompt_r:
                         return self._send_json({"reply": "", "action": "NONE"})
                 elif remark == "death":

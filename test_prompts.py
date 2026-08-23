@@ -130,7 +130,7 @@ ck("the drunk situation names no topic to avoid",
 # A spy has no reaction of its own for any kind; the handler maps it to loyal.
 for k in ("chest", "drunk", "mimic", "cleared", "swimming", "arrowtrap", "food", "kill",
           "death", "bossfight", "bossdown", "area", "minotaur", "minotimer", "minotaurdown",
-          "equip", "skills"):
+          "equip", "skillbest", "skillworst"):
     ck("no spy-specific %s angle to leak" % k, "spy" not in S.REMARK_ANGLE[k])
     ck("every %s angle has a default" % k, S.REMARK_ANGLE[k].get(None))
 ck("a fearful follower dreads chests", "Traps" in S.REMARK_ANGLE["chest"]["fearful"])
@@ -350,22 +350,49 @@ ck("the equip line falls back cleanly with no context",
    "{look}" not in S.build_remark_prompt("equip", "rat", 7, "swamp", "loyal")
    and "{slot}" not in S.build_remark_prompt("equip", "rat", 7, "swamp", "loyal"))
 
-# --- best and worst skills --------------------------------------------------------------------
+# --- praise and teasing, as TWO separate remarks -----------------------------------------------
+# ⚠ Deliberately split. One line doing both -- "an expert with the axe but hopeless at stealth" --
+# reads as a performance review rather than as something a companion would say.
+ck("the combined skills remark is gone", "skills" not in S.REMARK_SITUATION)
+_best = S.build_skill_prompt("skillbest", "human", 7, "swamp", "loyal",
+                             "the axe", "an expert", 60)
+_tease = S.build_skill_prompt("skillworst", "human", 7, "swamp", "loyal",
+                              "stealth", "hopeless", 60)
+_cool = S.build_skill_prompt("skillworst", "human", 7, "swamp", "loyal",
+                             "stealth", "hopeless", 5)
 # ⚠ The engine sends the game's own skill NAME and TIER, never a raw number -- Barony's tiers are
 # NOVICE 1 / BASIC 20 / SKILLED 40 / EXPERT 60 / MASTER 80 / LEGENDARY 100 (stat.hpp:195). A
 # follower quoting "your axe is 43" would be reading a sheet it cannot see.
-_sk = S.build_skills_prompt("human", 7, "swamp", "loyal",
-                            "the axe", "an expert", "stealth", "hopeless")
-ck("the skills line names the best", "an expert with the axe" in _sk)
-ck("and the worst", "hopeless at stealth" in _sk)
-# ⚠ Those two are the only skills it knows. Left open it invents a third, the same way an
-# unanchored place name gets invented.
-ck("and forbids inventing a third", "Do NOT bring up any other ability" in _sk)
-ck("no skills prompt without both ends",
-   S.build_skills_prompt("human", 7, "swamp", "loyal", "the axe", "an expert", "", "") == "")
+ck("praise names the skill with its tier", "an expert with the axe" in _best)
+ck("and the low one reads 'at', not 'with'", "hopeless at stealth" in _tease)
+ck("praise asks for plain admiration", "genuinely admiring" in _best)
+ck("neither mentions the other end",
+   "stealth" not in _best and "the axe" not in _tease)
+
+# ⚠ Teasing is something you do to someone you KNOW. A follower who barely knows this adventurer
+# mocking their weakness is contempt, not banter, and would read as the relationship system being
+# broken -- so the tone is chosen from friendship, server-side.
+ck("a friend teases", "good-natured grief" in _tease)
+ck("a near-stranger does not", "not know them well enough to tease" in _cool)
+ck("and the threshold is a real gate", S.SKILL_TEASE_MIN_FRIENDSHIP >= 20)
+# Allegiances that would never tease keep their own voice whatever the friendship.
+ck("a construct never mocks", "do not mock" in S.build_skill_prompt(
+    "skillworst", "human", 7, "swamp", "machine", "stealth", "hopeless", 99))
+ck("a mercenary calls it a liability", "liability" in S.build_skill_prompt(
+    "skillworst", "human", 7, "swamp", "self_interested", "stealth", "hopeless", 99))
+
+# ⚠ One skill is all it has been told about. Left open it names a second and is wrong about it,
+# the same way an unanchored place name gets invented.
+for _p in (_best, _tease, _cool):
+    ck("only the one skill may be discussed", "Do NOT bring up any other ability" in _p)
+    # ⚠ The fact is written in the third person for the model's benefit and gets echoed back --
+    # "They're not exactly sword-savvy, are they?" sounds like remarking to a bystander.
+    ck("and it is said TO them, not about them", "not about them" in _p)
+ck("no prompt without a skill and a tier",
+   S.build_skill_prompt("skillbest", "human", 7, "swamp", "loyal", "the axe", "", 60) == "")
 ck("a mercenary is still forbidden figures there",
-   "Naming any number is WRONG" in S.build_skills_prompt(
-       "gnome", 7, "swamp", "self_interested", "trading", "a master", "the sword", "a novice"))
+   "Naming any number is WRONG" in S.build_skill_prompt(
+       "skillbest", "gnome", 7, "swamp", "self_interested", "trading", "a master", 60))
 
 print("\n%d failure(s)" % len(fails), fails)
 sys.exit(1 if fails else 0)

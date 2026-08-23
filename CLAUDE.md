@@ -1136,17 +1136,44 @@ volunteering an opinion about your boots out of nowhere is not. Seeded silently,
 character's starting gear reads as ten things just donned — the same trap the inventory watch has.
 Taking something *off* says nothing.
 
+⚠ **Praise and teasing are TWO SEPARATE remarks** (`skillbest` / `skillworst`), rolled
+independently and never both in one turn. One line doing both — *"an expert with the axe but
+hopeless at stealth"* — reads as a performance review rather than as something a companion would
+actually say.
+
 ⚠ **Skills are sent as the game's own NAME and TIER, never a raw number.** Barony's tiers are
 `NOVICE 1 / BASIC 20 / SKILLED 40 / EXPERT 60 / MASTER 80 / LEGENDARY 100` (`stat.hpp:195`) and
 `getSkillLangEntry()` supplies the name, so nothing is invented. A follower quoting *"your axe is
 43"* would be reading a sheet it cannot see; one saying they are **skilled with an axe** is just
 watching them work.
 
-⚠ **It needs a real strength to name.** A fresh character is all zeroes, and *"you are hopeless at
-everything"* is not the line — so it waits until the best skill reaches `SKILL_LEVEL_BASIC`.
+⚠ **TEASING IS SOMETHING YOU DO TO SOMEONE YOU KNOW.** A follower who barely knows this adventurer
+mocking their weakness is not banter, it is contempt — and it would read as the relationship
+system being broken. The tone is chosen server-side from friendship (`SKILL_TEASE_MIN_FRIENDSHIP
+= 25`) and the model is only ever handed one of them. Measured, same weakness, same race:
 
-⚠ **And it must not invent a third skill.** The two ends are all it has been told about; left
-open it adds one and is wrong about it, exactly as an unanchored place name gets invented.
+| | |
+|---|---|
+| friendship 60 | *"Blimey, you're as stealthy as a drunken troll in a tavern!"* |
+| friendship 3 | *"Friend, I've noticed we tend to get into more fights than sneaking past them."* |
+| praise | *"You take that axe to things like a chainsaw on a stormy night!"* |
+
+A mercenary calls it a **liability** and a construct **does not mock at all**, whatever the
+friendship — those allegiances keep their own voice ahead of the warm/cool split.
+
+⚠ **It needs a real strength before either fires.** A fresh character is all zeroes: there is
+nothing to praise, and teasing someone for being bad at everything on floor one is just
+unpleasant. Gated on the best skill reaching `SKILL_LEVEL_BASIC`.
+
+⚠ **Ties are broken at RANDOM, not by index.** Most of a fresh character's skills sit at the same
+value, and always taking the lowest index would mean the same joke about lockpicking every run.
+
+⚠ **It must not invent a second skill.** The one it was handed is all it knows; left open it adds
+another and is wrong about it, exactly as an unanchored place name gets invented.
+
+⚠ **And it speaks TO them, not about them.** The fact is written in the third person for the
+model's benefit and gets echoed straight back — *"They're not exactly sword-savvy, are they?"* —
+which sounds like remarking to a bystander. **0/9** after saying so.
 
 > *"Legendary with sorcery, utterly lacking in shields."* (skeleton)
 > *"A master trader, but dead weight in a fight."* (mercenary gnome)
