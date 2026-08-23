@@ -201,10 +201,35 @@ def main():
                 print("   -> friendship, events, allegiance and the assigned name all restart")
                 print("      at every staircase. The Herx secret (friendship 50 + 4 fights) is")
                 print("      unreachable in real play while this holds.")
-            elif len(newf) > 1:
-                print("   no repeated names -- either identity held, or nothing was named yet.")
-                print("   (an UNNAMED follower cannot be tracked here; talk to one until it")
-                print("    names itself, then take a staircase, and check this section again)")
+            else:
+                # ⚠ Names are the PROOF, but they need the engine to be sending follower_name
+                # AND the follower to have named itself. Without either, fall back to the shape
+                # of the data: the same race getting fresh rows on a later floor is churn in all
+                # but name -- the first real session showed skeleton/skeleton/rat on floor 1 and
+                # skeleton/skeleton/rat again on floor 2 with brand new uids.
+                by_race = {}
+                for r in newf:
+                    by_race.setdefault(r.get("race", "?"), []).append(r)
+                sus = {k: v for k, v in by_race.items()
+                       if len({x.get("floor") for x in v if x.get("floor")}) > 1}
+                if sus:
+                    print("   !! UID CHURN SUSPECTED -- the same race got fresh rows on a later")
+                    print("      floor (no names to confirm with, but this is the shape of it):")
+                    for race, rs in sus.items():
+                        for x in rs:
+                            print(f"      {race:<9} uid {str(x.get('uid')):<6} floor "
+                                  f"{str(x.get('floor')):<4} rolled {x.get('allegiance')}")
+                    alls = {x.get("allegiance") for rs in sus.values() for x in rs}
+                    if len(alls) > 1:
+                        print("      -> allegiance differs between rows: it was RE-ROLLED, which")
+                        print("         only happens when a brand new state row is created.")
+                    print("   -> friendship, events and the assigned name restart each staircase.")
+                elif len(newf) > 1:
+                    print("   no repeated names and no repeated races across floors --")
+                    print("   either identity held, or nothing was named yet.")
+                if not any(r.get("engine_name") for r in newf):
+                    print("   NOTE: no engine_name on any row -- the game binary predates the")
+                    print("   follower_name field, so the name-based proof could not run.")
 
         # --- ⚠ CHATTER VOLUME: the thing most likely to need tuning on a first run ---
         rem = [r for r in recs if r.get("kind") in ("remark", "valuable")]
