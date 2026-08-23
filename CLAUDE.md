@@ -1123,9 +1123,25 @@ needed (drunk, hunger, now water); it is cheap and it always works, unlike namin
 
 ### The rat (easter egg)
 
-Walk a **rat follower** all the way to the Baron — or to the Archmagisters at the very bottom —
-and there is a **50%** chance the boss simply cannot cope with it. One coin flip per boss, win or
-lose, so it cannot be farmed by walking in and out of range.
+Walk a **rat follower** all the way to the Baron and there is a **50%** chance he simply cannot
+cope with it. One coin flip per boss, win or lose, so it cannot be farmed by walking in and out
+of range.
+
+**And then it escalates.** The rat that killed the Baron is *marked*. If **that same rat** — alive,
+still following — reaches the Archmagisters fifteen floors later, there is no roll: it is **100%**,
+and the twins have heard the story. Any *other* rat still gets the ordinary coin flip down there.
+
+⚠ **IDENTITY IS ON THE STAT, NOT THE UID.** Followers are **recreated as new entities on every
+level load** (`game.cpp:2455` copies their stats onto a fresh monster), so a uid does not survive
+a staircase. But `Stat::copyStats()` copies all 32 `MISC_FLAGS` and the name
+(`stat.cpp:641`/`679`), so a flag set at the Baron rides fifteen floors down with the creature.
+`MISC_FLAGS[21]` — indices 1–15 and 17–20 are spoken for.
+
+⚠ **If the rat dies on the way down, the legend dies with it.** That is the stake, and it is free:
+the marker lives on the creature, not in a run-global.
+
+⚠ **The slayer ignores the coin flip AND the already-rolled set**, so it still works if it only
+catches up to the twins after they have been seen once.
 
 **The boss speaks, and then dies.** It is the only line in the mod delivered by a *hostile*, and
 it goes out through the NPC branch — bubble and chat line, none of the follower machinery.
@@ -1170,6 +1186,30 @@ removed, bargain, deny it, lose the thread of a threat, say please) and the mode
 
 He also speaks with **his own canon** — `_lore_key("Baron Herx")` resolves to the individual's
 lore entry, not the generic lich's, via the same `npc_name` routing the named-NPC work established.
+
+#### The second encounter is a different scene
+
+Herx is **ambushed** by something absurd. The twins have **heard** — a rat that killed the Baron
+and then survived fifteen floors is a story that got down here before it did. So they are not
+surprised, they are **resigned**: recognition, not shock, with its own shapes
+(`RATLEGEND_SHAPES`) and its own register.
+
+⚠ **ASK FOR ONE THING, NOT TWO.** Requiring both halves — *"you already knew of it"* AND *"you are
+in no condition to face it"* — got the first and lost the second **entirely**: 8/8 recognised the
+rat, **0/8 conceded**. The recognition comes free from the situation, so only the concession is
+required, and it is pinned to the **END** of the line where it cannot be crowded out. ~6/8 carry
+both after.
+
+> *"You're the Nibbles that brought Baron Herx down, aren't you? I should've known better than to underestimate vermin. Take it away."*
+> *"Baron Herx, undone by vermin... or so the stories told, but we both knew, it's Nibbles."*
+> *"Preposterous, a mere myth, surely an exaggeration — but I have not the strength."*
+> *"Ah, Nibbles. The Baron's executioner."*
+
+⚠ **That 6/8 is a read, not a count.** The scorer said 2/8 — it missed *"have not the strength"*,
+*"taken away"* and the rat's own name as recognition. **Sixth bad probe this session.**
+
+The rat's **name** is passed through when it has one, so the twins can name it — which is what
+turns the joke into a legend.
 
 > *"Is that...a rat?! Can you all see this?! It's impossible! I have wards, I have incantations, I have—!"*
 > *"Please... remove it. I'll give you my most powerful artifact, everything in my vaults... just get rid of it."*

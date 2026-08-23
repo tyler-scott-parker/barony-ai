@@ -1095,6 +1095,47 @@ RATFEAR_ANGLE = (
     "are not in on this. Do NOT threaten the adventurer; you have stopped caring about them "
     "entirely. The rat is the only thing in the world right now.\n")
 
+# ⚠ THE SECOND ENCOUNTER IS A DIFFERENT SCENE. Herx is ambushed by something absurd; the twins
+# have HEARD. A rat that killed the Baron and then survived fifteen floors is a story that got
+# down here before it did, and they are not being surprised -- they are being confronted with
+# something they already decided they could not face. Recognition, not shock.
+RATLEGEND_SHAPES = [
+    "Name what it did to the Baron, and make clear you already knew the story before it walked in.",
+    "Concede. You are not going to fight this, and you would rather say so than be shown.",
+    "Ask the adventurer to take it away, as one professional to another. You are past pretending.",
+    "Say what the pair of you have been telling each other about it since the story reached you.",
+    "Try to argue that the story must be exaggerated, and hear how it sounds as you say it.",
+    "Address the rat directly. Not the adventurer — the rat.",
+]
+
+def build_ratlegend_prompt(boss_name, race, floor, map_name, rat_name=""):
+    head, body, limits = _persona(race, True, floor, map_name, npc_name=_lore_key(boss_name),
+                                  books=False, budget=6)
+    named = (" — they call it " + rat_name + " — ") if rat_name else " "
+    return (head
+            + f"YOU ARE {boss_name}, in the Sanctum at the very bottom of the world, and an "
+              "adventurer has come to end you.\n"
+            + body
+            + "They have a RAT with them" + named + "and you know exactly which rat it is.\n"
+            + "⚠ THIS IS THE ONE THAT KILLED BARON HERX. The story reached you long before they "
+              "did: the Baron of the mines, undone by vermin. You and your sibling have discussed "
+              "it. You did not entirely believe it. It is standing in your Sanctum now.\n"
+            + "You are not surprised — you are RESIGNED. Whatever you are, whatever you built "
+              "here, you are in no condition to face that thing and you know it. Say ONE line as "
+              "someone meeting a reputation they cannot argue with.\n"
+            + "⚠ Do NOT play it for laughs and do NOT be witty about it — you are not in on this. "
+              "Do NOT threaten the adventurer, and do NOT pretend confidence you do not have.\n"
+            # ⚠ ASK FOR ONE THING, NOT TWO. Requiring both halves -- "you already knew of it" AND
+            # "you are in no condition to face it" -- got the first and lost the second entirely:
+            # 8/8 recognised the rat, 0/8 conceded. The recognition comes free from the situation
+            # above, so only the concession is asked for, and it is pinned to the END of the line
+            # where it cannot be crowded out.
+            + "Your line must END by conceding that you cannot face it — that you are done, or "
+              "that you want it taken away, or that you will not fight. That concession is the "
+              "point of the line; everything before it is preamble.\n"
+            + "THE SHAPE YOUR LINE TAKES: " + random.choice(RATLEGEND_SHAPES) + "\n"
+            + "Respond with ONLY one short spoken line. No narration, no quotes, no JSON.")
+
 def build_ratfear_prompt(boss_name, race, floor, map_name):
     head, body, limits = _persona(race, True, floor, map_name, npc_name=_lore_key(boss_name),
                                   books=False, budget=6)
@@ -4151,12 +4192,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
             # follower state is touched -- the speaker here is the BOSS, not a follower.
             if data.get("ratfear"):
                 boss_name = (data.get("boss") or "the Baron").strip()
-                prompt_x = build_ratfear_prompt(boss_name, race, floor, map_name)
+                # ⚠ The legend variant is a different scene: they have HEARD, and they concede.
+                if data.get("legend"):
+                    prompt_x = build_ratlegend_prompt(boss_name, race, floor, map_name,
+                                                      (data.get("ratname") or "").strip())
+                else:
+                    prompt_x = build_ratfear_prompt(boss_name, race, floor, map_name)
                 raw_x = ask_ollama(prompt_x)
                 line_x = (raw_x or "").strip().strip('"').split("\n")[0][:200]
                 print(f"[SERVICE] -> RATFEAR {boss_name}: {line_x}")
                 logrec("ratfear", boss=boss_name, race=race, floor=floor, map=map_name,
-                       player=player, reply=line_x[:200])
+                       player=player, legend=bool(data.get("legend")) or None,
+                       ratname=(data.get("ratname") or None), reply=line_x[:200])
                 tts_emit(line_x, race, uid, "npc", boss_name, player)
                 return self._send_json({"reply": line_x, "action": "NONE"})
 

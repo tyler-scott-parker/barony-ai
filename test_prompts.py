@@ -573,5 +573,36 @@ ck("no two shapes are the same", len(set(S.RATFEAR_SHAPES)) == len(S.RATFEAR_SHA
 ck("the twins get it too", "YOU ARE Erudyce" in
    S.build_ratfear_prompt("Erudyce", "frosty lich", 35, "Sanctum"))
 
+# --- the legend: the same rat, fifteen floors later --------------------------------------------
+# ⚠ IDENTITY IS ON THE STAT, NOT THE UID. Followers are RECREATED as new entities on every level
+# load (game.cpp:2455 copies their stats onto a fresh monster), so a uid does not survive a
+# staircase -- but Stat::copyStats() copies all 32 MISC_FLAGS and the name (stat.cpp:641/679),
+# so a flag set at the Baron rides fifteen floors down with the creature. If it dies on the way,
+# the legend dies with it.
+_lg = S.build_ratlegend_prompt("Erudyce", "frosty lich", 35, "Sanctum", "Nibbles")
+ck("the twins know which rat it is", "THIS IS THE ONE THAT KILLED BARON HERX" in _lg)
+ck("and they heard before it arrived", "reached you long before" in _lg)
+ck("the rat is named when it has one", "they call it Nibbles" in _lg)
+ck("and gracefully unnamed when it does not",
+   "they call it" not in S.build_ratlegend_prompt("Erudyce", "frosty lich", 35, "Sanctum"))
+ck("they are resigned, not surprised", "RESIGNED" in _lg)
+ck("and it is still played straight", "Do NOT play it for laughs" in _lg)
+
+# ⚠ ASK FOR ONE THING, NOT TWO. Requiring both "you already knew of it" AND "you cannot face it"
+# got the first and lost the second entirely -- 8/8 recognised the rat, 0/8 conceded. Recognition
+# comes free from the situation, so only the concession is required, pinned to the END of the
+# line where it cannot be crowded out.
+ck("only the concession is required", "must END by conceding" in _lg)
+ck("and it is named as the point of the line", "point of the line" in _lg)
+
+# Same server-chosen-shape treatment as the Baron's version, for the same reason.
+ck("the legend has its own shapes", len(S.RATLEGEND_SHAPES) >= 5)
+ck("which are not the Baron's", not set(S.RATLEGEND_SHAPES) & set(S.RATFEAR_SHAPES))
+ck("and one is in the prompt", any(sh in _lg for sh in S.RATLEGEND_SHAPES))
+# The two encounters are genuinely different scenes, not one prompt with a flag.
+ck("the Baron is ambushed, the twins are confronted",
+   "genuinely, helplessly afraid" in S.build_ratfear_prompt("Baron Herx", "lich", 20, "Boss")
+   and "genuinely, helplessly afraid" not in _lg)
+
 print("\n%d failure(s)" % len(fails), fails)
 sys.exit(1 if fails else 0)
