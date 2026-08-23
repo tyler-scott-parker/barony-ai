@@ -202,5 +202,14 @@ for _ in range(400):
         saw_both += 1
 ck("a secret and a sabotage never share a reply", saw_both == 0, saw_both)
 
+# --- a stranded sabotage must not survive into the next run -----------------------------
+# ⚠ LAST_SABOTAGE is stamped while the prompt is built and popped only after ask_ollama
+# returns, so any generation that raises (a 60s timeout; co-op serialises on one GPU) strands
+# it. reset_run cleared every other per-run latch but not this one, and Barony recycles uids --
+# so a fresh run's follower could pop it and start a countdown nobody provoked.
+S.LAST_SABOTAGE[4242] = "minotaur"
+S.reset_run()
+ck("a stranded sabotage does not survive new_run", 4242 not in S.LAST_SABOTAGE)
+
 print("\n%d failure(s)" % len(fails), fails)
 sys.exit(1 if fails else 0)

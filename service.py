@@ -1126,6 +1126,13 @@ def reset_run():
     SABOTAGE_STATE["fog_floors"].clear()
     GUARD_STATE.update({"minotaur": False, "sokoban": False})
     LAST_BOON.clear()
+    # ⚠ LAST_SABOTAGE is per-run too, and leaking it is the worst of the three to leak: it is
+    # the only thing that can actively cost the player the run. It is stamped while the prompt
+    # is built and popped only after ask_ollama returns, so any generation that raises (a 60s
+    # Ollama timeout is the realistic one, and co-op serialises replies on one GPU) strands a
+    # "minotaur" against that uid. Barony recycles uids across runs, so the next run's follower
+    # could pop it and start a countdown nobody provoked -- on floor 1, or in town.
+    LAST_SABOTAGE.clear()
     npc_state.clear()
     PERSISTENT_IDENTITY.clear()
     _NAMES_TAKEN.clear()   # names actually revealed are held by name_history.json instead
@@ -1698,11 +1705,21 @@ def _boon_section(uid, st, race_l, floor, player=0):
             + iname + ". Offer it in one short line, with a plausible reason you have it.\n")
 
 def _secret_section(uid, st, race, says, floor=0):
+    # What this follower has ALREADY told stays in the prompt as a consistency reminder -- but
+    # it must NOT stop a different boss's secret being offered.
+    #
+    # ⚠ This used to return early on the first match, which silently closed the Archmagister
+    # arc for the followers most likely to carry it. Herx is told on floor <=20 and the twins
+    # only from floor 25, and the twins gate is strictly harder (friendship 60 / 6 fights
+    # against 50 / 4) -- so a follower who has passed the twins gate has almost always passed
+    # the Herx one already, and telling you about the Baron locked them out of the endgame for
+    # the rest of the run. Measured before this: 0 twins offers in 200 tries with the gate open.
+    told = ""
     for b, state in SECRET_STATE.items():
         if state["revealed"] and state["uid"] == uid:
-            return ("YOU HAVE ALREADY TOLD THIS ADVENTURER WHAT YOU KNOW ABOUT "
-                    + BOSS_SECRETS[b]["subject"].upper() + ": "
-                    + _herx_pool(state.get("is_false"), b)[state["variant"]]["truth"] + "\n")
+            told += ("YOU HAVE ALREADY TOLD THIS ADVENTURER WHAT YOU KNOW ABOUT "
+                     + BOSS_SECRETS[b]["subject"].upper() + ": "
+                     + _herx_pool(state.get("is_false"), b)[state["variant"]]["truth"] + "\n")
     # ⚠ Whichever boss the player actually asked about comes FIRST. Measured: asking "what do
     # you know about the Archmagisters?" deep in a run offered the HERX secret, the model quite
     # reasonably answered the question instead, and the offer was dropped -- so the arc could
@@ -1717,13 +1734,13 @@ def _secret_section(uid, st, race, says, floor=0):
             boss = b
             break
     if not boss:
-        return ""
+        return told
     is_spy = st.get("allegiance") == "spy"
     pool = _herx_pool(is_spy, boss)
     vi = random.randrange(len(pool))
     SECRET_STATE[boss]["pending"][uid] = (vi, is_spy)
     logrec("herx", stage="offered", uid=uid, is_false=is_spy, boss=boss)
-    return ("A SECRET YOU HAVE CARRIED: You know one true thing about "
+    return told + ("A SECRET YOU HAVE CARRIED: You know one true thing about "
             + BOSS_SECRETS[boss]["subject"] + ", "
             "learned long ago and never spoken. You trust this adventurer enough to tell them now. "
             "Share it in your own words, plainly, as something you know for certain: "
@@ -2568,14 +2585,24 @@ def herx_secret_field():
     The twins add a third and fourth: "<debuff>:<uid>:twins:<who>", where `who` is 1 for
     Erudyce and 2 for Orpheus, and ⚠ a NEGATIVE debuff is a BUFF -- a spy's lie at the endgame
     costs you rather than merely wasting your time."""
-    st = SECRET_STATE["herx"]
-    if st["revealed"]:
-        d = 0 if st.get("is_false") else HERX_SECRET_VARIANTS[st["variant"]]["debuff"]
-        return "%d:%d" % (d, st["uid"])
+    # ⚠ The twins are checked FIRST. The field carries one secret, and Herx used to win it
+    # forever -- so a successfully told endgame secret was silently discarded in exactly the
+    # runs where the player had done the most work (two followers, both arcs earned).
+    #
+    # Ordering it this way is safe rather than merely preferable: the twins secret cannot be
+    # told before floor 25 (TWINS_MIN_FLOOR) and floor 20 is Herx's boss floor on every route
+    # to Hamlet, so Herx has already spawned -- and initLich has already read and applied his
+    # debuff -- before this can ever switch over. The engine keeps the two in separate globals
+    # (mymod_herx_debuff / mymod_twins_debuff, mymod.cpp:1721), so the value it latched for
+    # Herx is not disturbed by the field changing shape afterwards.
     st = SECRET_STATE["twins"]
     if st["revealed"]:
         v = _herx_pool(st.get("is_false"), "twins")[st["variant"]]
         return "%d:%d:twins:%d" % (v["debuff"], st["uid"], v.get("who", 1))
+    st = SECRET_STATE["herx"]
+    if st["revealed"]:
+        d = 0 if st.get("is_false") else HERX_SECRET_VARIANTS[st["variant"]]["debuff"]
+        return "%d:%d" % (d, st["uid"])
     return ""
 
 class Handler(http.server.BaseHTTPRequestHandler):

@@ -91,5 +91,37 @@ ck("a new run reopens both",
    not S.SECRET_STATE["herx"]["revealed"] and not S.SECRET_STATE["twins"]["revealed"])
 ck("and HERX_STATE still aliases the same dict", S.HERX_STATE is S.SECRET_STATE["herx"])
 
+# --- 5. telling one boss's secret must not close the other's ----------------------------
+# ⚠ Found by audit, not by play. _secret_section returned early on the first ALREADY-TOLD
+# match, so a follower who told you about Herx could never be offered the twins -- and since
+# the twins gate is strictly harder than Herx's, that is precisely the follower who qualifies.
+# The gate said open (checked above); the live path offered 0 in 200.
+st = ready(50)
+S.SECRET_STATE["herx"].update({"revealed": True, "variant": 0, "uid": 50, "is_false": False})
+_offers = _reminders = 0
+for _ in range(200):
+    _out = S._secret_section(50, st, "human", "what do you know about the Archmagisters?", 30)
+    if "A SECRET YOU HAVE CARRIED" in _out: _offers += 1
+    if "ALREADY TOLD" in _out: _reminders += 1
+    S.SECRET_STATE["twins"]["pending"].clear()
+ck("having told Herx does not close the twins in the LIVE path", _offers > 0, _offers)
+ck("and the consistency reminder is still carried every time", _reminders == 200, _reminders)
+
+# --- 6. both secrets told: the twins must still reach the engine ------------------------
+# ⚠ The field carries one secret and Herx used to win it forever, so a successfully told
+# endgame secret was silently discarded. Safe to order twins first: they cannot be told before
+# floor 25 and Herx spawns on floor 20, so initLich has already applied his.
+for b in S.SECRET_STATE:
+    S.SECRET_STATE[b].clear(); S.SECRET_STATE[b].update(S._fresh_secret_state())
+S.SECRET_STATE["herx"].update({"revealed": True, "variant": 2, "uid": 9, "is_false": False})
+ck("Herx alone still reports the two-field form",
+   S.herx_secret_field() == "%d:9" % S.HERX_SECRET_VARIANTS[2]["debuff"], S.herx_secret_field())
+S.SECRET_STATE["twins"].update({"revealed": True, "variant": 3, "uid": 222, "is_false": False})
+_f = S.herx_secret_field()
+ck("with both told, the twins field is the one sent", ":twins:" in _f, _f)
+ck("and it names the right twin",
+   _f == "%d:222:twins:%d" % (S.TWINS_SECRET_VARIANTS[3]["debuff"],
+                              S.TWINS_SECRET_VARIANTS[3]["who"]), _f)
+
 print("\n%d failure(s)" % len(fails), fails)
 sys.exit(1 if fails else 0)
