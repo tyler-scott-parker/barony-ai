@@ -403,6 +403,12 @@ REMARK_SITUATION = {
     "dig": ("A wall has just come down. Somebody has decided the way through is the way THROUGH, "
             "and there is now a hole in this dungeon that was not there a moment ago."),
     "fountain": "FOUNTAIN",   # replaced per effect below; see FOUNTAIN_SITUATION
+    # ⚠ Only ever sent for an IDENTIFIED item. An unidentified curse is something the game
+    # deliberately hides until it bites, and a follower announcing it would be free
+    # identification -- the same leak the appraisal ceiling exists to close.
+    "blessed": ("They have just put on {look} — their {slot} now — and it is {blessing}. That is "
+                "plain to see on it, and you can see it."),
+    "strangle": "STRANGLE",   # replaced per victim below; see STRANGLE_SITUATION
     "biome": "BIOME",         # replaced per region below; see BIOME_SITUATION
     "bridge": "BRIDGE",       # replaced below; the hunger line depends on the map flag
     # Routed to build_skill_prompt, which needs the skill/tier pair; these exist so the handler
@@ -512,6 +518,20 @@ REMARK_ANGLE = {
         "bound": "State the outcome.",
         "machine": "State the outcome.",
         None: "React as YOUR kind would to the thing that was hunting you lying dead.",
+    },
+    "blessed": {
+        "self_interested": "Blessed gear is worth more and cursed gear is a client about to become a problem. Say which you are looking at.",
+        "fearful": "Good luck or bad luck, and you have opinions about both. Say which this is.",
+        "bound": "Note the state of the item. Fortune is not a thing you believe in.",
+        "machine": "Note the state of the item. Fortune is not a thing you believe in.",
+        None: "React as YOUR kind would to a thing that has been blessed or cursed — reverence, superstition, dark amusement, or a practical word about what it will mean.",
+    },
+    "strangle": {
+        "self_interested": "This is your client throttling themselves with jewellery, and you are the one who has to keep them alive. Say so.",
+        "fearful": "You are watching something strangle them and you cannot stop it. Say so.",
+        "bound": "State what the amulet is doing to them.",
+        "machine": "State what the amulet is doing to them.",
+        None: "React to what you are watching happen at their throat, right now.",
     },
     "dig": {
         "self_interested": "Doors are free and walls are work. Say what you make of the effort.",
@@ -949,6 +969,25 @@ BIOME_SITUATION = {
     "crystal_caves":  "You are in the Crystal Caves: glass underfoot, light where there should be none, and everything ringing faintly.",
     "citadel":        "You are in the Arcane Citadel, where the Guild built upward and did not care what it cost.",
 }
+# ⚠ The amulet of strangulation is not the same event for everyone, and the game says so:
+# it forces itself cursed on equip (items.cpp:2963) and then chokes you every few seconds --
+# EXCEPT a SKELETON, whom the damage loop skips outright (entity.cpp:7724), and a SUCCUBUS or
+# INCUBUS, who take the damage but FEED on it, gaining mana: "You feel energized?" (lang 3358).
+STRANGLE_SITUATION = {
+    "other": ("They have just put an amulet round their neck and it has CONSTRICTED — it is "
+              "choking them, they cannot get it off, and it is going to keep doing that. "
+              "This is happening RIGHT NOW."),
+    # ⚠ Say the harmlessness twice. "Nothing has happened... squeezing bare bone" read as damage
+    # to one follower, which answered "your neck is disintegrating!" -- the opposite of the point.
+    "skeleton": ("They have just put an amulet round their neck and it has constricted — and it "
+                 "is doing NOTHING to them. They are a SKELETON: no throat to close, no breath "
+                 "to stop. It tightens on bare bone and that is the end of it. They are in no "
+                 "danger from it at all, and it is faintly ridiculous to watch."),
+    "demon": ("They have just put an amulet round their neck and it has constricted — it is "
+              "throttling them, and they are ENJOYING it. Whatever they are, being choked is "
+              "feeding them; you can see the strength going into them as it tightens."),
+}
+
 FOUNTAIN_SITUATION = {
     "succubus":       ("THEY drank from the fountain — this adventurer, not you — and something CAME OUT OF IT — a succubus, "
                        "pulled up out of the water, and it is here now."),
@@ -973,6 +1012,11 @@ def build_remark_prompt(kind, race, floor, map_name, allegiance="loyal", ctx=Non
         situation = BIOME_SITUATION.get(region)
         if not situation:
             return ""      # nowhere worth remarking on; better silent than generic
+    if kind == "strangle":
+        situation = STRANGLE_SITUATION.get(c.get("victim") or "other",
+                                           STRANGLE_SITUATION["other"])
+    if kind == "blessed":
+        situation = situation.replace("{blessing}", (c.get("blessing") or "cursed"))
     if kind == "fountain":
         situation = FOUNTAIN_SITUATION.get(c.get("effect") or "potion",
                                            FOUNTAIN_SITUATION["potion"])
@@ -4111,6 +4155,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                          "slot": (data.get("slot") or "").strip(),
                          "band": (data.get("band") or "").strip(),
                          "effect": (data.get("effect") or "").strip(),
+                         "blessing": (data.get("blessing") or "").strip(),
+                         "victim": (data.get("victim") or "").strip(),
                          "nohunger": bool(data.get("nohunger"))})
                 if not prompt_r:
                     return self._send_json({"reply": "", "action": "NONE"})

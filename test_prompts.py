@@ -93,7 +93,7 @@ ck("the mercenary does not tout for the appraisal here",
 for k in ("chest", "drunk", "mimic", "cleared", "swimming", "arrowtrap", "food", "kill",
           "death", "bossfight", "bossdown", "area", "minotaur", "minotimer", "minotaurdown",
           "equip", "equiplegend", "gift", "wealth", "naked", "levitate", "boulderhit",
-          "boulderpush", "dig"):
+          "boulderpush", "dig", "blessed"):
     pr = S.build_remark_prompt(k, "goblin", 7, "swamp", "loyal")
     ck("the %s remark is a short form" % k, tok(pr) < 500, tok(pr))
     ck("the %s remark knows where it is" % k, "Swamp" in pr or "swamp" in pr)
@@ -132,7 +132,8 @@ ck("the drunk situation names no topic to avoid",
 for k in ("chest", "drunk", "mimic", "cleared", "swimming", "arrowtrap", "food", "kill",
           "death", "bossfight", "bossdown", "area", "minotaur", "minotimer", "minotaurdown",
           "equip", "equiplegend", "gift", "wealth", "naked", "levitate", "boulderhit",
-          "boulderpush", "dig", "fountain", "biome", "bridge", "skillbest", "skillworst"):
+          "boulderpush", "dig", "fountain", "biome", "bridge", "blessed", "strangle",
+          "skillbest", "skillworst"):
     ck("no spy-specific %s angle to leak" % k, "spy" not in S.REMARK_ANGLE[k])
     ck("every %s angle has a default" % k, S.REMARK_ANGLE[k].get(None))
 ck("a fearful follower dreads chests", "Traps" in S.REMARK_ANGLE["chest"]["fearful"])
@@ -510,6 +511,39 @@ ck("and never when it is not", "holds hunger off" not in _br_off)
 # here? This be mine place!". The positive role statement that fixed the swimming angle now lives
 # in the shared tail: 0/5 territorial after. FOURTH place this same fix has paid.
 ck("every remark names the follower's role", "the one you follow and travel with" in S.REMARK_TAIL)
+
+# --- blessed, cursed, and the amulet of strangulation ------------------------------------------
+# ⚠ Beatitude is only ever sent for an IDENTIFIED item. An unidentified curse is something the
+# game deliberately hides until it bites, and a follower announcing it would be free
+# identification -- the same leak the appraisal ceiling exists to close. (Enforced engine-side;
+# this asserts the wording assumes it is visible.)
+_bl = S.build_remark_prompt("blessed", "human", 7, "swamp", "loyal",
+                            {"look": "steel breastpiece", "slot": "armour", "blessing": "blessed"})
+_cu = S.build_remark_prompt("blessed", "human", 7, "swamp", "loyal",
+                            {"look": "iron helm", "slot": "helm", "blessing": "cursed"})
+ck("a blessing is named", "it is blessed" in _bl)
+ck("so is a curse", "it is cursed" in _cu)
+ck("and it is plain to see", "plain to see" in _bl)
+ck("an unstated blessing does not leave a placeholder",
+   "{blessing}" not in S.build_remark_prompt("blessed", "human", 7, "swamp", "loyal", {}))
+
+# ⚠ The amulet of strangulation is NOT the same event for everyone, and the game says so: it
+# forces itself cursed on equip (items.cpp:2963) then chokes you every few seconds -- EXCEPT a
+# SKELETON, whom the damage loop skips outright (entity.cpp:7724), and a SUCCUBUS or INCUBUS, who
+# take the damage but FEED on it for mana ("You feel energized?", lang 3358).
+ck("all three victims are distinguished",
+   set(S.STRANGLE_SITUATION) == {"other", "skeleton", "demon"})
+ck("an ordinary neck is in trouble", "RIGHT NOW" in S.STRANGLE_SITUATION["other"])
+ck("a skeleton has no throat to close", "no throat to close" in S.STRANGLE_SITUATION["skeleton"])
+# ⚠ Said twice on purpose: "nothing has happened... squeezing bare bone" read as damage, and a
+# follower answered "your neck is disintegrating!" -- the opposite of the point. 0/5 after.
+ck("and the harmlessness is stated twice",
+   "doing NOTHING" in S.STRANGLE_SITUATION["skeleton"]
+   and "no danger from it at all" in S.STRANGLE_SITUATION["skeleton"])
+ck("a succubus feeds on it", "ENJOYING it" in S.STRANGLE_SITUATION["demon"])
+ck("an unknown victim falls back to the dangerous case",
+   "RIGHT NOW" in S.build_remark_prompt("strangle", "human", 7, "swamp", "loyal",
+                                        {"victim": "gnome"}))
 
 print("\n%d failure(s)" % len(fails), fails)
 sys.exit(1 if fails else 0)

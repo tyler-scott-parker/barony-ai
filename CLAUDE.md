@@ -1121,6 +1121,65 @@ get **me** out of the water"* — writing itself as the one drowning. Every haza
 says "this adventurer, not you": **0/10** after. Third time this exact clarification has been
 needed (drunk, hunger, now water); it is cheap and it always works, unlike naming a topic.
 
+### ⚠ Remark cadence: three tiers, because one cooldown was the wrong shape
+
+With **31 kinds** of remark, a single shared cooldown either lets flavour crowd out the things
+that matter or makes a boulder to the face wait twenty seconds for its turn. The tier says how
+**urgent a reaction is**, which is a different question from how important the event was.
+
+| tier | gap | combat | what belongs here |
+|---|---|---|---|
+| **REACTIVE** | **2s** | always | it just happened TO them, visibly, and a late line is nonsense |
+| **EVENT** | 15s | per-kind | worth saying, not urgent |
+| **IDLE** | 60s | per-kind | pure flavour that could have been said at any point |
+
+Plus a **5s spacing** between any two *non-reactive* lines, so two remarks never land back to back.
+
+⚠ **Tiers do not block one another.** An idle line about the swamp must never be the reason a
+mimic goes unremarked — so REACTIVE ignores the spacing, the combat guard and the other tiers
+entirely, and only holds a 2s gap to stop one event producing two lines.
+
+| | |
+|---|---|
+| **REACTIVE** | `boulderhit` `arrowtrap` `mimic` `minotaur` `bossfight` `death` `naked` `fountain` `strangle` `swimming`(lava) |
+| **EVENT** | `bossdown` `minotaurdown` `minotimer` `area` `cleared` `gift` `equip` `equiplegend` `blessed` `wealth` `hunger` `drunk` `levitate` `dig` `bridge` `swimming`(water) |
+| **IDLE** | `biome` `food` `chest` `valuable` `kill` `boulderpush` `skillbest` `skillworst` |
+
+⚠ **The same event can sit in two tiers.** `swimming` is REACTIVE in lava and EVENT in water:
+one is burning them every tick, the other is a paddle. The tier is chosen at the call site from
+the actual situation, not fixed per kind.
+
+⚠ **`death` bypasses the gate entirely** — it always speaks — **but it still stamps the clocks**,
+or an idle line about the scenery lands on the corpse a second later.
+
+**The conversation slot is what actually serialises generation** (`mymod_convo[pnum].inflight`);
+the gaps above are pacing, not concurrency control. That distinction is why the numbers can be
+this loose without anything overlapping.
+
+#### Blessed, cursed, and the amulet of strangulation
+
+⚠ **Beatitude is only reported for an IDENTIFIED item.** An unidentified curse is something the
+game deliberately hides until it bites, and a follower announcing it would be free identification
+— the same leak the appraisal ceiling exists to close.
+
+⚠ **The amulet of strangulation is NOT the same event for everyone**, and the game says so. It
+forces itself cursed on equip (`items.cpp:2963`), then chokes you every few seconds — **except**:
+
+| | |
+|---|---|
+| **SKELETON** | the damage loop skips it outright (`entity.cpp:7724`) — no throat, no breath |
+| **SUCCUBUS / INCUBUS** | they take the damage but **feed** on it, gaining mana — *"You feel energized?"* (lang 3358, `entity.cpp:7735`) |
+| everyone else | it chokes them, and it can kill (*"choked to death"*) |
+
+⚠ **The harmless case has to say so twice.** *"Nothing has happened… squeezing bare bone"* read as
+damage, and a follower answered *"your neck is disintegrating!"* — the exact opposite of the point.
+With `doing NOTHING` and `in no danger from it at all` both present: **0/5**.
+
+> *"This amulet's got a serious sense of humor."* (skeleton wearer) · *"Me think it...harmless."*
+> *"Oooh, you like dis, yeah? You strong now!"* (goblin, succubus wearer)
+> *"you gonna choke yerself, stupid!"* (ordinary wearer)
+> *"Ugga ugga! You wear curse, human!"* · *"that blessed leather'll keep our hides intact"*
+
 #### Biomes, digging, bridges, and fountains
 
 | kind | fires on | |
