@@ -351,8 +351,11 @@ REMARK_SITUATION = {
     # engine derives it from the player's own checkEnemy going quiet. See mymod_remarkTick.
     "cleared": ("Nothing hostile is left alive on this floor. It is quiet — properly quiet — "
                 "for the first time since you came down here, and you can both feel it."),
+    # Replaced by SWIM_SITUATION below -- kept as the fallback for a payload with no medium.
     "swimming": ("They have waded in and are swimming. You are watching this adventurer paddle "
                  "about in dungeon water with all their gear on."),
+    "kill": ("Between you, you have just put down {look}. It is dead on the floor in front of "
+             "you and the fight is off you for the moment."),
     "arrowtrap": ("An arrow trap has just gone off and put a shaft in them. They are hurt and "
                   "there may be more of it. This is happening RIGHT NOW.\n"
                   "Do NOT claim you warned them and do NOT say you saw it coming — you did not."),
@@ -411,6 +414,13 @@ REMARK_ANGLE = {
         "bound": "You do not eat. Note it without interest.",
         "machine": "You do not eat. Note it without interest.",
         None: "React as YOUR kind would to that particular food — appetite, disgust, or a passing opinion. Keep it small; it is only a scrap of food.",
+    },
+    "kill": {
+        "self_interested": "One more thing that will not be collecting on your contract. Say it dryly.",
+        "fearful": "It is dead and you are not. Say so — the relief is the whole of it.",
+        "bound": "Note the kill. It is a fact, not an achievement.",
+        "machine": "Note the kill. It is a fact, not an achievement.",
+        None: "React as YOUR kind would to a fresh corpse — satisfaction, appetite, contempt, or a word about how it fought. Keep it to a breath; the next one may be along shortly.",
     },
     "chest": {
         "self_interested": "You are already working out what the take is worth and what your share of it looks like.",
@@ -496,6 +506,61 @@ def _remark_head(race, floor, map_name):
             + body)
 
 REMARK_TAIL = "Respond with ONLY one short spoken line. No narration, no quotes, no JSON."
+
+# ---- Water, lava, and the two races that water hurts ---------------------------------------
+# ⚠ isPlayerSwimming() is TRUE IN LAVA TOO (actplayer.cpp:3616), so a single "they are swimming"
+# line had a follower admiring the player's stroke while they burned. And the game states the
+# race-specific harm outright, so none of this is invented:
+#
+#   vampire in water    lang 3183  "Your flesh sears in pain as you make contact with the water!"
+#   automaton in water  lang 3702  "Cool water is flooding your boiler!"   (HUNGER -= 25)
+#   automaton in lava   lang 3703  "The lava overheats your boiler!"
+#   anyone in lava      lang 573   "You've fallen in boiling lava!"
+#
+# ⚠ The automaton case is the SAME boiler the hunger remarks read -- water drains it toward
+# CRITICAL and lava drives it toward SUPERHEATED -- so the follower shouts about the boiler,
+# and food language is forbidden there exactly as it is in the hunger block.
+SWIM_SITUATION = {
+    ("water", ""): ("They have waded in and are swimming. You are watching this adventurer "
+                    "paddle about in dungeon water with all their gear on."),
+    ("water", "vampire"): ("THEY have gone into the water — this adventurer, not you — and the "
+                           "water is BURNING them. THEIR flesh is searing where it touches. "
+                           "Plain water does that to them, and they are still in it. You are "
+                           "on dry ground, watching it happen to them."),
+    ("water", "automaton"): ("THEY have gone into the water — this adventurer, not you — and "
+                             "THEY ARE AN AUTOMATON. The cold is flooding THEIR boiler and "
+                             "putting THEIR fire out; every moment in there takes more of it. "
+                             "You have no boiler and you are not in the water.\n"
+                             "⚠ They do NOT eat and they do NOT get hungry. Do NOT mention "
+                             "food, hunger, meals or a stomach — this is a machine being "
+                             "quenched. Speak about the boiler, the fire, the cold or the water."),
+    ("lava", ""): ("THEY are IN LAVA — this adventurer, not you. Molten rock, burning them "
+                   "alive while you watch from safety. This is happening RIGHT NOW."),
+    ("lava", "vampire"): ("THEY are IN LAVA — this adventurer, not you. Molten rock, burning "
+                          "them alive while you watch from safety. This is happening RIGHT NOW."),
+    ("lava", "automaton"): ("THEY are IN LAVA — this adventurer, not you — and THEY ARE AN "
+                            "AUTOMATON. It is overheating THEIR boiler past what it can take, "
+                            "on top of burning them. This is happening RIGHT NOW.\n"
+                            "⚠ They do NOT eat and they do NOT get hungry. Do NOT mention food, "
+                            "hunger or a stomach. Speak about the heat, the boiler or the "
+                            "pressure."),
+}
+SWIM_ANGLE_HAZARD = ("Get them OUT. This is not a comment on the scenery — say the thing that "
+                     "makes them move. This is YOUR adventurer, the one you follow and travel "
+                     "with, and you are speaking to them.")
+
+def build_swim_prompt(race, floor, map_name, allegiance="loyal", medium="water", hazard=""):
+    key = (medium or "water", hazard or "")
+    situation = SWIM_SITUATION.get(key) or SWIM_SITUATION[("water", "")]
+    # A hazard is not scenery: the angle stops being "react as your kind would" and becomes
+    # "get them out", because that is the only sane reaction to someone dissolving.
+    if key == ("water", ""):
+        angle = remark_angle("swimming", allegiance)
+    else:
+        angle = SWIM_ANGLE_HAZARD
+    numbers = MERC_NO_NUMBERS if allegiance == "self_interested" else ""
+    return (_remark_head(race, floor, map_name)
+            + situation + "\n" + angle + "\n" + numbers + REMARK_TAIL)
 
 def build_hunger_prompt(state, race, floor, map_name, allegiance="loyal", blood=False):
     situation = HUNGER_SITUATION.get(state)
@@ -3537,8 +3602,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 _al = st_r.get("allegiance", "loyal")
                 if _al == "spy":
                     _al = "loyal"     # the disguise holds here too
-                prompt_r = build_remark_prompt(remark, race, floor, map_name, _al,
-                                               {"look": (data.get("look") or "").strip()})
+                if remark == "swimming":
+                    prompt_r = build_swim_prompt(race, floor, map_name, _al,
+                                                 (data.get("medium") or "water").strip(),
+                                                 (data.get("hazard") or "").strip())
+                else:
+                    prompt_r = build_remark_prompt(remark, race, floor, map_name, _al,
+                                                   {"look": (data.get("look") or "").strip()})
                 raw_r = ask_ollama(prompt_r)
                 line_r = (raw_r or "").strip().strip('"').split("\n")[0][:200]
                 print(f"[SERVICE] -> remark {remark}: {race}: {line_r}")

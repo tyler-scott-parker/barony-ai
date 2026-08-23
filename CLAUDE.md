@@ -1091,6 +1091,52 @@ line is about *that* food.
 > *"Bleed quickly, while I search…"* (skeleton, arrow trap)
 > *"What's a hero without dry boots?"* (kobold, swimming)
 
+#### ⚠ Water is not one situation — and `isPlayerSwimming()` is TRUE IN LAVA
+
+`isPlayerSwimming()` tests `swimmingtiles || lavatiles` (`actplayer.cpp:3616`), so a single
+"they are swimming" line had a follower admiring the player's stroke while they burned alive.
+And two player races are hurt by *ordinary* water. None of this is invented — the game says it:
+
+| | message | mechanic |
+|---|---|---|
+| vampire in water | *"Your flesh sears in pain as you make contact with the water!"* (3183) | damage |
+| **automaton in water** | *"Cool water is flooding your boiler!"* (3702) | **`HUNGER -= 25`** (`actplayer.cpp:9542`) |
+| **automaton in lava** | *"The lava overheats your boiler!"* (3703) | drives the boiler the other way |
+| anyone in lava | *"You've fallen in boiling lava!"* (573) | damage |
+
+⚠ **The automaton cases are the SAME boiler the hunger remarks read.** Water drains it toward
+`CRITICAL`, lava pushes it toward `SUPERHEATED` — so those two situations forbid food language
+exactly as the hunger block does, and the follower shouts about the fire going out, not about
+catching a chill. Measured across 6 races: **0/6 food language, 6/6 told them to get out**.
+
+> *"OUT! COLD STOP FIRE!"* (troll) · *"GET OUT THE BOILER'S FREEZING!"* (rat)
+> *"Boiler's bursting!"* (skeleton, in lava) · *"The lava's eating your boots off!"*
+
+⚠ **A hazard is not scenery**, so the angle stops being *"react as your kind would to water"* and
+becomes **"get them OUT"** — the only sane reaction to someone dissolving. Lava is also marked
+**urgent**: it skips the cooldown *and* the combat guard, because it damages every tick.
+
+⚠ **Whose body it is, again.** A skeleton answered the automaton-water case with *"Fire's dying,
+get **me** out of the water"* — writing itself as the one drowning. Every hazard situation now
+says "this adventurer, not you": **0/10** after. Third time this exact clarification has been
+needed (drunk, hunger, now water); it is cheap and it always works, unlike naming a topic.
+
+#### The party killing something
+
+⚠ **`kills[]` is the game's own per-run tally** — credited to a player (`entity.cpp:18411` for
+the host, `net.cpp:5225` for a client) and cleared on a new game. So an edge on it means "your
+side just killed something", and the index says **what**, which is the whole flavour of the line.
+Seeded silently so the first pass of a run does not report the previous run's tally.
+
+**10%**, on the once-a-second scan — kills are frequent, and this is a garnish rather than a
+commentary track. ⚠ Allowed **mid-combat** (a kill happens in one) but it still waits its turn on
+the shared cooldown, which is why `mymod_remarkSpeaker` grew an `inFight` flag separate from
+`urgent`.
+
+> *"Squeak! Meat!"* (rat) · *"Flesh for bone."* (skeleton) · *"Me hungry now."* (troll)
+> *"Another 'optional' bonus for my services."* (mercenary)
+> *"Might've fed a family for a week."* (human, over a dead shopkeeper)
+
 #### ⚠ The priming trap, twice more — and what actually fixes it
 
 `swimming` made small races **forget they were followers**: a goblin answered *"Go 'way, human

@@ -90,7 +90,7 @@ ck("the mercenary does not tout for the appraisal here",
    "do NOT offer to do it yourself" in S.VALUABLE_ANGLE["self_interested"])
 
 # --- chest, drunk and mimic -----------------------------------------------------------------
-for k in ("chest", "drunk", "mimic", "cleared", "swimming", "arrowtrap", "food"):
+for k in ("chest", "drunk", "mimic", "cleared", "swimming", "arrowtrap", "food", "kill"):
     pr = S.build_remark_prompt(k, "goblin", 7, "swamp", "loyal")
     ck("the %s remark is a short form" % k, tok(pr) < 500, tok(pr))
     ck("the %s remark knows where it is" % k, "Swamp" in pr or "swamp" in pr)
@@ -126,7 +126,7 @@ ck("the drunk situation names no topic to avoid",
    and "what lives here" not in S.REMARK_SITUATION["drunk"])
 
 # A spy has no reaction of its own for any kind; the handler maps it to loyal.
-for k in ("chest", "drunk", "mimic", "cleared", "swimming", "arrowtrap", "food"):
+for k in ("chest", "drunk", "mimic", "cleared", "swimming", "arrowtrap", "food", "kill"):
     ck("no spy-specific %s angle to leak" % k, "spy" not in S.REMARK_ANGLE[k])
     ck("every %s angle has a default" % k, S.REMARK_ANGLE[k].get(None))
 ck("a fearful follower dreads chests", "Traps" in S.REMARK_ANGLE["chest"]["fearful"])
@@ -206,6 +206,54 @@ ck("the swimming angle names the follower's role",
    "the one you follow and travel with" in S.REMARK_ANGLE["swimming"][None])
 ck("and names no territory to grab",
    "territory" not in S.REMARK_ANGLE["swimming"][None])
+
+# --- water, lava, and the two races water hurts ---------------------------------------------
+# ⚠ isPlayerSwimming() is TRUE IN LAVA TOO (actplayer.cpp:3616 tests swimmingtiles ||
+# lavatiles), so one "they are swimming" line had a follower admiring the player's stroke while
+# they burned. The race-specific harm is the game's own (lang 3183 / 3702 / 3703 / 573).
+ck("every medium/hazard combination has its own situation",
+   set(S.SWIM_SITUATION) == {("water", ""), ("water", "vampire"), ("water", "automaton"),
+                             ("lava", ""), ("lava", "vampire"), ("lava", "automaton")})
+for key, sit in S.SWIM_SITUATION.items():
+    if key == ("water", ""):
+        continue
+    # ⚠ A skeleton answered the automaton-water case with "Fire's dying, get ME out of the
+    # water" -- writing ITSELF as the one drowning. 0/10 after saying whose body it is.
+    ck("the %s situation says whose body it is" % (key,), "not you" in sit)
+for key in (("lava", ""), ("lava", "vampire"), ("lava", "automaton")):
+    ck("%s is urgent" % (key,), "RIGHT NOW" in S.SWIM_SITUATION[key])
+
+# ⚠ The automaton cases are the SAME boiler the hunger remarks read: water is HUNGER -= 25
+# (actplayer.cpp:9542), draining toward CRITICAL, and lava drives it the other way.
+for key in (("water", "automaton"), ("lava", "automaton")):
+    sit = S.SWIM_SITUATION[key]
+    ck("%s forbids food language" % (key,), "Do NOT mention" in sit and "hunger" in sit)
+    ck("%s names the boiler instead" % (key,), "boiler" in sit)
+ck("water quenches the boiler", "flooding" in S.SWIM_SITUATION[("water", "automaton")])
+ck("lava overheats it", "overheating" in S.SWIM_SITUATION[("lava", "automaton")])
+ck("water burns a vampire", "BURNING" in S.SWIM_SITUATION[("water", "vampire")])
+
+# A hazard is not scenery: the angle becomes "get them out".
+_h = S.build_swim_prompt("goblin", 7, "hell", "loyal", "lava", "")
+ck("a hazard tells them to get out", "Get them OUT" in _h)
+ck("and names the follower's role", "the one you follow" in _h)
+_plain = S.build_swim_prompt("goblin", 7, "swamp", "loyal", "water", "")
+ck("plain water keeps the ordinary angle", "Get them OUT" not in _plain)
+ck("an unknown medium falls back rather than breaking",
+   S.build_swim_prompt("goblin", 7, "swamp", "loyal", "acid", "wizard"))
+ck("a mercenary is still forbidden figures in water",
+   "Naming any number is WRONG" in S.build_swim_prompt("gnome", 7, "swamp", "self_interested",
+                                                        "water", "automaton"))
+
+# --- the party killing something ------------------------------------------------------------
+# ⚠ kills[] is the game's own per-run tally, credited to a player and cleared on a new game, so
+# an edge on it means "your side just killed something" and the index says WHAT.
+_k = S.build_remark_prompt("kill", "rat", 7, "swamp", "loyal", {"look": "a spider"})
+ck("the kill remark names what died", "a spider" in _k)
+ck("and falls back cleanly", "{look}" not in S.build_remark_prompt("kill", "rat", 7, "swamp",
+                                                                   "loyal"))
+ck("it keeps the moment short", "Keep it to a breath" in S.REMARK_ANGLE["kill"][None])
+ck("a construct does not gloat", "not an achievement" in S.REMARK_ANGLE["kill"]["machine"])
 
 print("\n%d failure(s)" % len(fails), fails)
 sys.exit(1 if fails else 0)
