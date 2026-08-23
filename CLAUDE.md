@@ -1121,6 +1121,62 @@ get **me** out of the water"* — writing itself as the one drowning. Every haza
 says "this adventurer, not you": **0/10** after. Third time this exact clarification has been
 needed (drunk, hunger, now water); it is cheap and it always works, unlike naming a topic.
 
+#### Kit, skills, and the minotaur
+
+| kind | fires on | |
+|---|---|---|
+| `equip` | an equipment slot's item uid changing | **35%**, and only on putting something ON |
+| `skills` | once per floor | **20%**, and only once they have a real strength |
+| `minotimer` | the countdown timer appearing | ⚠ only when the guard favour will **not** speak |
+| `minotaur` | a `MINOTAUR` entity within 20 tiles, once each | urgent, allowed mid-fight |
+| `minotaurdown` | a tracked minotaur gone or at 0 HP | |
+
+⚠ **Kit fires on a CHANGE, not a timer.** Putting something on is a moment; a follower
+volunteering an opinion about your boots out of nowhere is not. Seeded silently, or a new
+character's starting gear reads as ten things just donned — the same trap the inventory watch has.
+Taking something *off* says nothing.
+
+⚠ **Skills are sent as the game's own NAME and TIER, never a raw number.** Barony's tiers are
+`NOVICE 1 / BASIC 20 / SKILLED 40 / EXPERT 60 / MASTER 80 / LEGENDARY 100` (`stat.hpp:195`) and
+`getSkillLangEntry()` supplies the name, so nothing is invented. A follower quoting *"your axe is
+43"* would be reading a sheet it cannot see; one saying they are **skilled with an axe** is just
+watching them work.
+
+⚠ **It needs a real strength to name.** A fresh character is all zeroes, and *"you are hopeless at
+everything"* is not the line — so it waits until the best skill reaches `SKILL_LEVEL_BASIC`.
+
+⚠ **And it must not invent a third skill.** The two ends are all it has been told about; left
+open it adds one and is wrong about it, exactly as an unanchored place name gets invented.
+
+> *"Legendary with sorcery, utterly lacking in shields."* (skeleton)
+> *"A master trader, but dead weight in a fight."* (mercenary gnome)
+> *"Your axe work's as solid as a bank vault, but we'll need to move quiet."*
+> *"Just like Granddad used to wear in the old days."* (iron helm)
+> *"Leather's good for feet, keeps 'em from gettin' wet in the mire."* (rat, boots)
+
+⚠ **The minotaur is NOT a "major boss"** — it hunts you across an ordinary floor rather than
+sitting at the end of one, and the fear is being *chased*. Same entity tracking, different lines,
+and killing one is relief rather than triumph.
+
+⚠ **The countdown line only fires when the GUARD FAVOUR will not speak.** `mymod_favourTick`
+already asks a trusted follower whether it heads the minotaur off, and that produces a line either
+way — so remarking here as well would double up on the first timer of a run. Once the guard is
+spent (once per run) the favour path goes quiet and this is the only voice left.
+
+> *"Out of here, now! We can't outrun the beast, but we can outrun getting ourselves torn in half."*
+> *"AAAGHGHG!"* (fearful goblin) · *"Me goblin still standin'."*
+
+⚠ **The oath-only failure, again.** *"By Herx's bones, what in the depths...?"* over a corpse never
+says the thing is dead. Both `bossdown` and `minotaurdown` now carry the clause that fixed `area`
+— *"an oath or an exclamation on its own is not enough"* — and after it every reply conveyed the
+kill (*"it's finally still"*, *"a stake through its heart"*, *"that corpse'll stink up the whole
+level"*, *"Herx's darkness is ended"*).
+
+⚠ **That measurement is a warning about probes, not about prompts.** The regex scored it 3/8
+because it looked for *dead/over/slain* and the model wrote *still / corpse / ended / take him*.
+Reading the replies, it was 8/8. **Fourth time this session a scorer has been wrong** — read the
+output before believing the number.
+
 #### Major bosses, special areas, and Hell
 
 | kind | fires on | |

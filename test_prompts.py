@@ -91,7 +91,8 @@ ck("the mercenary does not tout for the appraisal here",
 
 # --- chest, drunk and mimic -----------------------------------------------------------------
 for k in ("chest", "drunk", "mimic", "cleared", "swimming", "arrowtrap", "food", "kill",
-          "death", "bossfight", "bossdown", "area"):
+          "death", "bossfight", "bossdown", "area", "minotaur", "minotimer", "minotaurdown",
+          "equip"):
     pr = S.build_remark_prompt(k, "goblin", 7, "swamp", "loyal")
     ck("the %s remark is a short form" % k, tok(pr) < 500, tok(pr))
     ck("the %s remark knows where it is" % k, "Swamp" in pr or "swamp" in pr)
@@ -128,7 +129,8 @@ ck("the drunk situation names no topic to avoid",
 
 # A spy has no reaction of its own for any kind; the handler maps it to loyal.
 for k in ("chest", "drunk", "mimic", "cleared", "swimming", "arrowtrap", "food", "kill",
-          "death", "bossfight", "bossdown", "area"):
+          "death", "bossfight", "bossdown", "area", "minotaur", "minotimer", "minotaurdown",
+          "equip", "skills"):
     ck("no spy-specific %s angle to leak" % k, "spy" not in S.REMARK_ANGLE[k])
     ck("every %s angle has a default" % k, S.REMARK_ANGLE[k].get(None))
 ck("a fearful follower dreads chests", "Traps" in S.REMARK_ANGLE["chest"]["fearful"])
@@ -194,8 +196,8 @@ ck("and says it is happening now", "RIGHT NOW" in S.REMARK_SITUATION["arrowtrap"
 # The food line carries the actual item, filled from the engine.
 _f = S.build_remark_prompt("food", "rat", 7, "swamp", "loyal", {"look": "loaf of bread"})
 ck("the food remark names what was picked up", "loaf of bread" in _f)
-ck("and falls back cleanly with no context",
-   "some food" in S.build_remark_prompt("food", "rat", 7, "swamp", "loyal"))
+ck("the food line falls back cleanly with no context",
+   "{look}" not in S.build_remark_prompt("food", "rat", 7, "swamp", "loyal"))
 ck("it keeps the moment small", "only a scrap of food" in S.REMARK_ANGLE["food"][None])
 ck("a construct does not eat", "do not eat" in S.REMARK_ANGLE["food"]["machine"])
 
@@ -324,6 +326,46 @@ ck("remarks in Hell carry the dread",
    "this is HELL" in S.build_remark_prompt("chest", "human", 22, "hell", "loyal"))
 ck("remarks elsewhere do not",
    "this is HELL" not in S.build_remark_prompt("chest", "human", 7, "swamp", "loyal"))
+
+# --- the minotaur ---------------------------------------------------------------------------
+# ⚠ NOT a "major boss": it hunts you across an ordinary floor rather than sitting at the end of
+# one, and the fear is being CHASED. Same entity machinery, different lines.
+ck("the minotaur situation is about being hunted",
+   "follow you across this whole floor" in S.REMARK_SITUATION["minotaur"])
+ck("and it is urgent", "RIGHT NOW" in S.REMARK_SITUATION["minotaur"])
+ck("the countdown line says to move", "they need to move" in S.REMARK_SITUATION["minotimer"])
+ck("killing one is relief, not triumph", "You can breathe" in S.REMARK_SITUATION["minotaurdown"])
+# ⚠ Same oath-only failure the area line had: "By Herx's bones, what in the depths...?" over a
+# corpse never says the thing is dead.
+for k in ("minotaurdown", "bossdown"):
+    ck("%s refuses a bare oath" % k, "own is not enough" in S.REMARK_SITUATION[k])
+
+# --- what they are wearing --------------------------------------------------------------------
+_eq = S.build_remark_prompt("equip", "rat", 7, "swamp", "loyal",
+                            {"look": "leather boots", "slot": "boots"})
+ck("the equip line names the item", "leather boots" in _eq)
+ck("and the slot it went into", "their boots now" in _eq)
+ck("it keeps the moment small", "not an event" in S.REMARK_ANGLE["equip"][None])
+ck("the equip line falls back cleanly with no context",
+   "{look}" not in S.build_remark_prompt("equip", "rat", 7, "swamp", "loyal")
+   and "{slot}" not in S.build_remark_prompt("equip", "rat", 7, "swamp", "loyal"))
+
+# --- best and worst skills --------------------------------------------------------------------
+# ⚠ The engine sends the game's own skill NAME and TIER, never a raw number -- Barony's tiers are
+# NOVICE 1 / BASIC 20 / SKILLED 40 / EXPERT 60 / MASTER 80 / LEGENDARY 100 (stat.hpp:195). A
+# follower quoting "your axe is 43" would be reading a sheet it cannot see.
+_sk = S.build_skills_prompt("human", 7, "swamp", "loyal",
+                            "the axe", "an expert", "stealth", "hopeless")
+ck("the skills line names the best", "an expert with the axe" in _sk)
+ck("and the worst", "hopeless at stealth" in _sk)
+# ⚠ Those two are the only skills it knows. Left open it invents a third, the same way an
+# unanchored place name gets invented.
+ck("and forbids inventing a third", "Do NOT bring up any other ability" in _sk)
+ck("no skills prompt without both ends",
+   S.build_skills_prompt("human", 7, "swamp", "loyal", "the axe", "an expert", "", "") == "")
+ck("a mercenary is still forbidden figures there",
+   "Naming any number is WRONG" in S.build_skills_prompt(
+       "gnome", 7, "swamp", "self_interested", "trading", "a master", "the sword", "a novice"))
 
 print("\n%d failure(s)" % len(fails), fails)
 sys.exit(1 if fails else 0)

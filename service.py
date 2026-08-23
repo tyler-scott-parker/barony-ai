@@ -362,12 +362,31 @@ REMARK_SITUATION = {
     # ⚠ {look} is the boss's REAL name, read from stats->name engine-side -- "Baphomet",
     # "Baron Herx", "Erudyce", "Orpheus" -- never guessed from the race, because LICH_ICE and
     # LICH_FIRE are ordinary elemental liches unless spawned as the named pair.
+    # ⚠ The minotaur is NOT a "major boss": it hunts you across an ordinary floor rather than
+    # sitting at the end of one, and the fear is being CHASED. Different lines, same machinery.
+    "minotaur": ("A MINOTAUR is here — you can see it, and it has seen you. It does not stop, it "
+                 "does not lose interest, and it will follow you across this whole floor. "
+                 "This is happening RIGHT NOW."),
+    "minotimer": ("Something has just changed. There is a minotaur loose on this floor now, "
+                  "hunting, and it knows where you are. It is only a matter of time before it "
+                  "finds you. Say it plainly — they need to move."),
+    "minotaurdown": ("The minotaur is DEAD. The thing that was hunting you across this floor is "
+                     "down and it is not getting up. You can breathe.\n"
+                     "Your line must make clear that it is DEAD. An oath or an exclamation on "
+                     "its own is not enough."),
+    # ⚠ {look} and {slot} come from the engine: the real item and the real slot it went into.
+    "equip": ("They have just put on {look} — it is their {slot} now. You watched them do it."),
+    # Routed to build_skills_prompt, which needs the best/worst pair; this entry exists so the
+    # handler recognises the kind.
+    "skills": "You have taken this adventurer's measure.",
     "bossfight": ("{look} is HERE, in front of you, alive and enormous, and the fight is "
                   "starting. This is not another dungeon creature — this is the thing this "
                   "whole floor was built around. It is happening RIGHT NOW."),
     "bossdown": ("{look} is DEAD. Between you, you have brought down the thing this whole "
                  "stretch of the dungeon belonged to. It is over, and the quiet after it is "
-                 "enormous."),
+                 "enormous.\n"
+                 "Your line must make clear that it is over. An oath or an exclamation on its "
+                 "own is not enough."),
     # ⚠ {look} is the area, keyed engine-side on the map's INTERNAL name -- several of which do
     # not match their filename (hamlet.lmp is "Mages Guild").
     # ⚠ THREE attempts, and the third failure was self-inflicted:
@@ -442,6 +461,34 @@ REMARK_ANGLE = {
         "bound": "You do not eat. Note it without interest.",
         "machine": "You do not eat. Note it without interest.",
         None: "React as YOUR kind would to that particular food — appetite, disgust, or a passing opinion. Keep it small; it is only a scrap of food.",
+    },
+    "minotaur": {
+        "self_interested": "You are not paid to be hunted. Say so, and say what you are doing about it.",
+        "fearful": "You are terrified. Shout it.",
+        "bound": "Identify the threat and state it. You do not run.",
+        "machine": "Identify the threat and state it. You do not run.",
+        None: "React as YOUR kind would to being hunted by something that does not stop. Keep it to one breath.",
+    },
+    "minotimer": {
+        "self_interested": "This was not in the arrangement. Say so, and say to move.",
+        "fearful": "You want to be anywhere else. Say so, and say to move.",
+        "bound": "State the situation. Advise moving.",
+        "machine": "State the situation. Advise moving.",
+        None: "Warn them, shortly. There is no fighting this thing on its terms.",
+    },
+    "minotaurdown": {
+        "self_interested": "You survived something that does not usually let people survive it. Say what that is worth.",
+        "fearful": "You did not think you would live through that. Say so.",
+        "bound": "State the outcome.",
+        "machine": "State the outcome.",
+        None: "React as YOUR kind would to the thing that was hunting you lying dead.",
+    },
+    "equip": {
+        "self_interested": "You price gear by habit. Say what you make of it as a piece of kit — good buy, bad buy, or wasted coin.",
+        "fearful": "Anything that keeps them alive keeps you alive. Say what you make of it.",
+        "bound": "Note what they are wearing. Nothing more.",
+        "machine": "Note what they are wearing. Nothing more.",
+        None: "Give a plain opinion of it — approval, doubt, or an old memory of one like it. Keep it small; it is a piece of kit, not an event.",
     },
     "bossfight": {
         "self_interested": "No fee covers this. Say so — and then square up anyway, because running is worse.",
@@ -654,6 +701,41 @@ DEATH_ANGLE = {
 # test meaningful.
 REMARK_ANGLE["death"] = DEATH_ANGLE
 
+# ---- What they are good and bad at -----------------------------------------------------------
+# ⚠ The engine sends the game's own SKILL NAME and TIER, never a raw number -- Barony's tiers are
+# NOVICE 1 / BASIC 20 / SKILLED 40 / EXPERT 60 / MASTER 80 / LEGENDARY 100 (stat.hpp:195), and
+# getSkillLangEntry supplies the name. A follower quoting "your axe is 43" would be reading a
+# sheet it cannot see; a follower saying they are skilled with an axe is just watching them work.
+SKILLS_ANGLE = {
+    "self_interested": ("You size people up for a living, and you have been watching them fight. "
+                        "Say what they are worth and where they will get themselves killed."),
+    "fearful": "What they are bad at is what gets you both killed. Say which it is.",
+    "bound": "State what you have observed of their abilities. Nothing more.",
+    "machine": "State what you have observed of their abilities. Nothing more.",
+    None: ("Say it as someone who has watched them work — praise for the one, a dry word about "
+           "the other. You are not reading a list; you have simply noticed."),
+}
+
+REMARK_ANGLE["skills"] = SKILLS_ANGLE
+
+def build_skills_prompt(race, floor, map_name, allegiance="loyal",
+                        best="", best_tier="", worst="", worst_tier=""):
+    if not best or not worst:
+        return ""
+    numbers = MERC_NO_NUMBERS if allegiance == "self_interested" else ""
+    return (_remark_head(race, floor, map_name)
+            + _dread_section(floor, map_name)
+            + "You have travelled with this adventurer long enough to have taken their measure.\n"
+            + "They are " + best_tier + " with " + best + " — that is the best of them.\n"
+            + "They are " + worst_tier + " at " + worst + " — that is the worst of them.\n"
+            + (SKILLS_ANGLE.get(allegiance) or SKILLS_ANGLE[None]) + "\n"
+            # ⚠ Those two are the ONLY skills it has been told about. Left open it will invent
+            # a third and be wrong about it, the same way an unanchored place name gets invented.
+            + "Mention only those two things. Do NOT bring up any other ability of theirs — you "
+              "have not been told about any, and inventing one is WRONG.\n"
+            + numbers
+            + REMARK_TAIL)
+
 def build_death_prompt(race, floor, map_name, allegiance="loyal", own=True, can_return=True):
     situation = DEATH_SITUATION[(bool(own), bool(can_return))]
     numbers = MERC_NO_NUMBERS if allegiance == "self_interested" else ""
@@ -690,8 +772,11 @@ def build_remark_prompt(kind, race, floor, map_name, allegiance="loyal", ctx=Non
     # may talk about worth; he may not put a number on it.
     numbers = MERC_NO_NUMBERS if allegiance == "self_interested" else ""
     situation = REMARK_SITUATION.get(kind, "Something has happened.")
+    c = ctx or {}
     if "{look}" in situation:
-        situation = situation.replace("{look}", ((ctx or {}).get("look") or "some food"))
+        situation = situation.replace("{look}", (c.get("look") or "something"))
+    if "{slot}" in situation:
+        situation = situation.replace("{slot}", (c.get("slot") or "kit"))
     return (_remark_head(race, floor, map_name)
             + _dread_section(floor, map_name)
             + situation + "\n"
@@ -3746,7 +3831,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 _al = st_r.get("allegiance", "loyal")
                 if _al == "spy":
                     _al = "loyal"     # the disguise holds here too
-                if remark == "death":
+                if remark == "skills":
+                    prompt_r = build_skills_prompt(
+                        race, floor, map_name, _al,
+                        (data.get("best") or "").strip(),
+                        (data.get("besttier") or "").strip(),
+                        (data.get("worst") or "").strip(),
+                        (data.get("worsttier") or "").strip())
+                    if not prompt_r:
+                        return self._send_json({"reply": "", "action": "NONE"})
+                elif remark == "death":
                     prompt_r = build_death_prompt(race, floor, map_name, _al,
                                                   bool(data.get("own", True)),
                                                   bool(data.get("canreturn", False)))
@@ -3755,8 +3849,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                                  (data.get("medium") or "water").strip(),
                                                  (data.get("hazard") or "").strip())
                 else:
-                    prompt_r = build_remark_prompt(remark, race, floor, map_name, _al,
-                                                   {"look": (data.get("look") or "").strip()})
+                    prompt_r = build_remark_prompt(
+                        remark, race, floor, map_name, _al,
+                        {"look": (data.get("look") or "").strip(),
+                         "slot": (data.get("slot") or "").strip()})
                 raw_r = ask_ollama(prompt_r)
                 line_r = (raw_r or "").strip().strip('"').split("\n")[0][:200]
                 print(f"[SERVICE] -> remark {remark}: {race}: {line_r}")
