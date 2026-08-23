@@ -135,5 +135,49 @@ ck("a machine does not panic", "not panic" in S.REMARK_ANGLE["mimic"]["machine"]
 ck("every remark kind has a situation and angles",
    set(S.REMARK_SITUATION) == set(S.REMARK_ANGLE))
 
+# --- hunger, and the automaton's boiler -----------------------------------------------------
+# ⚠ AN AUTOMATON DOES NOT GET HUNGRY. The game's own getEntityHungerInterval returns -1 --
+# "unreachable" -- for HUNGRY/WEAK/STARVING when the player is an AUTOMATON, and gives it
+# SUPERHEATED (1200) and CRITICAL (300) instead. It runs a boiler, not a stomach.
+for st_ in ("hungry", "weak", "starving", "oversatiated"):
+    pr = S.build_hunger_prompt(st_, "human", 7, "swamp", "loyal")
+    ck("the %s prompt exists and is short" % st_, pr and tok(pr) < 500, tok(pr))
+    # ⚠ Whose state it is has to be explicit: a troll answered "oversatiated" with "Me belly
+    # hurt, bad eating" -- writing ITSELF as the one who overate. 0/9 after saying "not you".
+    ck("the %s prompt says whose state it is" % st_, "not you" in pr)
+
+for st_ in ("superheated", "critical"):
+    pr = S.build_hunger_prompt(st_, "human", 7, "swamp", "loyal")
+    ck("the %s prompt exists" % st_, bool(pr))
+    ck("%s forbids food language outright" % st_,
+       "any word about eating is WRONG" in pr)
+    ck("%s says they do not eat" % st_, "do NOT get hungry" in pr)
+    ck("%s names the machine axis instead" % st_,
+       ("heat" in pr or "fuel" in pr) and "AUTOMATON" in pr)
+ck("superheated is about pressure", "pressure" in S.HUNGER_SITUATION["superheated"])
+ck("critical is about the fire going out", "cold" in S.HUNGER_SITUATION["critical"])
+
+# ⚠ A vampire is sustained by blood, not bread -- the engine flags it from the game's own
+# playerRequiresBloodToSustain, so nothing about vampires is duplicated here.
+ck("the blood note appears when flagged",
+   "BLOOD they need" in S.build_hunger_prompt("hungry", "human", 7, "swamp", "loyal", blood=True))
+ck("and not otherwise",
+   "BLOOD they need" not in S.build_hunger_prompt("hungry", "human", 7, "swamp", "loyal"))
+# ⚠ A construct is not a vampire. The engine can only flag one thing, so the blood note must
+# never land on top of the boiler states.
+ck("a construct is never told it needs blood",
+   "BLOOD they need" not in S.build_hunger_prompt("critical", "human", 7, "swamp",
+                                                  "loyal", blood=True))
+
+ck("an unknown state produces nothing rather than a wrong line",
+   S.build_hunger_prompt("peckish", "human", 7, "swamp", "loyal") == "")
+ck("a mercenary is still forbidden figures here",
+   "Naming any number is WRONG" in S.build_hunger_prompt("starving", "gnome", 7, "swamp",
+                                                         "self_interested"))
+ck("no spy-specific hunger angle to leak", "spy" not in S.HUNGER_ANGLE)
+ck("every hunger state has a situation",
+   set(S.HUNGER_SITUATION) == {"hungry", "weak", "starving", "oversatiated",
+                               "superheated", "critical"})
+
 print("\n%d failure(s)" % len(fails), fails)
 sys.exit(1 if fails else 0)

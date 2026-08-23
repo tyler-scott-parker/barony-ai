@@ -956,6 +956,59 @@ the outputs before believing the number — the same lesson the sabotage-tell pr
 regardless, and the engine prints *"(Skarn wants 140 gold for the layout of this floor. Say yes to
 agree.)"* whether or not the pitch was spoken.
 
+### Hunger — and the automaton runs a boiler, not a stomach
+
+A follower comments when the player's condition turns. Edge-triggered on the **band**, never the
+number: `HUNGER` ticks down constantly, and a line per point would be unbearable.
+
+⚠ **AN AUTOMATON DOES NOT GET HUNGRY, and that is the whole reason this needed its own table.**
+The game's own `getEntityHungerInterval` (`entity.cpp`) returns **−1** — its word for
+"unreachable" — for `HUNGRY`, `WEAK` and `STARVING` when the player is an `AUTOMATON`, and 5000
+for `OVERSATIATED`. What it gets instead is a boiler:
+
+| | normal player | insectoid | **automaton** |
+|---|---|---|---|
+| oversatiated | >1500 | >1500 | *unreachable* |
+| hungry / weak / starving | ≤250 / ≤150 / ≤50 | ≤100 / ≤50 / ≤25 | ***unreachable*** |
+| **superheated** | — | — | **≥1200** |
+| **critical** | — | — | **≤300** |
+
+So a follower telling an automaton it looks peckish would be talking nonsense. The two machine
+states forbid food language outright — *"they do NOT eat and they do NOT get hungry… any word
+about eating is WRONG"* — and point at heat, pressure, fuel and cold instead. Measured across
+5 races × both states: **0/10 used food language**.
+
+> *"Plate 3's thermal indicator is spiking — we need to vent the excess steam, now."*
+> *"Grogga gorga! Hot go boom!"* (goblin)
+> *"Fuel's runnin' low, mate — we need sommat hot to get this furnace sparkin' again."*
+
+**Nothing about the thresholds is duplicated**; the engine asks `getEntityHungerInterval` for each
+band, so the insectoid numbers, any DLC race and any future rebalance come along for free.
+`mymod_hungerStateOf()` only decides *which* band the player is in.
+
+⚠ **Most severe first.** `starving < weak < hungry`, so testing in the other order reports a
+starving player as merely hungry.
+
+⚠ **Only on getting worse.** Eating your way back up from starving passes through *weak* and
+*hungry*, and a fresh complaint on the way past would be nonsense. Dropping back to normal is
+silent too — *"you are no longer starving"* is not a line.
+
+⚠ **Hunger can be switched off for a run** (`SV_FLAG_HUNGER`), at which point the value stops
+moving and the whole concept is meaningless; guarded.
+
+**A vampire is sustained by blood, not bread.** The game already knows this
+(`playerRequiresBloodToSustain`, `actplayer.cpp:15793`), so the engine just flags it and the
+prompt adds a line. Measured: **0/4** offered a vampire a meal, three said blood outright.
+⚠ The blood note is **suppressed for the two boiler states** — a construct is not a vampire, and
+the engine can only tell us one thing about the player at a time.
+
+⚠ **Whose stomach it is has to be said out loud.** A troll answered `oversatiated` with *"Me
+belly hurt, bad eating"* — writing **itself** as the one who overate. Every state now says "this
+adventurer, not you": **0/9** after. This is a *subject* clarification, not a topic, so it is
+safe where the drunk experiment was not.
+
+An unrecognised state produces **no line at all** rather than a wrong one.
+
 ### Remarks — chests, booze, and a chest that was not a chest
 
 Three more of the same short form as the valuable pickup, sharing one system: the engine spots a

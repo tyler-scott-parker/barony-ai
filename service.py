@@ -389,6 +389,53 @@ REMARK_ANGLE = {
     },
 }
 
+# ---- Hunger, and the automaton's boiler ----------------------------------------------------
+# ⚠ AN AUTOMATON DOES NOT GET HUNGRY, and this is the whole reason hunger needs its own table
+# rather than one line. The game's own getEntityHungerInterval returns -1 -- "unreachable" --
+# for HUNGRY/WEAK/STARVING when the player is an AUTOMATON, and gives it SUPERHEATED (1200) and
+# CRITICAL (300) instead. It runs a boiler, not a stomach. A follower telling one it looks
+# peckish would be talking nonsense, so those two states forbid food language outright.
+HUNGER_SITUATION = {
+    "hungry":     ("THEY are hungry — this adventurer, not you. You can see it: the way they "
+                   "keep checking their pack, the attention that is not quite on the room."),
+    "weak":       ("THEY have gone too long without eating — this adventurer, not you — and it "
+                   "is showing in their body: slower, unsteady, the strength going out of "
+                   "them."),
+    "starving":   ("THEY are STARVING — this adventurer, not you. This is no longer "
+                   "discomfort; they are failing in front of you, and if they do not eat "
+                   "something they are going to die of it."),
+    "oversatiated": ("THEY have eaten far too much — this adventurer, not you — and are "
+                     "labouring under it: heavy, slow, and in no state to fight. It is THEIR "
+                     "belly that is complaining, not yours."),
+    # ⚠ The two automaton states. Heat and pressure, never appetite.
+    "superheated": ("THEY are an AUTOMATON and their boiler is running far too hot — plates "
+                    "ticking, seams glowing, steam where there should not be steam. They have "
+                    "over-stoked themselves and it is dangerous.\n"
+                    "⚠ They do NOT eat and they do NOT get hungry. Do NOT mention food, "
+                    "hunger, meals, appetite or a stomach — this is a machine running hot, and "
+                    "any word about eating is WRONG. Speak about heat, pressure or venting."),
+    "critical":   ("THEY are an AUTOMATON and their furnace is guttering out — running cold, "
+                   "slow and quiet, the fire in them nearly gone. Without fuel they will stop.\n"
+                   "⚠ They do NOT eat and they do NOT get hungry. Do NOT mention food, hunger, "
+                   "meals, appetite or a stomach — this is a machine going cold, and any word "
+                   "about eating is WRONG. Speak about fuel, fire or the cold."),
+}
+# A vampire (or the accursed class) is sustained by blood, not bread -- the game already knows
+# this via playerRequiresBloodToSustain, so the engine just flags it.
+HUNGER_BLOOD = ("⚠ This one does not live on food. It is BLOOD they need, and both of you know "
+                "it. Do not offer them a meal.\n")
+
+HUNGER_ANGLE = {
+    "self_interested": ("You are being paid to keep this person alive, and a client in this "
+                        "state is a client who does not pay again. Say so, dryly."),
+    "fearful":         ("This frightens you. They are what stands between you and everything "
+                        "down here, and they are failing."),
+    "bound":           "State the condition you observe. It is a fact about the one who called you.",
+    "machine":         "State the condition you observe, flatly.",
+    None:              ("React as your kind would — concern, bluntness, or an offer to do "
+                        "something about it."),
+}
+
 def remark_angle(kind, allegiance):
     table = REMARK_ANGLE.get(kind, {})
     return table.get(allegiance) or table.get(None, "")
@@ -403,6 +450,21 @@ def _remark_head(race, floor, map_name):
             + body)
 
 REMARK_TAIL = "Respond with ONLY one short spoken line. No narration, no quotes, no JSON."
+
+def build_hunger_prompt(state, race, floor, map_name, allegiance="loyal", blood=False):
+    situation = HUNGER_SITUATION.get(state)
+    if not situation:
+        return ""
+    # ⚠ The blood note is skipped for the two automaton states: a construct is not a vampire,
+    # and the engine can only tell us one thing about the player at a time.
+    blood_line = (HUNGER_BLOOD if (blood and state not in ("superheated", "critical")) else "")
+    numbers = MERC_NO_NUMBERS if allegiance == "self_interested" else ""
+    return (_remark_head(race, floor, map_name)
+            + situation + "\n"
+            + blood_line
+            + (HUNGER_ANGLE.get(allegiance) or HUNGER_ANGLE[None]) + "\n"
+            + numbers
+            + REMARK_TAIL)
 
 def build_remark_prompt(kind, race, floor, map_name, allegiance="loyal"):
     # ⚠ A mercenary told to think about "what the take is worth" invents a figure -- measured,
@@ -3400,6 +3462,26 @@ class Handler(http.server.BaseHTTPRequestHandler):
             # no conversation state, no boons, no relationship movement -- it is a remark, not
             # an exchange, and it must not consume the chat cap or a boon slot.
             remark = (data.get("remark") or "").strip()
+            if remark == "hunger":
+                _state = (data.get("state") or "").strip()
+                with STATE_LOCK:
+                    st_h = get_follower_state(uid, race, player) if uid else {}
+                _al = st_h.get("allegiance", "loyal")
+                if _al == "spy":
+                    _al = "loyal"
+                prompt_h = build_hunger_prompt(_state, race, floor, map_name, _al,
+                                               bool(data.get("blood")))
+                if not prompt_h:
+                    return self._send_json({"reply": "", "action": "NONE"})
+                raw_h = ask_ollama(prompt_h)
+                line_h = (raw_h or "").strip().strip('"').split("\n")[0][:200]
+                print(f"[SERVICE] -> hunger ({_state}): {race}: {line_h}")
+                logrec("remark", uid=uid, race=race, floor=floor, player=player, what="hunger",
+                       state=_state, blood=bool(data.get("blood")) or None,
+                       allegiance=st_h.get("allegiance"), reply=line_h[:200])
+                tts_emit(line_h, race, uid, "remark", "", player)
+                return self._send_json({"reply": line_h, "action": "NONE"})
+
             if remark in REMARK_SITUATION:
                 with STATE_LOCK:
                     st_r = get_follower_state(uid, race, player) if uid else {}
