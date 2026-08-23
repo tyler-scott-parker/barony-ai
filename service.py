@@ -4200,12 +4200,25 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     prompt_x = build_ratfear_prompt(boss_name, race, floor, map_name)
                 raw_x = ask_ollama(prompt_x)
                 line_x = (raw_x or "").strip().strip('"').split("\n")[0][:200]
+                # ⚠ A rat that kills the Baron has EARNED a name. Drawn from the ordinary pool
+                # and committed to name_history like any other, so it will not be handed out
+                # again in a later run -- this creature is going to be talked about.
+                new_name = ""
+                if data.get("ratunnamed") and not data.get("legend"):
+                    with STATE_LOCK:
+                        new_name = reserve_name("rat") or ""
+                        if new_name:
+                            commit_name(new_name)
+                    if new_name:
+                        print(f"[SERVICE] -> the rat is named {new_name}")
                 print(f"[SERVICE] -> RATFEAR {boss_name}: {line_x}")
                 logrec("ratfear", boss=boss_name, race=race, floor=floor, map=map_name,
                        player=player, legend=bool(data.get("legend")) or None,
-                       ratname=(data.get("ratname") or None), reply=line_x[:200])
+                       ratname=(data.get("ratname") or new_name or None),
+                       named_now=(new_name or None), reply=line_x[:200])
                 tts_emit(line_x, race, uid, "npc", boss_name, player)
-                return self._send_json({"reply": line_x, "action": "NONE"})
+                return self._send_json({"reply": line_x, "action": "NONE",
+                                        "ratname": new_name})
 
             # A follower reacting to something valuable the player just picked up. Short form:
             # no conversation state, no boons, no relationship movement -- it is a remark, not

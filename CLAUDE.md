@@ -1208,8 +1208,23 @@ both after.
 ⚠ **That 6/8 is a read, not a count.** The scorer said 2/8 — it missed *"have not the strength"*,
 *"taken away"* and the rat's own name as recognition. **Sixth bad probe this session.**
 
-The rat's **name** is passed through when it has one, so the twins can name it — which is what
-turns the joke into a legend.
+#### The rat's name
+
+⚠ **A rat that kills the Baron EARNS a name.** If it is still unnamed when it does it, the service
+draws one from the ordinary rat pool and commits it to `name_history` like any other — *Draintail,
+Underfloor, Gristletail, Weevil* — and the engine writes it to `Stat->name` and broadcasts `MYNM`.
+The name is applied **before** the boss falls, so the creature that gets talked about already has
+one. The twins then use it: *"You're Grizzle, the rat that devoured Baron Herx's entrails."*
+
+⚠ **And the name is then LOCKED** — `mymod_nameIsLoadBearing()` returns true for a slayer rat, the
+same mechanism that protects a conjurer's skeleton knight. This is not decoration: follower state
+is **uid-keyed service-side and a level change gives the creature a new uid** (see below), so the
+service would otherwise decide the rat is unnamed and reveal a *second* name on a later floor —
+and the legend the twins have heard about would quietly become somebody else.
+
+⚠ **`Stat->name` is the half that survives.** `copyStats()` carries the name and all 32
+`MISC_FLAGS` across the staircase, so the HUD, the mark, and the name the twins use are all safe.
+The *service's* row is not.
 
 > *"Is that...a rat?! Can you all see this?! It's impossible! I have wards, I have incantations, I have—!"*
 > *"Please... remove it. I'll give you my most powerful artifact, everything in my vaults... just get rid of it."*
