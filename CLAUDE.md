@@ -1121,6 +1121,61 @@ get **me** out of the water"* — writing itself as the one drowning. Every haza
 says "this adventurer, not you": **0/10** after. Third time this exact clarification has been
 needed (drunk, hunger, now water); it is cheap and it always works, unlike naming a topic.
 
+### The rat (easter egg)
+
+Walk a **rat follower** all the way to the Baron — or to the Archmagisters at the very bottom —
+and there is a **50%** chance the boss simply cannot cope with it. One coin flip per boss, win or
+lose, so it cannot be farmed by walking in and out of range.
+
+**The boss speaks, and then dies.** It is the only line in the mod delivered by a *hostile*, and
+it goes out through the NPC branch — bubble and chat line, none of the follower machinery.
+
+⚠ **NOTHING IS SPAWNED AND NO PORTAL IS CREATED.** Both winning portals already sit **invisible**
+on their floor and reveal themselves the moment no boss of the right kind remains in
+`map.creatures` (`actladder.cpp:460` for `LICH`/`DEVIL`, `:721` for `LICH_FIRE`/`LICH_ICE`). So the
+entire mechanism is *"the boss dies"* — exactly what the peaceful-Herx design note predicted.
+
+⚠ **Setting `HP = 0` is the RIGHT kill, not a shortcut.** `actmonster.cpp:4008`/`4074` give `LICH`
+and `LICH_FIRE` their own death states from the ordinary `HP<=0` path, so the boss gets its proper
+death animation, its drops, and its removal from the creature list.
+
+⚠ **BOTH TWINS HAVE TO GO.** The sanctum portal returns early if *either* `LICH_FIRE` or
+`LICH_ICE` is still standing, so killing one and leaving the other would strand the player at the
+bottom of the game with no exit — the precise "half-fired ending" failure the peaceful-Herx note
+warns about designing around.
+
+⚠ **HERX'S PORTAL ONLY APPEARS IN CLASSIC MODE.** `actWinningPortal` returns early on `Boss` and
+`Hell Boss` unless `SV_FLAG_CLASSIC` is set (`actladder.cpp:444`) — which is the same reason
+killing Herx normally does not end the run in the expanded campaign. So on floor 20 the egg kills
+the Baron and the run continues to Hell, as it would if you had fought him; at the **sanctum**
+there is no such gate and the portal does appear. The egg is identical either way; the portal is
+the game's own business.
+
+⚠ **The kill lands a beat AFTER the line.** Killing on the request would put the bubble over a
+corpse two seconds later. The mod waits for the conversation slot to clear (the line is up) and
+then ~1.5s more — that pause is what makes it read as a joke rather than as a glitch.
+
+#### ⚠ Played straight, or it is not funny
+
+The joke is a dread lich undone by vermin, and it only works if **he means it**. Written as a gag
+the model reaches for slapstick and the moment dies; written as genuine, sudden, undignified
+terror it is funnier *and* the character survives. The block forbids winking at it, being witty
+about it, and threatening the adventurer — he has stopped caring about them entirely.
+
+⚠ **Without server-chosen shapes, every boss says "GET IT AWAY."** Measured **8/8** across Herx
+and both twins — the model converges on the single most obvious panic line, which is fatal for
+something a player sees once in a playthrough. `RATFEAR_SHAPES` picks the *shape* (order it
+removed, bargain, deny it, lose the thread of a threat, say please) and the model only voices it:
+**8/8 unique** after. Same fix as the spy crack, the sabotage tell and the map pitch.
+
+He also speaks with **his own canon** — `_lore_key("Baron Herx")` resolves to the individual's
+lore entry, not the generic lich's, via the same `npc_name` routing the named-NPC work established.
+
+> *"Is that...a rat?! Can you all see this?! It's impossible! I have wards, I have incantations, I have—!"*
+> *"Please... remove it. I'll give you my most powerful artifact, everything in my vaults... just get rid of it."*
+> *"I will... I'll show you the true meaning of torment, adventurer, but first... GET IT AWAY FROM ME!"*
+> *"Please, get... that thing off my floor."*
+
 ### ⚠ Remark cadence: three tiers, because one cooldown was the wrong shape
 
 With **31 kinds** of remark, a single shared cooldown either lets flavour crowd out the things

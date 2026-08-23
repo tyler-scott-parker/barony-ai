@@ -1059,6 +1059,54 @@ def build_valuable_prompt(race, floor, map_name, look, category, value, allegian
               "it LOOKS and what that is worth.\n"
             + REMARK_TAIL)
 
+# ---- The rat (easter egg) ----------------------------------------------------------------------
+# Walk a RAT follower all the way to the Baron -- or to the Archmagisters at the very bottom --
+# and there is a coin-flip chance the boss simply cannot cope with it.
+#
+# ⚠ PLAYED STRAIGHT. The joke is a dread lich undone by vermin, and it only works if he means it.
+# Written as a gag ("comically terrified") the model reaches for slapstick and the moment dies;
+# written as genuine, sudden, undignified terror it is funnier and it keeps the character intact.
+#
+# ⚠ The boss speaks, not the follower -- so this is the only line in the mod delivered by a
+# hostile, and it goes out through the NPC branch (bubble + chat, no follower machinery).
+# ⚠ WITHOUT THESE EVERY BOSS SAYS "GET IT AWAY". Measured 8/8 across Herx and both twins --
+# the model converges on the single most obvious panic line, which is fatal for something the
+# player sees once in a playthrough. Same fix as the spy crack, the sabotage tell and the map
+# pitch: the SHAPE of the line is chosen server-side and the model only voices it.
+RATFEAR_SHAPES = [
+    "Order it removed, as though there were still someone here who takes your orders.",
+    "Try to bargain with the adventurer about it — offer them something, anything, to take it away.",
+    "Refuse to believe it. Demand to know whether they can see it too.",
+    "Something from long before any of this surfaces — you are briefly not a lich at all.",
+    "Begin a threat you have made a thousand times and lose the thread of it halfway through.",
+    "Give an instruction to someone who is not there, and who has not been there for a very long time.",
+    "Tell it to stop looking at you.",
+    "Ask them to move it. Say please, which you have not said in centuries.",
+]
+
+RATFEAR_ANGLE = (
+    "⚠ You are TERRIFIED OF RATS. Not amused, not disdainful — genuinely, helplessly afraid, in "
+    "a way you have never let anyone see and cannot hide now. Everything you are — the power, "
+    "the centuries, the dread you have built around yourself — has just gone out from under you "
+    "because there is a rat in the room.\n"
+    "Say ONE line, in your own voice, as this comes apart. It can break off. It can be a "
+    "demand, a plea, or something small and undignified that you would never normally say.\n"
+    "⚠ Do NOT play it for laughs, do NOT wink at the joke, and do NOT be witty about it — you "
+    "are not in on this. Do NOT threaten the adventurer; you have stopped caring about them "
+    "entirely. The rat is the only thing in the world right now.\n")
+
+def build_ratfear_prompt(boss_name, race, floor, map_name):
+    head, body, limits = _persona(race, True, floor, map_name, npc_name=_lore_key(boss_name),
+                                  books=False, budget=6)
+    return (head
+            + f"YOU ARE {boss_name}, in your own lair at the bottom of everything, and an "
+              "adventurer has just walked in to face you.\n"
+            + body
+            + "They have brought a RAT with them. It is here, on the floor, looking at you.\n"
+            + RATFEAR_ANGLE
+            + "THE SHAPE YOUR LINE TAKES: " + random.choice(RATFEAR_SHAPES) + "\n"
+            + "Respond with ONLY one short spoken line. No narration, no quotes, no JSON.")
+
 def build_heckle_prompt(race, floor, count):
     return (
         "You are a DUMMYBOT: a training dummy on a spring, bolted together out of scrap and "
@@ -4098,6 +4146,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 logrec("heckle", race=race, floor=floor, asked=count, got=len(lines),
                        gen_ms=int((time.time() - _t0) * 1000), sample=lines[:3])
                 return self._send_json({"lines": lines})
+
+            # ⚠ The easter egg: a rat brought all the way to the Baron. Answered before any
+            # follower state is touched -- the speaker here is the BOSS, not a follower.
+            if data.get("ratfear"):
+                boss_name = (data.get("boss") or "the Baron").strip()
+                prompt_x = build_ratfear_prompt(boss_name, race, floor, map_name)
+                raw_x = ask_ollama(prompt_x)
+                line_x = (raw_x or "").strip().strip('"').split("\n")[0][:200]
+                print(f"[SERVICE] -> RATFEAR {boss_name}: {line_x}")
+                logrec("ratfear", boss=boss_name, race=race, floor=floor, map=map_name,
+                       player=player, reply=line_x[:200])
+                tts_emit(line_x, race, uid, "npc", boss_name, player)
+                return self._send_json({"reply": line_x, "action": "NONE"})
 
             # A follower reacting to something valuable the player just picked up. Short form:
             # no conversation state, no boons, no relationship movement -- it is a remark, not

@@ -545,5 +545,33 @@ ck("an unknown victim falls back to the dangerous case",
    "RIGHT NOW" in S.build_remark_prompt("strangle", "human", 7, "swamp", "loyal",
                                         {"victim": "gnome"}))
 
+# --- the rat (easter egg) ----------------------------------------------------------------------
+# Walk a RAT follower all the way to the Baron -- or the Archmagisters -- and there is a coin-flip
+# chance the boss cannot cope with it.
+#
+# ⚠ Nothing is spawned. Both winning portals sit INVISIBLE on their floor and reveal themselves
+# once no boss of the right kind is left in map.creatures (actladder.cpp:460 and :721), so the
+# whole mechanism is "the boss dies" and the game does the rest.
+_rf = S.build_ratfear_prompt("Baron Herx", "lich", 20, "Boss")
+ck("the boss speaks, and is named", "YOU ARE Baron Herx" in _rf)
+ck("the rat is in the room", "brought a RAT" in _rf)
+ck("he is genuinely afraid, not amused", "genuinely, helplessly afraid" in _rf)
+# ⚠ PLAYED STRAIGHT. The joke is a dread lich undone by vermin, and it only works if he means it.
+ck("and it is not played for laughs", "Do NOT play it for laughs" in _rf)
+ck("he stops caring about the adventurer", "Do NOT threaten the adventurer" in _rf)
+# ⚠ He gets his OWN canon: _lore_key("Baron Herx") is the individual's lore entry, not the
+# generic lich's, which is the same npc_name routing the named-NPC work established.
+ck("his lore key resolves to the individual", S._lore_key("Baron Herx") == "baron_herx")
+
+# ⚠ WITHOUT SERVER-CHOSEN SHAPES EVERY BOSS SAYS "GET IT AWAY" -- measured 8/8 across Herx and
+# both twins, which is fatal for something seen once a playthrough. Same fix as the spy crack,
+# the sabotage tell and the map pitch. 8/8 unique after.
+ck("the shape of the line is chosen server-side", len(S.RATFEAR_SHAPES) >= 6)
+ck("and one of them is in the prompt",
+   any(sh in _rf for sh in S.RATFEAR_SHAPES))
+ck("no two shapes are the same", len(set(S.RATFEAR_SHAPES)) == len(S.RATFEAR_SHAPES))
+ck("the twins get it too", "YOU ARE Erudyce" in
+   S.build_ratfear_prompt("Erudyce", "frosty lich", 35, "Sanctum"))
+
 print("\n%d failure(s)" % len(fails), fails)
 sys.exit(1 if fails else 0)
