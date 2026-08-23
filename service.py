@@ -585,6 +585,9 @@ MERC_HAGGLE_STEP  = 1       # a mercenary at your shoulder talks the merchant do
 MERC_RATES = {
     #  kind        base  per_floor   what it buys
     "identify":  {"base":  25, "per_floor":  5},   # the everyday repeatable
+    # ⚠ His best product, and the only one he OFFERS rather than being asked for. Priced
+    # between the two: dearer than an appraisal, well under heading off the minotaur.
+    "map":       {"base":  50, "per_floor": 10},
     "minotaur":  {"base": 100, "per_floor": 25},   # it saves your run; it should hurt
     # ⚠ Sokoban is a CUT of what he recovers, not a fee -- self-balancing, no floor scaling,
     # and thematically exact. The engine counts the gold on the floor and sends it, because
@@ -1214,6 +1217,7 @@ def reset_run():
     LAST_CHARGE.clear()
     LAST_FAVOUR.clear()
     LAST_QUOTE.clear()
+    MERC_LATE.clear()
     npc_state.clear()
     PERSISTENT_IDENTITY.clear()
     _NAMES_TAKEN.clear()   # names actually revealed are held by name_history.json instead
@@ -1672,6 +1676,7 @@ MERC_NO_NUMBERS = ("Do NOT state a price, a number, an amount of gold or any fig
 
 MERC_JOB_WORDS = {
     "identify": "telling them what a thing they are carrying actually is",
+    "map":      "what you learned walking this floor",
     "minotaur": "dealing with the trouble you can feel on this floor",
     "sokoban":  "clearing this room of boulders for them",
 }
@@ -1704,6 +1709,10 @@ MERC_JOB_DONE = {
                  "pits by accident. Do NOT boast and do NOT make a speech."),
     "identify": ("Give them your appraisal of the thing, as instructed above, and nothing "
                  "else."),
+    # ⚠ The map does NOT use this path -- it needs the post-limits slot and a much lower
+    # prohibition-to-instruction ratio, so it builds its own block in _merc_section. Kept only
+    # so the "every service can report its job" test stays meaningful.
+    "map":      ("Say, shortly, that they have the whole of this floor now."),
 }
 
 def merc_paid_section(kind):
@@ -1802,6 +1811,33 @@ BOON_STATE = {"good_used": set(), "map_used": set()}   # per-player once-per-run
 #
 # Stronger than a scroll of magic mapping (that reveals 16+8*beatitude tiles; this reveals the
 # floor), so it is once per run per player, like the good item.
+# ⚠ The pitch is chosen SERVER-SIDE, like the spy crack, the sabotage tell and the haggle
+# angle. Measured with the model asked to invent the offer itself: 0/6 at friendship 0 and
+# 0/6 at friendship 30 -- it ignored the block completely and made small talk, even placed
+# last and after the limits. Every block that measures well in this project hands over
+# concrete content and leaves only the phrasing to the 8B; this one was asking it to invent
+# the substance, which is the one thing it reliably will not do on command.
+# The delivery, once paid. ⚠ Same failure as the pitch and the same fix: the first version
+# reused merc_paid_section, whose map wording ran three prohibitions ("do NOT list directions,
+# do NOT name rooms, do NOT describe the floor") against one instruction -- and the safest way
+# to obey "do not describe the floor" is to not mention the floor at all. Measured 0/6 with the
+# mechanics landing perfectly every time; the speech simply went elsewhere.
+MAP_DELIVERED_ANGLES = [
+    "that is the lot of it — every corridor and every dead end on this level, and they have it now",
+    "you have just walked them through the whole floor, and there is nothing left of it they do not know",
+    "they know this level as well as you do now, and you are square",
+    "that is the shape of the place, all of it, and it is theirs now",
+    "you have given them the whole of it, end to end, and that is your part done",
+]
+
+MAP_PITCH_ANGLES = [
+    "you were gone a good while earlier, and you came back knowing the shape of this whole level",
+    "you have already walked every corridor on this floor, end to end, while they were busy",
+    "you know where every dead end on this level is, and they do not",
+    "you scouted the whole of this floor earlier and kept what you learned to yourself",
+    "there is not a passage on this level you have not already put your feet in",
+]
+
 BOON_MAP_MIN_CURIOSITY = 40
 BOON_MAP_MIN_FRIENDSHIP = 20
 BOON_MAP_CHANCE = 0.25
@@ -1814,6 +1850,14 @@ LAST_SABOTAGE = {}   # uid -> "minotaur", pending delivery to C++
 LAST_CHARGE = {}   # uid -> gold to deduct from the owning player, pending delivery to C++
 LAST_FAVOUR = {}   # uid -> "minotaur"/"sokoban" the engine should now actually perform
 LAST_QUOTE  = {}   # uid -> "kind:price" for the engine to print; the model never says a number
+# ⚠ Mercenary text that must be emitted AFTER the hard limits, not inside the follower block.
+# Anything about the MAP is a knowledge claim about this place, and LIMITS_HEADER spends a
+# paragraph forbidding exactly that ("do NOT describe its traps, corridors, chambers,
+# contents"; "an honest 'I do not know' is always the correct reply"). Measured with the offer
+# in the ordinary boon slot: the quote stamped correctly and the price was right, and the model
+# ignored the pitch 4/4, making small talk about goblins instead. This is the same ordering bug
+# the Herx secret had, and it takes the same fix -- see _secret_override.
+MERC_LATE = {}     # uid -> prompt text to emit after `limits`
 
 def boon_roll(st, floor, player=0):
     """One boon per follower per floor, chance scaling with friendship.
@@ -1823,7 +1867,24 @@ def boon_roll(st, floor, player=0):
     # bot has no pockets. Neither can hand you bread.
     if st.get("origin") in NO_BOON_ORIGINS:
         return None
-    if f < BOON_MIN_FRIENDSHIP or st.get("last_boon_floor") == floor:
+    if st.get("last_boon_floor") == floor:
+        return None
+    # ⚠ The mercenary's map SALE is checked BEFORE the friendship gate, because it is not a
+    # boon. Everything else below this line is generosity -- a follower doing something nice
+    # because they have come to like you -- and it is rightly gated on friendship and scales
+    # with it. Selling you a map is a transaction, and the whole point of the allegiance is
+    # that a transaction does not require him to like you.
+    #
+    # It still consumes the floor's boon slot, so he cannot pitch it every time you speak;
+    # and curiosity >= 40 remains, because that is the CAPABILITY gate -- it is what makes
+    # him the sort who wanders off and looks. Curiosity starts at 15 and has to be earned up,
+    # so this cannot fire in the opening floors anyway.
+    if (is_merc(st) and player not in BOON_STATE["map_used"]
+            and st.get("curiosity", 0) >= BOON_MAP_MIN_CURIOSITY
+            and random.random() < BOON_MAP_CHANCE):
+        st["last_boon_floor"] = floor
+        return ("map_offer", "")
+    if f < BOON_MIN_FRIENDSHIP:
         return None
     if random.random() >= min(0.35, (f - BOON_MIN_FRIENDSHIP) / 200.0):
         return None
@@ -1837,6 +1898,7 @@ def boon_roll(st, floor, player=0):
     # what they know, so their boons skew hard to information instead.
     merc = st.get("allegiance") == "self_interested"
     if merc:
+        # The map sale is decided above, before the friendship gate -- see there.
         if random.random() < MERC_INFO_SHARE:
             return ("info", "")
         it, ct = random.choice(BOON_MUNDANE)
@@ -1875,6 +1937,24 @@ def _boon_section(uid, st, race_l, floor, player=0):
         return ("UNPROMPTED: you decide to share something useful with them now, "
                 "unasked, because you have come to trust them. Work it naturally into your reply: "
                 + pick + "\n")
+    if kind == "map_offer":
+        # ⚠ The once-per-run latch is NOT spent here. He has only made a pitch; a declined
+        # offer must not burn the player's one map for the run. It is spent on the SALE,
+        # in _merc_section.
+        price = merc_quote(st, "map", floor)
+        LAST_QUOTE[uid] = "map:%d" % price
+        logrec("merc", uid=uid, what="map", stage="quoted", price=price, floor=floor)
+        MERC_LATE[uid] = (
+            "AN EXCEPTION TO THE LIMITS ABOVE — THIS floor, the one you are both standing on, "
+            "you DO know. You slipped away earlier and walked the whole of it.\n"
+            "SAY THIS, in your own words, and make it the WHOLE of your reply: "
+            + random.choice(MAP_PITCH_ANGLES) + " — and you will tell them what you found if "
+            "they make it worth your while.\n"
+            "This offer must be the main thing your reply says. Answering their question with "
+            "news, observations or small talk INSTEAD of making the offer is WRONG, and so is "
+            "saying you do not know this floor. Do not describe the layout itself yet — that "
+            "is what they are buying.\n" + MERC_NO_NUMBERS)
+        return ""
     if kind == "map":
         LAST_BOON[uid] = "map:"
         logrec("boon", uid=uid, boon_kind="map")
@@ -1901,7 +1981,7 @@ def merc_declined_section(kind):
             "all — all three are WRONG. It is their business if they would rather go without.\n"
             + MERC_NO_NUMBERS)
 
-def _merc_section(uid, st, floor, says, gold=0):
+def _merc_section(uid, st, floor, says, gold=0, ident=None):
     """Settle a quote the player is answering. Returns the prompt block, and stamps the
     engine-side latches when a deal is actually struck.
 
@@ -1911,10 +1991,17 @@ def _merc_section(uid, st, floor, says, gold=0):
     q = st.get("quote")
     if not q or not is_merc(st):
         return ""
+    # ⚠ Not while an identify request is in flight. That path has ALREADY stamped LAST_CHARGE
+    # for its own fee before build_prompt ran, and there is one slot per uid -- settling a
+    # second deal here would overwrite it and one of the two jobs would be done unpaid. The
+    # quote simply stays on the table; the player can say yes again next turn. This is also
+    # the "one special behaviour per reply" rule the boon and spy-crack suppressions follow.
+    if ident:
+        return ""
     kind = q["kind"]
     # A quote for work on THIS floor dies with the floor: the minotaur's clock and the boulder
     # room are both left behind, and an offer that outlives the job is just clutter.
-    if kind in ("minotaur", "sokoban") and q.get("floor") != floor:
+    if kind in ("minotaur", "sokoban", "map") and q.get("floor") != floor:
         st.pop("quote", None)
         return ""
     ans = agrees_to_quote(says)
@@ -1932,6 +2019,24 @@ def _merc_section(uid, st, floor, says, gold=0):
     if kind in ("minotaur", "sokoban"):
         LAST_FAVOUR[uid] = kind        # the engine performs it on this reply
         GUARD_STATE[kind] = True       # and it is spent, whoever else asks
+    elif kind == "map":
+        # Delivered down the ordinary boon channel -- the engine already knows "map:" and
+        # calls spell_magicMap, which replicates to a remote client by itself.
+        LAST_BOON[uid] = "map:"
+        BOON_STATE["map_used"].add(st.get("owner", 0))   # spent now, on the sale
+        # ⚠ Late again: "you have told them the whole layout" is the same knowledge claim the
+        # limits forbid, so it has to land after them or it loses the same way the offer did.
+        # Written positive-led with server-chosen content and ONE short prohibition -- see
+        # MAP_DELIVERED_ANGLES for what the prohibition-heavy version measured.
+        MERC_LATE[uid] = (
+            "AN EXCEPTION TO THE LIMITS ABOVE — THIS floor you DO know; you walked the whole "
+            "of it earlier, and you have just finished telling them what is where. They have "
+            "paid you for it and you are square.\n"
+            "SAY THIS, in your own words, and make it the WHOLE of your reply: "
+            + random.choice(MAP_DELIVERED_ANGLES) + ".\n"
+            "Speak of it as already done and already told. They have it now, so there is no "
+            "need to go back over any of it. Do not mention the payment.\n" + MERC_NO_NUMBERS)
+        return ""
     print(f"[SERVICE-DBG] mercenary {uid} hired for {kind}: {q['price']} gold")
     logrec("merc", uid=uid, what=kind, stage="hired", price=q["price"], gold=gold, floor=floor)
     return merc_paid_section(kind)
@@ -2295,8 +2400,17 @@ def _follower_sections(uid, race, floor, says, player=0, ident=None, gold=0):
     alleg = allegiance_section(st, says)
     # Settled before the boon roll: a man who has just been hired is not also handing out
     # free bread in the same breath.
-    merc = _merc_section(uid, st, floor, says, gold)
+    merc = _merc_section(uid, st, floor, says, gold, ident)
     boon = "" if merc else _boon_section(uid, st, race_l, floor, player)
+    if uid in MERC_LATE:
+        boon = ""              # a map sale is being made; nothing else unprompted this turn
+    # ⚠ A map SALE has to land late, where the other mercenary blocks do. Measured in the boon
+    # slot -- which sits mid-prompt, before the allegiance and obedience blocks -- the offer
+    # fired correctly (quote stamped, price right) and the model ignored it completely, talking
+    # about goblins instead. Position is a lever at 8B: whatever comes later competes and wins.
+    # A free boon can afford that slot because items and maps are applied whether or not the
+    # line is spoken; an OFFER is nothing but the line, so it has to be heard.
+
     secret = _secret_section(uid, st, race, says, floor)
     # ⚠ Not while a secret is being told: two unprompted behaviours in one reply and the later
     # one takes the turn. Unlike the Herx/crack pair -- which measured as ALIGNED, both being
@@ -2377,8 +2491,16 @@ def build_prompt(race, floor, says="", uid=0, player=0, player_name="", party=1,
         # is the once-per-run payoff of the whole arc while the crack fires every turn it can.
         # Measured: the crack ate a false secret outright ("I've learned some things about
         # myself that maybe aren't entirely... honest" — and no secret). Spec 35/36.
+        # ⚠ Stands down for a map sale too, for the reason given above: the sale is a mandatory
+        # unprompted behaviour and so is the crack, and the later one takes the turn.
         + (spy_crack_section(get_follower_state(uid, race, player))
-           if (uid and not ident and uid not in LAST_SABOTAGE) else "")
+           if (uid and not ident and uid not in LAST_SABOTAGE and uid not in MERC_LATE) else "")
+        # ⚠ THE LAST THING IN THE PROMPT, which is the slot the spy crack measured 20/20 from.
+        # It has to be after `limits` (it is a knowledge claim about a place, which the limits
+        # forbid at length — the Herx carve-out has the same problem) AND after the action
+        # rules, because at 8B whatever lands later competes and wins. Measured immediately
+        # after the limits but BEFORE the action rules: 2/6. Here: see below.
+        + (MERC_LATE.pop(uid, "") if uid else "")
         + 'Respond ONLY with JSON, no other text, like: {"speech": "your line", "action": "FOLLOW"}'
     )
 

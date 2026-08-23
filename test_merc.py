@@ -170,5 +170,72 @@ ck("and every one has a name for the job", all(k in S.MERC_JOB_WORDS for k in S.
 ck("the refusal forbids sounding like agreement",
    "Alright" in S.merc_broke_section("minotaur"))
 
+# --- 9. he SELLS the map rather than giving it ---------------------------------------------
+# ⚠ The map boon could not fire for a mercenary at all before this: the self_interested branch
+# in boon_roll returned before the map check, so his best product was unsellable.
+S.reset_run()
+def merc_map(uid, f=20, cur=60):
+    S.follower_state.pop(uid, None)
+    st = S.get_follower_state(uid, "human", 0)
+    st.update(allegiance="self_interested", friendship=f, curiosity=cur, name="Skarn")
+    return st
+
+st = merc_map(40)
+got = None
+for _ in range(400):
+    st.pop("last_boon_floor", None)
+    r = S.boon_roll(st, 9, 0)
+    if r and r[0] == "map_offer": got = r; break
+ck("a mercenary can be offered the map sale at all", got is not None)
+
+# ⚠ The sale is checked BEFORE the friendship gate, because it is a transaction rather than
+# generosity -- everything else in boon_roll is a gift and is rightly friendship-gated.
+st = merc_map(41, f=0)
+sold = False
+for _ in range(400):
+    st.pop("last_boon_floor", None)
+    r = S.boon_roll(st, 9, 0)
+    if r and r[0] == "map_offer": sold = True; break
+ck("and at friendship 0, because it is a sale and not a gift", sold)
+ck("curiosity is still required -- it is the capability gate",
+   all(S.boon_roll(merc_map(42, f=0, cur=10), 9, 0) != ("map_offer", "") for _ in range(200)))
+
+# ⚠ A declined offer must NOT burn the player's one map for the run.
+S.reset_run()
+st = merc_map(43)
+for _ in range(400):
+    st.pop("last_boon_floor", None)
+    S.MERC_LATE.pop(43, None)
+    S._boon_section(43, st, "human", 9, 0)
+    if 43 in S.MERC_LATE: break
+ck("pitching does not spend the once-per-run map", 0 not in S.BOON_STATE["map_used"])
+ck("but it does put a price on the table", st.get("quote", {}).get("kind") == "map")
+ck("and the price is right", st["quote"]["price"] == S.merc_price("map", 9))
+ck("the pitch is emitted LATE, not in the boon slot", 43 in S.MERC_LATE)
+S.MERC_LATE.pop(43, None)
+_sec = S._merc_section(43, st, 9, "alright, deal", gold=9999)
+ck("agreeing spends it now", 0 in S.BOON_STATE["map_used"])
+ck("and delivers down the ordinary boon channel", S.LAST_BOON.get(43) == "map:")
+ck("and charges the fee", S.LAST_CHARGE.get(43) == S.merc_price("map", 9))
+ck("the delivery is emitted late too", 43 in S.MERC_LATE)
+
+# ⚠ Both map blocks are knowledge claims about a place, which LIMITS_HEADER forbids at length.
+# They must carve themselves out of the limits explicitly, the way _secret_override does.
+ck("the late blocks name themselves an exception to the limits",
+   "EXCEPTION TO THE LIMITS" in S.MERC_LATE[43])
+# ⚠ Both hand over concrete content. Asked to invent the offer itself the model ignored the
+# block entirely -- 0/6 at friendship 0 and 0/6 at friendship 30, even placed last.
+ck("the pitch angles are server-chosen", len(S.MAP_PITCH_ANGLES) >= 4)
+ck("so are the delivery angles", len(S.MAP_DELIVERED_ANGLES) >= 4)
+S.MERC_LATE.clear()
+
+# Cannot pay -> refused, and the map is NOT spent.
+S.reset_run()
+st = merc_map(44)
+S.merc_quote(st, "map", 9)
+_b = S._merc_section(44, st, 9, "yes", gold=0)
+ck("too poor for the map means no map", "CANNOT PAY" in _b
+   and 44 not in S.LAST_BOON and 0 not in S.BOON_STATE["map_used"])
+
 print("\n%d failure(s)" % len(fails), fails)
 sys.exit(1 if fails else 0)

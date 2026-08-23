@@ -902,9 +902,59 @@ speech act and forbid the specific route out:**
 ⚠ **`LAST_CHARGE` / `LAST_FAVOUR` / `LAST_QUOTE` are per-run latches and are cleared in
 `reset_run`** — the `LAST_SABOTAGE` leak class, and this one takes the player's money.
 
-**Not done:** the map boon still cannot fire for a mercenary at all (the `self_interested` branch
-in `boon_roll` returns before the map check), so his best product is unsellable. Charging for an
-*unprompted* gift does not fit the ask→quote→accept shape, so it needs its own offer path.
+#### He sells the map, and it took three attempts to make him say so
+
+His best product, and the only service he **offers** rather than being asked for — so it needed
+an offer path rather than the ask→quote→accept one. He pitches, you agree, he is paid, the
+minimap fills in. `50 + 10×floor`.
+
+⚠ **The sale is checked BEFORE the friendship gate in `boon_roll`.** Everything below that gate
+is *generosity* — a follower doing something nice because they have come to like you — and is
+rightly friendship-gated and friendship-scaled. Selling you a map is a transaction, and the whole
+point of the allegiance is that a transaction does not require him to like you. Verified firing at
+**friendship 0**. Curiosity ≥40 stays, because it is the **capability** gate: it is what makes him
+the sort who wanders off and looks. It still consumes the floor's boon slot, so he cannot pitch
+every time you speak — measured **170/200** floors produce the pitch within 15 exchanges, the
+other 30 pre-empted by an ordinary boon stamping the slot first.
+
+⚠ **The once-per-run latch is spent on the SALE, not the offer** — a declined pitch must not burn
+the player's one map for the run.
+
+**Three failures, in order, and the third is the one worth remembering:**
+
+| Attempt | Result |
+|---|---|
+| offer block in the ordinary boon slot | **0/6** — ignored completely, small talk about goblins |
+| moved after `limits`, before the action rules | **2/6** |
+| moved to the LAST slot **and** given server-chosen content | **~6/8** |
+
+1. ⚠ **It is a knowledge claim about a place, and `LIMITS_HEADER` forbids exactly that** — at
+   length, including *"do NOT describe its traps, corridors, chambers, contents"* and *"an honest
+   'I do not know' is always the correct reply."* Same ordering problem as the Herx secret, and it
+   needs the same fix: the block names itself `AN EXCEPTION TO THE LIMITS ABOVE` and lands after
+   them. `MERC_LATE` is that channel.
+2. ⚠ **Position again: the true last slot is after the ACTION RULES**, where the spy crack sits
+   (20/20). After `limits` but before them scored only 2/6.
+3. ⚠ **But the real cause was that it asked the 8B to invent the substance.** Every block that
+   measures well here hands over concrete content and leaves only the phrasing —
+   `_secret_override` quotes the actual secret, the info boon quotes the actual fact, the spy
+   crack and the sabotage tell are chosen server-side. `MAP_PITCH_ANGLES` and
+   `MAP_DELIVERED_ANGLES` do the same. **Placement alone did not fix it; content did.**
+
+⚠ **The delivery block failed the same way for the same reason.** Reusing `merc_paid_section` ran
+three prohibitions (*"do NOT list directions, do NOT name rooms, do NOT describe the floor"*)
+against one instruction — and the safest way to obey *"do not describe the floor"* is not to
+mention the floor at all. **0/6**, with the mechanics landing perfectly every time. Rewritten
+positive-led with one short prohibition: **~8/10**.
+
+⚠ **A bad probe nearly cost a working prompt.** The first delivery regex scored the rewrite 1/6;
+reading the actual replies, *"I've given you the lay of the land on this floor"*, *"You've got a
+map of the floor"* and *"the lowdown on this floor"* were all deliveries it did not match. Read
+the outputs before believing the number — the same lesson the sabotage-tell probe taught.
+
+**A missed line is not a broken feature**: the fee, the `map:` boon and the minimap fill are 100%
+regardless, and the engine prints *"(Skarn wants 140 gold for the layout of this floor. Say yes to
+agree.)"* whether or not the pitch was spoken.
 
 ### Allegiance & spies
 Weighted roll at recruitment: **loyal 70 / self_interested 15 / fearful 8 / spy 7**. Never shown to the player. Spies get a motive and behavioral tells: deflect on personal history, over-interest in the player's gear and plans, hesitation at Herx's name. `allegiance_section(st, says)` detects probing questions and sharpens the tell.
