@@ -254,6 +254,26 @@ def main():
                 if len(rem) / dur_min > 3:
                     print("   !! over 3/min -- consider raising MYMOD_TIER_GAP for idle/event")
 
+        # --- ⚠ EVERY TRANSCRIPT, including the ones that became notes. Whisper mishears, and a
+        # strange follower reply is very often a transcription failure wearing a model failure's
+        # clothes. This is the line that tells them apart.
+        heard = [r for r in recs if "voice: heard" in r.get("msg", "")]
+        if heard:
+            print(f"\nVOICE TRANSCRIPTS ({len(heard)})")
+            for r in heard:
+                print(f"   t={r['t']:>8.1f}  {r.get('msg','').replace('voice: heard ','')}")
+
+        # --- ⚠ SPOKEN INPUT: what was actually heard, and the notes taken by voice ---
+        # A mis-transcription reads as the player saying something strange, so the transcript is
+        # worth seeing next to the reply it produced. Anything opening with note/log/bug/todo/
+        # mark is routed to the timeline as a player note instead of to a follower.
+        spoken = [r for r in recs if r.get("via") == "voice"]
+        if spoken:
+            print(f"\nSPOKEN TO A FOLLOWER ({len(spoken)})")
+            for r in spoken:
+                print(f"   t={r['t']:>8.1f}  heard: \"{r.get('says','')}\"")
+                print(f"                 -> {r.get('reply','')[:110]}")
+
         # --- the mercenary's economy ---
         merc = [r for r in recs if r.get("kind") == "merc"]
         if merc:

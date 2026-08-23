@@ -4190,7 +4190,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
             player_kind = (data.get("player_kind") or "").strip()
             _req_set(engine_name=(data.get("follower_name") or "").strip(),
                      floor=floor,
-                     persist=int(data.get("persist", 0) or 0))
+                     persist=int(data.get("persist", 0) or 0),
+                     # ⚠ "voice" when this line was spoken rather than typed. A mangled
+                     # transcript reads as the player saying something strange, and without
+                     # this the log cannot tell a transcription failure from a model failure.
+                     via=(data.get("via") or "typed").strip())
             # How this follower came to be, and the part of its identity that outlives this
             # body (see the origin section). Empty for an ordinary recruit.
             origin = (data.get("origin") or "").strip()
@@ -4621,7 +4625,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             _open = [n for n, g, _ in DISCLOSURE_TIERS if _st and g(_st)]
             _tens = len([1 for c, _x in DIMENSION_TENSIONS if _st and c(_st)])
             logrec(_kind, uid=uid, race=race, floor=floor, map=map_name, player=player,
-                   says=says[:160], reply=speech[:400], action=action, name=name,
+                   via=(_req("via") if _req("via") != "typed" else None),
+                   says=says[:400], reply=speech[:400], action=action, name=name,
                    allegiance=(_st.get("allegiance") if _st else None),
                    open_tiers=(len(_open) if _st else None),
                    tensions=(_tens or None) if _st else None,

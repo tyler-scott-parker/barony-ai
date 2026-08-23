@@ -22,6 +22,17 @@ The binary is already built and copied. The service must be running **before** y
 | `/ailog <what went wrong>` | drops a note into the timeline. **Use it constantly.** `logreview` prints these first, and one line of "the bubble never appeared here" is worth more than an hour of guessing afterwards |
 | `/aistatus` | dumps what the mod currently believes: partner, busy flags, follower watch, Herx debuff |
 
+**Or just say it.** Hold **V** and start with **note / log / bug / todo / mark** and the rest goes
+into the timeline instead of to your follower:
+
+> *"note the bubble never appeared here"* → `NOTE (p0): (spoken) the bubble never appeared here`
+
+⚠ It has to be the first word, so ordinary speech is safe — *"nothing here is worth taking"*,
+*"logging off soon"* and *"bugbears are ahead"* all still reach your follower (13 assertions in
+`src/mymod/notetest.cpp`). **Every** transcript is logged either way, so if whisper mishears you
+the review shows what it actually heard next to the reply it produced — which is how you tell a
+transcription failure from a model failure.
+
 Afterwards: `python3 ~/barony-ai/logreview.py`
 
 ---
