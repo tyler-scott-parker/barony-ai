@@ -359,6 +359,31 @@ REMARK_SITUATION = {
     # Routed to build_death_prompt, which needs the own/can_return pair; this entry exists so
     # the handler recognises the kind.
     "death": "An adventurer has been killed.",
+    # ⚠ {look} is the boss's REAL name, read from stats->name engine-side -- "Baphomet",
+    # "Baron Herx", "Erudyce", "Orpheus" -- never guessed from the race, because LICH_ICE and
+    # LICH_FIRE are ordinary elemental liches unless spawned as the named pair.
+    "bossfight": ("{look} is HERE, in front of you, alive and enormous, and the fight is "
+                  "starting. This is not another dungeon creature — this is the thing this "
+                  "whole floor was built around. It is happening RIGHT NOW."),
+    "bossdown": ("{look} is DEAD. Between you, you have brought down the thing this whole "
+                 "stretch of the dungeon belonged to. It is over, and the quiet after it is "
+                 "enormous."),
+    # ⚠ {look} is the area, keyed engine-side on the map's INTERNAL name -- several of which do
+    # not match their filename (hamlet.lmp is "Mages Guild").
+    # ⚠ THREE attempts, and the third failure was self-inflicted:
+    #   1. no requirement          -> bare oaths that never said where ("By the bones of Herx's
+    #                                 victims...") -- 2 of 8 misses
+    #   2. "make clear WHERE you have arrived" -> 1/6, and now INVENTING names: Uzgag's tunnels,
+    #                                 the Chamber of Wailing Stones, Krog's Grotto. Asking for a
+    #                                 name without anchoring one produces confabulation.
+    #   3. the fix, but with those invented names quoted in the prompt as things not to do ->
+    #      the goblin promptly said "Uzgag's Maze". ⚠ THE EXAMPLES PRIMED IT. Exactly the spy
+    #      crack's lesson ("the model copies the incriminating noun"), and the examples now live
+    #      here in the comment where they belong rather than in the prompt.
+    "area": ("You have both just walked into {look}. This is not another stretch of corridor; "
+             "it is somewhere, and you know it the moment you are through the door.\n"
+             "This place is called {look}. Use that name, in your own phrasing. Do not invent "
+             "a different name for it, and do not answer with only an oath."),
     "arrowtrap": ("An arrow trap has just gone off and put a shaft in them. They are hurt and "
                   "there may be more of it. This is happening RIGHT NOW.\n"
                   "Do NOT claim you warned them and do NOT say you saw it coming — you did not."),
@@ -417,6 +442,27 @@ REMARK_ANGLE = {
         "bound": "You do not eat. Note it without interest.",
         "machine": "You do not eat. Note it without interest.",
         None: "React as YOUR kind would to that particular food — appetite, disgust, or a passing opinion. Keep it small; it is only a scrap of food.",
+    },
+    "bossfight": {
+        "self_interested": "No fee covers this. Say so — and then square up anyway, because running is worse.",
+        "fearful": "You are terrified and you are not hiding it. Say what you are about to do anyway.",
+        "bound": "Assess it. State what you see. You do not fear it.",
+        "machine": "Assess it. State what you see. You do not fear it.",
+        None: "React as YOUR kind would to something far above you — dread, defiance, awe, or a flat warning. Keep it to one breath; the fight is starting.",
+    },
+    "bossdown": {
+        "self_interested": "You have just been part of something people will pay to hear about. Say what it is worth to you.",
+        "fearful": "You did not think you would live through that. Say so.",
+        "bound": "State the outcome. It is a fact.",
+        "machine": "State the outcome. It is a fact.",
+        None: "React as YOUR kind would to having survived the impossible — disbelief, exhaustion, triumph, or a quiet word for what it cost.",
+    },
+    "area": {
+        "self_interested": "Somewhere new is somewhere with things worth having. Say what you make of the prospects.",
+        "fearful": "Somewhere new is somewhere you do not know the way out of.",
+        "bound": "Note where you have arrived. Nothing more.",
+        "machine": "Note where you have arrived. Nothing more.",
+        None: "React as YOUR kind would to arriving here — recognition, unease, curiosity, or an old opinion about the place.",
     },
     "kill": {
         "self_interested": "One more thing that will not be collecting on your contract. Say it dryly.",
@@ -637,6 +683,7 @@ def build_hunger_prompt(state, race, floor, map_name, allegiance="loyal", blood=
             + REMARK_TAIL)
 
 def build_remark_prompt(kind, race, floor, map_name, allegiance="loyal", ctx=None):
+    # Remarks made in Hell carry the dread too; a cheerful word about a chest is wrong down there.
     # ⚠ A mercenary told to think about "what the take is worth" invents a figure -- measured,
     # he answered an opened chest with "Sixty-five gold pieces, a decent haul". He cannot know
     # that, nothing displays it, and it is the same error the haggle block exists to stop. He
@@ -646,6 +693,7 @@ def build_remark_prompt(kind, race, floor, map_name, allegiance="loyal", ctx=Non
     if "{look}" in situation:
         situation = situation.replace("{look}", ((ctx or {}).get("look") or "some food"))
     return (_remark_head(race, floor, map_name)
+            + _dread_section(floor, map_name)
             + situation + "\n"
             + remark_angle(kind, allegiance) + "\n"
             + numbers
@@ -2818,6 +2866,32 @@ def _introduction_section(uid, st, race):
             "Say it plainly and without ceremony, the way you would tell someone what you are "
             "good for.\n" + INTRO_NO_BACKSTORY)
 
+# ---- Hell: a standing dread, not a one-off remark -------------------------------------------
+# ⚠ This is NOT a remark. Everything else in this section fires once on an event; being in Hell
+# colours every line a follower says while they are down there, so it belongs in build_prompt
+# beside _fearful_section rather than in the remark path.
+#
+# Region comes from floor_to_region, which already resolves by map.name first -- so the boss
+# floor ("Hell Boss") and the generated hell floors are both covered without a second table.
+HELL_DREAD = (
+    "WHERE YOU ARE: this is HELL. Not a deep part of the dungeon — the actual place, hot and "
+    "lit wrong, and everything native to it is older and worse than anything above. You are "
+    "frightened to be here and you do not entirely hide it: shorter sentences, an ear on the "
+    "dark, a wish to be finished and gone. This colours how you speak; it does not stop you "
+    "doing your job.\n")
+# ⚠ Baphomet is named because he is the fact of the place, and a follower who has come this far
+# knows whose ground this is. He is NOT described beyond that -- the hard limits still hold, and
+# a follower who has never seen him must not start inventing what he looks like.
+HELL_BAPHOMET = (
+    "Baphomet rules here, and you know it. If it comes up, you may say that this is his ground "
+    "and that he is somewhere below — but you have not seen him and you do NOT know what he "
+    "looks like, what he can do, or what he wants. Do not invent any of it.\n")
+
+def _dread_section(floor, map_name=""):
+    if floor_to_region(floor, map_name) != "hell":
+        return ""
+    return HELL_DREAD + HELL_BAPHOMET
+
 def _obedience_section(st):
     """Willingness to act on an order. Friendship alone was never the right input: someone can
     obey out of respect without warmth, or out of fear without loyalty, and resentment eats
@@ -2856,9 +2930,16 @@ def _follower_memory_block(st):
     if not lines:
         return ""
     return ("WHAT YOU ALREADY SAID TO THEM (stay consistent with this; do not contradict "
-            "yourself):\n" + _bullets(lines) + "\n")
+            "yourself):\n" + _bullets(lines) + "\n"
+            # ⚠ Without this the most obedient answer to "stay consistent" is to repeat the
+            # sentence, and a follower asked the same thing twice replies word for word --
+            # observed live, an introduction echoed back verbatim on the next exchange. Same
+            # fix, same wording, as the merchant who quoted its own previous line.
+            "Staying consistent means not contradicting the FACTS of what you said — it does "
+            "NOT mean repeating those sentences. If the same ground comes up again, say it a "
+            "different way.\n")
 
-def _follower_sections(uid, race, floor, says, player=0, ident=None, gold=0):
+def _follower_sections(uid, race, floor, says, player=0, ident=None, gold=0, map_name=""):
     """The relationship half of the prompt. Order matters: boon and secret rolls
     consume randomness, and the sections read as one escalating block."""
     race_l = race.lower()
@@ -2926,8 +3007,8 @@ def _follower_sections(uid, race, floor, says, player=0, ident=None, gold=0):
         MERC_LATE[uid] = intro
         intro = ""
     return (history + memory + relations + _name_section(st) + secret + boon + identify + alleg
-            + _obedience_section(st) + merc + intro + _fearful_section(st, floor) + fixed
-            + sabotage)
+            + _obedience_section(st) + merc + intro + _fearful_section(st, floor)
+            + _dread_section(floor, map_name) + fixed + sabotage)
 
 def build_prompt(race, floor, says="", uid=0, player=0, player_name="", party=1, map_name="",
                  ident=None, gold=0):
@@ -2953,7 +3034,8 @@ def build_prompt(race, floor, says="", uid=0, player=0, player_name="", party=1,
            f"YOU ARE: a {race} on dungeon floor {floor}, an ally the adventurer can command.\n")
         + body
         + party_line
-        + (_follower_sections(uid, race, floor, says, player, ident, gold) if uid else "")
+        + (_follower_sections(uid, race, floor, says, player, ident, gold, map_name)
+           if uid else "")
         # HARD LIMITS LAND HERE, AFTER the disclosure block inside _follower_sections.
         # Disclosure says "do not claim ignorance"; the limits say "say you do not know and
         # STOP". Whichever comes later wins, and it must be this one.
@@ -3377,7 +3459,10 @@ def _npc_memory_block(st):
     for e in st["exchanges"]:
         lines.append(f'{e["who"]} said: "{e["said"]}" — you replied: "{e["replied"]}"')
     return ("WHAT YOU ALREADY SAID TO THEM (stay consistent with this; do not contradict "
-            "yourself):\n" + _bullets(lines) + "\n")
+            "yourself):\n" + _bullets(lines) + "\n"
+            "Staying consistent means not contradicting the FACTS of what you said — it does "
+            "NOT mean repeating those sentences. If the same ground comes up again, say it a "
+            "different way.\n")
 
 def build_npc_prompt(race, floor, says="", uid=0, player=0, player_name="", haggle="",
                      name="", role="townsfolk", shop=-1, map_name="", greeting=False):

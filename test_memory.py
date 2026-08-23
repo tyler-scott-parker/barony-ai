@@ -68,5 +68,20 @@ for i in range(30):
 ck("and the per-floor cap still holds",
    st["friendship"] <= before + S.CHAT_CAP_PER_FLOOR, st["friendship"])
 
+# ⚠ "Stay consistent" alone makes repeating the sentence the most obedient answer available.
+# Observed live: a follower echoed its own introduction back word for word on the next exchange.
+# Same fix and same wording as the merchant who quoted its own previous line -- facts held,
+# phrasing varied.
+_st = S.get_follower_state(99, "human", 0)
+S.record_follower_interaction(99, "where are you from?", 3, 0, "Hamlet, born and raised.")
+_blk = S._follower_memory_block(_st)
+ck("the memory block still demands consistency", "do not contradict" in _blk)
+ck("but says consistency is about FACTS, not sentences",
+   "does NOT mean repeating those sentences" in _blk)
+ck("and asks for a different wording next time", "say it a different way" in _blk)
+ck("the NPC block carries the same fix",
+   "does NOT mean repeating those sentences" in S._npc_memory_block(
+       {"exchanges": [{"who": "Ada", "said": "hello", "replied": "well met"}]}))
+
 print("\n%d failure(s)" % len(fails), fails)
 sys.exit(1 if fails else 0)

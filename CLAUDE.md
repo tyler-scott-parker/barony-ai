@@ -1121,6 +1121,71 @@ get **me** out of the water"* — writing itself as the one drowning. Every haza
 says "this adventurer, not you": **0/10** after. Third time this exact clarification has been
 needed (drunk, hunger, now water); it is cheap and it always works, unlike naming a topic.
 
+#### Major bosses, special areas, and Hell
+
+| kind | fires on | |
+|---|---|---|
+| `bossfight` | a boss entity alive within 20 tiles, once per boss | allowed mid-fight — you meet a boss *by* fighting it |
+| `bossdown` | a tracked boss entity gone or at 0 HP | one line for the party |
+| `area` | `map.name` changing to a known special map | seeded silently on the first tick |
+
+⚠ **Bosses are tracked as ENTITIES, not through `kills[]`.** The tally only gives a race index,
+and a race is not an identity here: `LICH_ICE`/`LICH_FIRE` are **Erudyce** and **Orpheus** only
+when spawned as the named pair (`stat_shared.cpp:918`/`946`) and are ordinary elemental liches
+otherwise. Watching the entity lets the mod read `stats->name` — *"Baphomet"*, *"Baron Herx"*,
+*"Erudyce"*, *"Orpheus"* — and be right in both cases.
+
+⚠ **Boss tracking is cleared on a level change.** Leaving Herx's lair replaces the entity list,
+which would otherwise read exactly like his death.
+
+⚠ **Areas are keyed on the map's INTERNAL name**, read out of the `.lmp` headers rather than
+guessed — several do not match their filename at all:
+
+| file | `map.name` | file | `map.name` |
+|---|---|---|---|
+| `hamlet.lmp` | **Mages Guild** | `greatcastle.lmp` | **The Haunted Castle** |
+| `caveslair.lmp` | **Cockatrice Lair** | `boss.lmp` | **Boss** |
+| `gnomishmines.lmp` | The Gnomish Mines | `hellboss.lmp` | **Hell Boss** |
+
+#### ⚠ Four attempts at the area line, and the third failure was self-inflicted
+
+| attempt | result |
+|---|---|
+| no requirement | bare oaths that never said where — *"By the bones of Herx's victims…"* |
+| *"make clear WHERE you have arrived"* | **1/6**, and now **inventing** names: *Uzgag's tunnels*, *the Chamber of Wailing Stones*, *Krog's Grotto* |
+| supply the name — **but quote those inventions in the prompt as things not to do** | 4/8, **2 still invented** — the goblin said *"Uzgag's Maze"* |
+| supply the name, examples moved to a code comment | **6/8 named the real place, 0/8 invented** |
+
+Two distinct lessons. **Asking for a name without anchoring one produces confabulation** — the
+model will supply *something*. And **quoting the bad examples in the prompt primes them**, which
+is the spy crack's *"the model copies the incriminating noun"* all over again. Examples of what
+went wrong belong in a comment beside the code, never in the prompt text.
+
+#### Hell: a standing dread, not a remark
+
+⚠ **This one is NOT a remark.** Everything else in this section fires once on an event; being in
+Hell colours *every* line a follower says while they are down there, so it lives in `build_prompt`
+beside `_fearful_section` — and is added to remarks made there too, because a cheerful word about
+a chest is wrong in Hell. Gated by `floor_to_region`, which already resolves by `map.name`, so
+the generated hell floors and `Hell Boss` are both covered with no second table.
+
+Measured, same question:
+
+| | swamp | Hell |
+|---|---|---|
+| human | *"I'm hangin' in there, Ada. Swamp's been treatin' us alright."* | *"being down here is a nightmare"* |
+| goblin | *"Holding up fine."* | *"Not great, Ada. This place is a bad omen."* |
+| skeleton | *"I'm managing. Still here to watch your back."* | *"We should keep moving."* |
+
+⚠ **Baphomet is named but NOT described.** A follower this deep knows whose ground it is, but the
+hard limits still hold — one who has never seen him must not start inventing what he looks like
+or what he can do. Verified: *"this is Baphomet's ground. I've not seen him, don't know what he
+wants or looks like."*
+
+> *"Baphomet is HERE"* → *"Baphomet lives."* (skeleton) · *"Me go hide behind something, now!"* (fearful goblin)
+> *"Baphomet is DEAD"* → *"I... live."* (skeleton) · *"We did it."*
+> Herx → *"The Baron stirs."* / *"The silence... it's almost palpable."*
+
 #### When the adventurer dies — and in co-op, does not stay dead
 
 ⚠ **Death is not one situation.** Two things decide the line, and the game itself draws the
@@ -1939,6 +2004,14 @@ being identified, `MYAI` arriving, friendly fire, deaths, NPC engagement.
 ⚠ **`logreview` reports peaks, not just first→last.** First-vs-last hides a round trip: trust built
 by fighting together and then destroyed by friendly fire ends where it started and reads as "no
 change", when it is the most interesting thing that happened. Shown as `trus 0->0 peak 16`.
+
+⚠ **A follower asked the same thing twice used to answer word for word.** "Stay consistent; do
+not contradict yourself" makes repeating the sentence the most obedient reply available —
+observed live, a follower echoed its own introduction back verbatim on the next exchange. The
+merchant had the same bug and the same fix; the wording just never made it into
+`_follower_memory_block` / `_npc_memory_block`. Both now add *"staying consistent means not
+contradicting the FACTS — it does NOT mean repeating those sentences"*. Verified: the facts held
+across three askings ("from Hamlet, born and raised", "Herx's regime") while the phrasing moved.
 
 ⚠ **Prompt size is now ~3.5k tokens** and `logreview` warns above that. Context was never the limit
 here — attention is — so this is worth watching as more sections are added.

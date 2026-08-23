@@ -91,7 +91,7 @@ ck("the mercenary does not tout for the appraisal here",
 
 # --- chest, drunk and mimic -----------------------------------------------------------------
 for k in ("chest", "drunk", "mimic", "cleared", "swimming", "arrowtrap", "food", "kill",
-          "death"):
+          "death", "bossfight", "bossdown", "area"):
     pr = S.build_remark_prompt(k, "goblin", 7, "swamp", "loyal")
     ck("the %s remark is a short form" % k, tok(pr) < 500, tok(pr))
     ck("the %s remark knows where it is" % k, "Swamp" in pr or "swamp" in pr)
@@ -128,7 +128,7 @@ ck("the drunk situation names no topic to avoid",
 
 # A spy has no reaction of its own for any kind; the handler maps it to loyal.
 for k in ("chest", "drunk", "mimic", "cleared", "swimming", "arrowtrap", "food", "kill",
-          "death"):
+          "death", "bossfight", "bossdown", "area"):
     ck("no spy-specific %s angle to leak" % k, "spy" not in S.REMARK_ANGLE[k])
     ck("every %s angle has a default" % k, S.REMARK_ANGLE[k].get(None))
 ck("a fearful follower dreads chests", "Traps" in S.REMARK_ANGLE["chest"]["fearful"])
@@ -280,6 +280,50 @@ ck("a construct does not grieve", "not grieve" in S.DEATH_ANGLE["machine"])
 ck("a mercenary is still forbidden figures over a corpse",
    "Naming any number is WRONG" in S.build_death_prompt("gnome", 7, "swamp", "self_interested"))
 ck("death is a short form", tok(_own_ret) < 500, tok(_own_ret))
+
+# --- major bosses ---------------------------------------------------------------------------
+# ⚠ The boss's REAL name is read from stats->name engine-side, never derived from the race:
+# LICH_ICE/LICH_FIRE are Erudyce and Orpheus only when spawned as the named pair
+# (stat_shared.cpp:918/946) and are ordinary elemental liches otherwise.
+_bf = S.build_remark_prompt("bossfight", "human", 24, "Hell Boss", "loyal", {"look": "Baphomet"})
+_bd = S.build_remark_prompt("bossdown", "human", 24, "Hell Boss", "loyal", {"look": "Baphomet"})
+ck("the boss is named in the fight line", "Baphomet is HERE" in _bf)
+ck("and in the victory line", "Baphomet is DEAD" in _bd)
+ck("the fight line is urgent", "RIGHT NOW" in _bf)
+ck("a construct does not fear a boss", "not fear it" in S.REMARK_ANGLE["bossfight"]["machine"])
+
+# --- special and optional areas ---------------------------------------------------------------
+# ⚠ FOUR attempts. Bare oaths that never said where; then "make clear WHERE you have arrived",
+# which made followers INVENT names (1/6, 2 inventions); then the fix with those invented names
+# quoted in the prompt as things to avoid -- which primed them straight back in (4/8, 2
+# inventions), the spy crack's "the model copies the incriminating noun" all over again. With
+# the name supplied and the examples moved to a comment: 6/8 named the real place, 0/8 invented.
+_ar = S.build_remark_prompt("area", "gnome", 4, "The Gnomish Mines", "loyal",
+                            {"look": "the Gnomish Mines"})
+ck("the area line supplies the real name", "called the Gnomish Mines" in _ar)
+ck("and forbids inventing another", "Do not invent a different name" in _ar)
+ck("and forbids answering with only an oath", "only an oath" in _ar)
+ck("no invented example is quoted back at the model",
+   not any(w in S.REMARK_SITUATION["area"] for w in ("Uzgag", "Wailing", "Krog")))
+
+# --- Hell: a standing dread, not a remark -----------------------------------------------------
+# ⚠ Everything else here fires once on an event; being in Hell colours every line spoken down
+# there, so it lives in build_prompt beside _fearful_section.
+ck("hell floors carry the dread", bool(S._dread_section(22, "hell")))
+ck("so does Baphomet's floor", bool(S._dread_section(24, "Hell Boss")))
+ck("the swamp does not", not S._dread_section(7, "swamp"))
+ck("and neither does the town", not S._dread_section(25, "Mages Guild"))
+ck("the dread names Hell outright", "this is HELL" in S.HELL_DREAD)
+# ⚠ Baphomet is named because a follower this deep knows whose ground it is -- but NOT described,
+# because the hard limits still hold and an unseen boss must not be invented.
+ck("Baphomet is named as the ruler here", "Baphomet rules here" in S.HELL_BAPHOMET)
+ck("but the follower admits it has not seen him", "you have not seen him" in S.HELL_BAPHOMET)
+ck("and is forbidden from inventing him", "Do not invent any of it" in S.HELL_BAPHOMET)
+# Remarks made in Hell carry it too -- a cheerful word about a chest is wrong down there.
+ck("remarks in Hell carry the dread",
+   "this is HELL" in S.build_remark_prompt("chest", "human", 22, "hell", "loyal"))
+ck("remarks elsewhere do not",
+   "this is HELL" not in S.build_remark_prompt("chest", "human", 7, "swamp", "loyal"))
 
 print("\n%d failure(s)" % len(fails), fails)
 sys.exit(1 if fails else 0)
