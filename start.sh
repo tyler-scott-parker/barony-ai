@@ -22,6 +22,14 @@ if [[ "${1:-}" == "--stop" ]]; then
     for p in voice_bridge.py service.py barony-modded; do
         if alive "$p"; then pkill -f "[${p:0:1}]${p:1}"; echo "stopped $p"; fi
     done
+    # ⚠ Wait for them to actually be gone. The game takes a couple of seconds to tear down SDL,
+    # and a --stop immediately followed by a --game raced: the new instance died while the old
+    # one was still shutting down, and the old one's shutdown text landed in the freshly
+    # truncated log, which made it look as though the new one had crashed on startup.
+    for _ in $(seq 20); do
+        alive barony-modded || alive service.py || alive voice_bridge.py || break
+        sleep 0.5
+    done
     exit 0
 fi
 
