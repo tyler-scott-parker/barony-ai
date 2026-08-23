@@ -386,6 +386,17 @@ REMARK_SITUATION = {
     "gift": ("They have just handed YOU {look} — your {slot} now. This adventurer has armed you "
              "out of their own kit, which is not a thing most of them do."),
     "wealth": "WEALTH",   # replaced per band below; see WEALTH_SITUATION
+    # ⚠ "Clothes" is the ARMOUR slots only -- a weapon, a shield and a fistful of rings are not
+    # an outfit, and someone in nothing but a ring and a sword is exactly the case worth a line.
+    "naked": ("They are not wearing anything. No helm, no armour, no boots, no gloves, no cloak "
+              "— they are walking through a dungeon in their skin, and you are looking right at "
+              "them."),
+    "levitate": ("They have left the ground. This adventurer is floating — feet clear of the "
+                 "floor, drifting along above it — and you are not."),
+    "boulderhit": ("A boulder has just rolled straight over them. They are hurt and they are "
+                   "getting up out of the dirt. This is happening RIGHT NOW."),
+    "boulderpush": ("They have just set a boulder rolling with their own hands. It is moving now, "
+                    "and it will go where it goes."),
     # Routed to build_skill_prompt, which needs the skill/tier pair; these exist so the handler
     # recognises the kinds.
     "skillbest": "You have seen what this adventurer is good at.",
@@ -493,6 +504,34 @@ REMARK_ANGLE = {
         "bound": "State the outcome.",
         "machine": "State the outcome.",
         None: "React as YOUR kind would to the thing that was hunting you lying dead.",
+    },
+    "naked": {
+        "self_interested": "A client with no armour is a client about to become a corpse, and a corpse does not settle up. Say so, dryly.",
+        "fearful": "This frightens you. They are what stands between you and everything down here, and they have nothing on.",
+        "bound": "Note the absence of equipment. Modesty is not a thing you have.",
+        "machine": "Note the absence of equipment. Modesty is not a thing you have.",
+        None: "React as YOUR kind would — most creatures down here wear nothing either, so the joke may well be on the humans. Amusement, bafflement, or a practical word about what armour is for.",
+    },
+    "levitate": {
+        "self_interested": "You cannot follow them up there, and you are not paid to watch. Say something dry about it.",
+        "fearful": "They are up there and you are down here with whatever comes along. Say so.",
+        "bound": "Note that they are airborne. It is a fact.",
+        "machine": "Note that they are airborne. It is a fact.",
+        None: "React as YOUR kind would to someone leaving the ground — envy, unease, wonder, or a flat remark about the trick of it.",
+    },
+    "boulderhit": {
+        "self_interested": "That is damage you will have to keep them alive through. Say so, shortly.",
+        "fearful": "That could have been you, and it nearly was. Say so.",
+        "bound": "Note the impact and the injury.",
+        "machine": "Note the impact and the injury.",
+        None: "React as YOUR kind would to watching someone get run down by a rock — alarm, sympathy, or very dark amusement. Keep it to one breath.",
+    },
+    "boulderpush": {
+        "self_interested": "Moving rocks is not what you were hired for, and you are watching them do it. Say something dry.",
+        "fearful": "Loud things attract attention, and that was loud. Say so.",
+        "bound": "Note what they have done. Nothing more.",
+        "machine": "Note what they have done. Nothing more.",
+        None: "React as YOUR kind would to them shoving a great rock about — approval, doubt about where it is going, or a word about what usually happens next.",
     },
     "equiplegend": {
         "self_interested": "You have never had a client carrying one of those. Say what it is worth — and what it makes them, walking around with it.",
@@ -633,7 +672,13 @@ def _remark_head(race, floor, map_name):
                f"YOU ARE: a {race} on dungeon floor {floor}, this adventurer's companion.\n")
             + body)
 
-REMARK_TAIL = "Respond with ONLY one short spoken line. No narration, no quotes, no JSON."
+# ⚠ Speaking TO them, not about them. Every situation above is written in the third person for
+# the model's benefit and gets echoed straight back -- a mercenary answered a levitating player
+# with "Bless their curiosity, I suppose", which is remarking to a bystander. The same one-line
+# subject clarification that fixed the skill remarks and the hunger block, applied to all of them.
+REMARK_TAIL = ("You are speaking straight to this adventurer, face to face — say it TO them, not "
+               "about them.\n"
+               "Respond with ONLY one short spoken line. No narration, no quotes, no JSON.")
 
 # ---- Water, lava, and the two races that water hurts ---------------------------------------
 # ⚠ isPlayerSwimming() is TRUE IN LAVA TOO (actplayer.cpp:3616), so a single "they are swimming"

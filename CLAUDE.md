@@ -1121,6 +1121,48 @@ get **me** out of the water"* — writing itself as the one drowning. Every haza
 says "this adventurer, not you": **0/10** after. Third time this exact clarification has been
 needed (drunk, hunger, now water); it is cheap and it always works, unlike naming a topic.
 
+#### No clothes, floating, and boulders
+
+| kind | fires on | |
+|---|---|---|
+| `naked` | every armour slot empty | ⚠ **not** suppressed at seed time |
+| `levitate` | `isLevitating()` rising edge | |
+| `boulderhit` | HP drop within 8 ticks of a rolling boulder being close | urgent |
+| `boulderpush` | a rolling boulder carrying a pusher, once per boulder | |
+
+⚠ **"Clothes" is the ARMOUR slots only** — helm, body, gloves, boots, cloak. A weapon, a shield
+and a fistful of rings are not an outfit, and someone in nothing but a ring and a sword is exactly
+the case worth a line.
+
+⚠ **`naked` is the one watch NOT suppressed at seed time.** Every other watch seeds silently so a
+run's opening state does not read as an event — but a character who *starts* the run with no
+clothes on is precisely the case worth remarking on.
+
+⚠ **Both boulder cases are watched, not hooked**, the same way the arrow trap is: a rolling
+boulder near a player followed by an HP drop is a hit, and `BOULDER_PLAYERPUSHED` (`skill[8]`,
+`actboulder.cpp:34`) names the shover. ⚠ That field encodes telekinesis as `index + MAXPLAYERS*n`
+(`actboulder.cpp:423`), so the player is the **remainder**, not the value.
+
+> *"Flesh is armor enough... not."* (skeleton, naked) · *"What's that useless stuff do?"* (rat, on clothes)
+> *"Blind fool, you're going in buck naked?"* (mercenary)
+> *"Why do you float?"* (rat) · *"Me stay ground! Humans float, good for nothing!"*
+> *"Fool."* (skeleton, boulder hit) · *"Still breathing, aren't you? Now get up and let's move!"*
+> *"Where you sendin' da big thing? Better hope's not after our hole."* (rat, boulder pushed)
+
+#### ⚠ "Say it TO them, not about them" is now in REMARK_TAIL, for every kind
+
+Every situation is written in the third person for the model's benefit — *"They have just put
+on…"* — and the 8B echoes that straight back. A mercenary answered a levitating player with
+*"Bless their curiosity, I suppose"*, which is remarking to a bystander rather than talking to
+someone. The one-line subject clarification that fixed the skill remarks and the hunger block now
+sits in the shared tail: **1/8 after, and that one was "they're coming for the meat" — the
+monsters, not the player.**
+
+It also visibly improved lines that were merely vague before, which is worth noting: this is the
+**third** distinct place the same fix has paid (drunk/hunger, skills, now everything), and it has
+never once backfired — unlike naming a forbidden topic, which has backfired every time it was
+tried.
+
 #### A monster-race adventurer
 
 Barony's DLC makes skeletons, goblins, rats, trolls, vampires and the rest playable, and **a

@@ -92,7 +92,8 @@ ck("the mercenary does not tout for the appraisal here",
 # --- chest, drunk and mimic -----------------------------------------------------------------
 for k in ("chest", "drunk", "mimic", "cleared", "swimming", "arrowtrap", "food", "kill",
           "death", "bossfight", "bossdown", "area", "minotaur", "minotimer", "minotaurdown",
-          "equip", "equiplegend", "gift", "wealth"):
+          "equip", "equiplegend", "gift", "wealth", "naked", "levitate", "boulderhit",
+          "boulderpush"):
     pr = S.build_remark_prompt(k, "goblin", 7, "swamp", "loyal")
     ck("the %s remark is a short form" % k, tok(pr) < 500, tok(pr))
     ck("the %s remark knows where it is" % k, "Swamp" in pr or "swamp" in pr)
@@ -130,7 +131,8 @@ ck("the drunk situation names no topic to avoid",
 # A spy has no reaction of its own for any kind; the handler maps it to loyal.
 for k in ("chest", "drunk", "mimic", "cleared", "swimming", "arrowtrap", "food", "kill",
           "death", "bossfight", "bossdown", "area", "minotaur", "minotimer", "minotaurdown",
-          "equip", "equiplegend", "gift", "wealth", "skillbest", "skillworst"):
+          "equip", "equiplegend", "gift", "wealth", "naked", "levitate", "boulderhit",
+          "boulderpush", "skillbest", "skillworst"):
     ck("no spy-specific %s angle to leak" % k, "spy" not in S.REMARK_ANGLE[k])
     ck("every %s angle has a default" % k, S.REMARK_ANGLE[k].get(None))
 ck("a fearful follower dreads chests", "Traps" in S.REMARK_ANGLE["chest"]["fearful"])
@@ -440,6 +442,28 @@ ck("and nobody states an amount", "Naming any number is WRONG" in
    S.build_remark_prompt("wealth", "human", 7, "swamp", "loyal", {"band": "rich"}))
 ck("an unknown band falls back rather than breaking",
    bool(S.build_remark_prompt("wealth", "human", 7, "swamp", "loyal", {"band": "gilded"})))
+
+# --- no clothes, floating, and boulders --------------------------------------------------------
+# ⚠ "Clothes" is the ARMOUR slots only. A weapon, a shield and a fistful of rings are not an
+# outfit, and someone in nothing but a ring and a sword is the case worth remarking on.
+ck("the naked line lists the armour slots",
+   all(w in S.REMARK_SITUATION["naked"] for w in ("helm", "armour", "boots", "gloves", "cloak")))
+ck("and most creatures down here wear nothing either",
+   "the joke may well be on the humans" in S.REMARK_ANGLE["naked"][None])
+ck("levitation notices they left the ground", "left the ground" in S.REMARK_SITUATION["levitate"])
+ck("a boulder hit is urgent", "RIGHT NOW" in S.REMARK_SITUATION["boulderhit"])
+ck("and pushing one is not", "RIGHT NOW" not in S.REMARK_SITUATION["boulderpush"])
+ck("a construct has no modesty to offend", "Modesty is not a thing" in S.REMARK_ANGLE["naked"]["machine"])
+
+# ⚠ Speaking TO them, not about them. Every situation is written in the third person for the
+# model's benefit and gets echoed back -- a mercenary answered a levitating player with "Bless
+# their curiosity, I suppose", which is remarking to a bystander. Applied to ALL remarks, not
+# just the skill ones: 1/8 after, and that one was "they're coming for the meat" (the monsters).
+ck("every remark is addressed to the adventurer", "not about them" in S.REMARK_TAIL)
+for k in ("naked", "levitate", "boulderhit", "kill", "chest"):
+    ck("the %s remark carries it" % k,
+       "not about them" in S.build_remark_prompt(k, "human", 7, "swamp", "loyal"))
+ck("and it still asks for one spoken line", "ONLY one short spoken line" in S.REMARK_TAIL)
 
 print("\n%d failure(s)" % len(fails), fails)
 sys.exit(1 if fails else 0)
