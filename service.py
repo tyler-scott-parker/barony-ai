@@ -304,6 +304,60 @@ def build_ambient_prompt(race, floor, relation="hostile", map_name=""):
 HECKLE_MAX_LINES = 12
 HECKLE_MAX_CHARS = 90    # a bubble the player can read at a glance, not a speech
 
+# ---- "That looks worth something" ---------------------------------------------------------
+# A follower reacting to what you just picked up. Short, one line, the taunt/ambient shape.
+#
+# ⚠ THEY NEVER NAME IT. Most followers cannot appraise a legendary item at all (see the
+# competence ceiling), so naming one here would hand out for free exactly what the appraisal
+# tiers gate -- and would contradict the same follower saying it is beyond them a moment later.
+# They react to the LOOK of the thing, which is all a bystander has.
+VALUABLE_BANDS = [
+    (3000, "worth more than most people down here will see in a lifetime"),
+    (1500, "worth a great deal — a serious piece of money"),
+    (0,    "worth real money, more than the usual scrapings"),
+]
+
+def valuable_band(value):
+    for floor_v, text in VALUABLE_BANDS:
+        if int(value or 0) >= floor_v:
+            return text
+    return VALUABLE_BANDS[-1][1]
+
+# ⚠ A SPY USES THE LOYAL REACTION. Same rule as the introduction: the disguise is the whole
+# point, and a spy who eyes your treasure differently from an honest companion is a tell the
+# player gets for free.
+VALUABLE_ANGLE = {
+    "self_interested": ("You are a hired professional and you price things by habit. React to "
+                        "it as money — what it would fetch, who would want it, what it says "
+                        "about their luck. You may note that a thing like that wants a proper "
+                        "appraisal, but do NOT offer to do it yourself here."),
+    "fearful":         ("Carrying something like that makes you nervous. React to it as a "
+                        "thing that draws attention — from people, or from worse."),
+    "bound":           ("You have no use for wealth and no memory of wanting any. Note it "
+                        "flatly, as an observation about them rather than about the object."),
+    "machine":         ("You have no use for wealth. Note it flatly, as an observation."),
+}
+VALUABLE_DEFAULT = ("React to it plainly and warmly — you are pleased for them, or impressed, "
+                    "or wary of what carrying it might mean.")
+
+def build_valuable_prompt(race, floor, map_name, look, category, value, allegiance="loyal"):
+    head, body, limits = _persona(race, False, floor, map_name, books=False, budget=6)
+    where = place_name(floor, map_name)
+    angle = VALUABLE_ANGLE.get(allegiance, VALUABLE_DEFAULT)
+    return (head
+            + (f"YOU ARE: a {race} in {where}, on dungeon floor {floor}, this adventurer's "
+               "companion.\n" if where else
+               f"YOU ARE: a {race} on dungeon floor {floor}, this adventurer's companion.\n")
+            + body
+            + "They have just picked up a " + (look or "thing") + " — a " + (category or "thing")
+            + ", and even at a glance it is " + valuable_band(value) + ".\n"
+            + angle + "\n"
+            + "⚠ You do NOT know what it actually is, what it does, or what it is called. Do "
+              "NOT name it, do NOT guess at its powers, and do NOT say what it might be — you "
+              "are looking at it from across the room, not appraising it. Speak only about how "
+              "it LOOKS and what that is worth.\n"
+            + "Respond with ONLY one short spoken line. No narration, no quotes, no JSON.")
+
 def build_heckle_prompt(race, floor, count):
     return (
         "You are a DUMMYBOT: a training dummy on a spring, bolted together out of scrap and "
@@ -2686,10 +2740,21 @@ IDENT_REACH_LAY    = 300
 IDENT_REACH_EXPERT = 1500
 IDENT_REACH_CEILING = 1500     # the skill-50 tier belongs to the player, not to a companion
 
+# ⚠ THE MERCENARY IS THE ONE EXCEPTION, and the fee is what makes it fair rather than a hole.
+# He reads the legendary tier too, at 20% of what the thing is worth: 600 gold for an artifact,
+# 1000 for the amulet of lifesaving. That is a real decision at the point in a run where those
+# items appear, and it is the only route to a top-tier appraisal that does not go through a
+# maxed PRO_APPRAISAL -- everyone else, expert or not, still stops at 1500.
+MERC_REACH_UNLIMITED = True
+# At that price he takes his time. Without this a non-expert mercenary would be reading a
+# 600-gold artifact at IDENT_LAY_ACCURACY + MERC_IDENT_BONUS = 50%, which is a coin flip on a
+# fortune -- the fee is meant to be the cost, not a gamble on top of it.
+IDENT_LEGENDARY_ACCURACY = 0.85
+
 def ident_reach(st, race, category):
     """The most valuable thing this follower could plausibly put a name to."""
     if is_merc(st):
-        return IDENT_REACH_EXPERT
+        return 10 ** 9 if MERC_REACH_UNLIMITED else IDENT_REACH_EXPERT
     if (race or "").lower() in IDENT_EXPERTISE.get(category, ()):
         return IDENT_REACH_EXPERT
     return IDENT_REACH_LAY
@@ -2700,7 +2765,10 @@ def identify_beyond(st, race, category, value):
     v = int(value or 0)
     if v <= 0:
         return False
-    return v > min(ident_reach(st, race, category), IDENT_REACH_CEILING)
+    reach = ident_reach(st, race, category)
+    if not is_merc(st):
+        reach = min(reach, IDENT_REACH_CEILING)
+    return v > reach
 
 def identify_attempt(st, race, category, real_name, decoys, value=0):
     """Returns (kind, claim, truthful). kind in refuse|beyond|correct|mistaken|lie."""
@@ -2727,6 +2795,9 @@ def identify_attempt(st, race, category, real_name, decoys, value=0):
     # species would otherwise know -- this is the mercenary's genuine edge.
     if st.get("allegiance") == "self_interested":
         acc = min(0.95, acc + MERC_IDENT_BONUS)
+        # Above the tier everyone else stops at, he is being paid a fortune to be careful.
+        if int(value or 0) > IDENT_REACH_CEILING:
+            acc = max(acc, IDENT_LEGENDARY_ACCURACY)
     if random.random() < acc:
         return ("correct", real_name, True)
     return ("mistaken", wrong or real_name, wrong == "")
@@ -3252,6 +3323,31 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 logrec("heckle", race=race, floor=floor, asked=count, got=len(lines),
                        gen_ms=int((time.time() - _t0) * 1000), sample=lines[:3])
                 return self._send_json({"lines": lines})
+
+            # A follower reacting to something valuable the player just picked up. Short form:
+            # no conversation state, no boons, no relationship movement -- it is a remark, not
+            # an exchange, and it must not consume the chat cap or a boon slot.
+            remark = (data.get("remark") or "").strip()
+            if remark == "valuable":
+                with STATE_LOCK:
+                    st_v = get_follower_state(uid, race, player) if uid else {}
+                _alleg = st_v.get("allegiance", "loyal")
+                # ⚠ A spy reacts exactly as a loyal follower would; the disguise is the point.
+                if _alleg == "spy":
+                    _alleg = "loyal"
+                prompt_v = build_valuable_prompt(
+                    race, floor, map_name, (data.get("look") or "").strip(),
+                    (data.get("category") or "").strip(),
+                    int(data.get("value", 0) or 0), _alleg)
+                raw_v = ask_ollama(prompt_v)
+                line_v = (raw_v or "").strip().strip('"').split("\n")[0][:200]
+                print(f"[SERVICE] -> valuable ({data.get('value')}): {race}: {line_v}")
+                logrec("valuable", uid=uid, race=race, floor=floor, player=player,
+                       value=int(data.get("value", 0) or 0),
+                       look=(data.get("look") or "")[:60],
+                       allegiance=st_v.get("allegiance"), reply=line_v[:200])
+                tts_emit(line_v, race, uid, "valuable", "", player)
+                return self._send_json({"reply": line_v, "action": "NONE"})
 
             # A countdown has started on this floor and the engine is asking whether this
             # follower heads it off. Answered before any conversation state is touched.

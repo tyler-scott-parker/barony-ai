@@ -299,21 +299,30 @@ S.MERC_LATE.clear()
 # for a few coins skips a progression the game gates behind a maxed skill.
 def _who(alleg="loyal", trust=60, friendship=60):
     return dict(allegiance=alleg, trust=trust, friendship=friendship)
+TRIED_LATER = ("correct", "mistaken", "lie")
 def kind(alleg, race, cat, val, trust=60, friendship=60):
     return S.identify_attempt(_who(alleg, trust, friendship), race, cat,
                               "real", ["d1", "d2"], val)[0]
 
 ck("an artifact is beyond a loyal companion", kind("loyal", "human", "weapon", 3000) == "beyond")
 ck("beyond an EXPERT in that very category", kind("loyal", "goblin", "weapon", 3000) == "beyond")
-ck("beyond the mercenary, however well paid",
-   kind("self_interested", "human", "weapon", 3000) == "beyond")
+# ⚠ THE MERCENARY IS THE EXCEPTION, and the fee is what makes it fair. He reads the legendary
+# tier at 20% of value -- 600 for an artifact, 1000 for the amulet of lifesaving -- and that is
+# the only route to a top-tier appraisal that does not go through a maxed PRO_APPRAISAL.
+ck("but a mercenary will read it, for a price",
+   kind("self_interested", "human", "weapon", 3000) in TRIED_LATER)
+ck("an artifact costs him 20% of its worth", S.merc_price("identify", 10, 3000) == 600)
+ck("the amulet of lifesaving costs 1000", S.merc_price("identify", 10, 5000) == 1000)
+# ⚠ At that price he takes his time: without the floor a non-expert mercenary would be reading
+# a 600-gold artifact at 50%, a coin flip on a fortune.
+ck("and he is careful at that price", S.IDENT_LEGENDARY_ACCURACY >= 0.85)
 # ⚠ Checked before the spy branch: a spy who cannot read it has nothing to lie about either,
 # and a confident false name for an artifact is exactly the hole this closes.
 ck("and a spy cannot lie about one either", kind("spy", "human", "weapon", 3000) == "beyond")
 ck("the amulet of lifesaving too", kind("loyal", "gnome", "amulet", 5000) == "beyond")
-ck("nothing reaches past the ceiling",
+ck("nothing but a mercenary reaches past the ceiling",
    all(S.ident_reach(_who(a), r, "weapon") <= S.IDENT_REACH_CEILING
-       for a in ("loyal", "self_interested", "spy", "fearful") for r in ("human", "goblin")))
+       for a in ("loyal", "spy", "fearful") for r in ("human", "goblin")))
 
 # Below the line it still works, and expertise is what widens the reach.
 # ⚠ Assert they ATTEMPT it, not that they get it right: identify_attempt is probabilistic
@@ -344,9 +353,11 @@ ck("the mercenary charges by what the thing is worth",
 ck("and falls back to the flat rate for ordinary goods",
    S.merc_price("identify", 10, 60) == 25 + 5 * 10)
 ck("the Sokoban cut is unchanged by that", S.merc_price("sokoban", 6, 2000) == 500)
-ck("identify_beyond is what gates the quote",
-   S.identify_beyond(_who("self_interested"), "human", "weapon", 3000)
-   and not S.identify_beyond(_who("self_interested"), "human", "weapon", 400))
+ck("identify_beyond no longer stops the mercenary at any value",
+   not S.identify_beyond(_who("self_interested"), "human", "weapon", 999999))
+ck("but still stops everyone else dead",
+   S.identify_beyond(_who("loyal"), "human", "weapon", 1501)
+   and not S.identify_beyond(_who("loyal"), "human", "weapon", 1500))
 
 # The introduction must not promise what the ceiling forbids.
 S.reset_run()

@@ -58,5 +58,36 @@ ck("conversation still carries hard limits",
 ck("ambient still sets the world", S.WORLD[:40] in amb)
 ck("ambient still carries race guidance", "CHARACTER GUIDANCE" in amb)
 
+# --- the valuable-pickup remark ---------------------------------------------------------
+# A follower reacting to something you just picked up. Another short form, and the same rules:
+# it must know where it is, it must be cheap, and it must not say more than it knows.
+val = S.build_valuable_prompt("gnome", 25, "Mages Guild", "clear gemstone", "gem", 3000, "loyal")
+ck("the remark knows it is in a town, not a dungeon", "Hamlet" in val)
+ck("and it is a SHORT form", tok(val) < 500, tok(val))
+ck("no book block, like the other short forms", "FROM THE BOOKS" not in val)
+
+# ⚠ THE BALANCE-CRITICAL LINE. Most followers cannot appraise a legendary item at all, so
+# naming one here would hand out free exactly what the appraisal tiers gate -- and would
+# contradict the same follower calling it beyond them a moment later.
+ck("it forbids naming the item", "Do NOT name it" in val)
+ck("and forbids guessing what it does", "do NOT guess at its powers" in val)
+ck("it says what they may talk about instead", "how it LOOKS" in val)
+
+# Bands, so a 1200-gold gem and an artifact do not read the same.
+ck("an artifact sits in the top band", "lifetime" in S.valuable_band(3000))
+ck("a 2000-gold ring in the middle", "serious piece of money" in S.valuable_band(2000))
+ck("and an aquamarine in the lowest", "usual scrapings" in S.valuable_band(1200))
+ck("bands are ordered high to low", [b[0] for b in S.VALUABLE_BANDS]
+   == sorted([b[0] for b in S.VALUABLE_BANDS], reverse=True))
+
+# ⚠ A SPY HAS NO REACTION OF ITS OWN -- the handler maps it to the loyal one before building
+# the prompt. A spy who eyes your treasure differently is a tell the player gets for free.
+ck("no spy-specific reaction exists to leak", "spy" not in S.VALUABLE_ANGLE)
+ck("a mercenary does have one", "self_interested" in S.VALUABLE_ANGLE)
+ck("and a fearful follower worries about attention",
+   "attention" in S.VALUABLE_ANGLE["fearful"])
+ck("the mercenary does not tout for the appraisal here",
+   "do NOT offer to do it yourself" in S.VALUABLE_ANGLE["self_interested"])
+
 print("\n%d failure(s)" % len(fails), fails)
 sys.exit(1 if fails else 0)

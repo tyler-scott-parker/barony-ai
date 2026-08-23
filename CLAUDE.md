@@ -983,8 +983,8 @@ player's own to earn:
 |---|---|---|
 | ordinary follower | **300** | ≈ the skill-30 breakpoint; covers **69%** of items in the game |
 | expert for that kind (`IDENT_EXPERTISE`) | **1500** | the skill-40 breakpoint — a gnome and a ring, a goblin and an axe |
-| mercenary | **1500** | handling goods is his trade — but he charges by what it is worth |
-| **anyone, ever** | **ceiling 1500** | the 23 legendary items are excluded outright |
+| **mercenary** | **no limit** | ⚠ the one exception — he reads the legendary tier too, at **20% of its worth** |
+| everyone else, ever | **ceiling 1500** | the 23 legendary items are past them |
 
 Using the game's own numbers means **DLC and modded items are covered automatically**, with no
 list to maintain. Distribution: 69% of items ≤300, 27% in 301–1500, **4.4% above**.
@@ -1007,9 +1007,26 @@ sword: **0/8 named or hedged a name**, 7/8 pointed the player at a real appraise
 ⚠ **The mercenary is not paid for a job he cannot do.** He says it is beyond him for free —
 quoting and charging for "it is beyond me" would be the worst version of this feature.
 
-**Below the line he prices by what the thing is worth**, the Sokoban-cut precedent again:
-`max(25 + 5×floor, 20% of value)`. A 1200-gold spellbook costs **240**; an ordinary dagger costs
-the flat rate. That makes a valuable appraisal a real decision rather than pocket change.
+**He prices by what the thing is worth**, the Sokoban-cut precedent again:
+`max(25 + 5×floor, 20% of value)`.
+
+| item | fee |
+|---|---|
+| ordinary dagger | flat `25 + 5×floor` |
+| 1200-gold spellbook | **240** |
+| artifact (3000) | **600** |
+| amulet of lifesaving (5000) | **1000** |
+
+⚠ **At that price he takes his time** — `IDENT_LEGENDARY_ACCURACY = 0.85` floors his accuracy
+above 1500. Without it a non-expert mercenary reads a 600-gold artifact at
+`IDENT_LAY_ACCURACY + MERC_IDENT_BONUS` = **50%**, a coin flip on a fortune. The fee is meant to
+be the cost, not a gamble on top of it. (He is never a spy — that is a different allegiance — so
+there is no lying branch to worry about here.)
+
+**This is the only route to a top-tier appraisal that does not go through a maxed
+`PRO_APPRAISAL`**, which is what keeps it a trade-off rather than a hole: 600 gold at the point
+in a run where artifacts appear is a real decision. `MERC_REACH_UNLIMITED` is the knob if it
+ever needs putting back.
 
 **The engine sends the value** (`mymod_appraisalValue`, mirroring `appraisalPossible`), because
 only the engine knows it. For a remote client it rides in `MYID` **after the counted decoys**, so
@@ -1023,6 +1040,50 @@ rest of that list follows.
 ⚠ **`identify_attempt` is probabilistic, so `== "correct"` is a flaky assertion.** Tests assert
 the follower ATTEMPTED it (`correct | mistaken | lie`) rather than got it right; the first
 version failed intermittently, a different line each run.
+
+### "That looks worth something" — remarking on a valuable pickup
+
+A follower reacts when you pick up something valuable. Value ≥ **1000** (aquamarine and up), one
+remark per 20s, and it rides the conversation slot like a taunt.
+
+⚠ **NO UPSTREAM HOOK.** `itemPickup()` is called from a dozen contexts — shop purchases, stack
+splits, emptying bottles — and hooking it would put a new file in the upstream diff for a
+cosmetic feature. Instead `mymod_valuablesTick()` rides the per-frame scan `mymod_watch` already
+runs, watching each player's inventory for a uid that was not there last frame. Cheap, and it
+catches every route into the inventory rather than the ones `itemPickup` happens to cover.
+
+⚠ **Seeded silently on the first pass**, or a new character's starting kit reads as a pile of
+treasure picked up the instant the run begins — a Merchant starts with 1000 gold of it. Cleared
+and re-seeded on `new_run`.
+
+⚠ **THEY NEVER NAME IT**, and this is the balance-critical line. Most followers cannot appraise a
+legendary item at all, so naming one here would hand out free exactly what the appraisal tiers
+gate — and would contradict the same follower calling it beyond them a moment later. The engine
+sends the **look** (`getUnidentifiedName()` — "a gold ring", "a curved sword"), the category, and
+a value band; the prompt forbids naming it, guessing its powers, or saying what it might be.
+Measured across gems, artifacts, rings and amulets: **0/6 leaked a real item name**.
+
+⚠ **An unidentified item is judged the way the APPRAISAL system judges it**, so `GEM_GLASS` is
+weighed at 1000 — which means a follower gets excited about worthless glass, and the player only
+finds out by having it appraised. That is Barony's own joke arriving for free. An *identified*
+item uses its real value, so known glass gets no remark.
+
+**The reaction is allegiance-flavoured** (`VALUABLE_ANGLE`), and ⚠ **a spy uses the loyal one** —
+same rule as the introduction, since a spy who eyes your treasure differently is a tell the
+player gets for nothing. Measured:
+
+| | |
+|---|---|
+| loyal human, ruby | *"That's a pretty gemstone, we should keep an eye on it."* |
+| mercenary, artifact sword | *"…that's a sword fit for a lord."* |
+| **fearful** goblin, ring | *"Ugga ugga! Shiny! Worth big squabble!"* — it draws attention |
+| loyal gnome, **glass** | *"worth at least three weeks' worth of good scraps!"* |
+
+⚠ The mercenary is told **not** to tout for the appraisal in this line. He already quotes when
+asked; touting here would make every valuable pickup a sales pitch.
+
+Prompts are ~280 tokens — the short-form shape, no books, budget 6. It records no relationship
+movement, consumes no chat cap and no boon slot: it is a remark, not an exchange.
 
 ### The introduction: what a follower is FOR
 
