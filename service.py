@@ -566,7 +566,85 @@ ALLEGIANCE_FEEL = {
 MERC_INFO_SHARE   = 0.85    # their boons are information, not goods (0.60 for everyone else)
 MERC_IDENT_BONUS  = 0.20    # they handle goods for a living; they know what they are holding
 MERC_HAGGLE_STEP  = 1       # a mercenary at your shoulder talks the merchant down one more step
-MERC_FAVOUR_TAX   = 20      # favours cost more friendship: helping has to be worth their while
+
+# ---- His fee ------------------------------------------------------------------------------
+# ⚠ Gold REPLACES the relationship gate for a mercenary; it does not stack on top of it. The
+# old MERC_FAVOUR_TAX made him need you to like him MORE than a loyal follower does, which
+# quietly made him a worse loyal follower -- the one thing the allegiance is not supposed to be.
+# Inverted, the deal reads properly:
+#
+#     A loyal follower does it because they like you. A mercenary does it because you paid.
+#
+# So he will solve Sokoban at friendship 0 if the money is right, and the loyal follower still
+# does it for free at friendship 20. Different deal, not a stingier one.
+#
+# Calibrated against the real economy: a floor pile is 10 + rand%100 + currentlevel
+# (maps.cpp:7775), monsters carry ~15-50, and starting gold is 0-250 for most classes
+# (Merchant 1000, stat_shared.cpp:70 is the 0 default). So these bite early and are affordable
+# by the midgame -- which makes a paid mercenary a midgame unlock, deliberately.
+MERC_RATES = {
+    #  kind        base  per_floor   what it buys
+    "identify":  {"base":  25, "per_floor":  5},   # the everyday repeatable
+    "minotaur":  {"base": 100, "per_floor": 25},   # it saves your run; it should hurt
+    # ⚠ Sokoban is a CUT of what he recovers, not a fee -- self-balancing, no floor scaling,
+    # and thematically exact. The engine counts the gold on the floor and sends it, because
+    # only the engine can know it. `base` is the floor under a thin room.
+    "sokoban":   {"cut": 0.25, "base": 100},
+}
+
+def merc_price(kind, floor, gold_here=0):
+    """What he wants for this job. Server-side and authoritative -- the model is never asked
+    for a number and is forbidden from saying one (see merc_quote_section)."""
+    r = MERC_RATES.get(kind)
+    if not r:
+        return 0
+    if "cut" in r:
+        return max(r["base"], int(gold_here * r["cut"]))
+    return r["base"] + r["per_floor"] * max(0, floor)
+
+# Accepting a quote. Deliberately generous and deliberately NOT a general yes-detector: it only
+# ever runs while a quote from THIS follower is on the table, so "fine" and "deal" cannot be
+# mistaken for agreement to something else.
+AGREE_PATTERNS = re.compile(
+    r"\b(yes|yeah|yep|aye|ok|okay|okey|sure|fine|deal|agreed|agree|done|"
+    r"do it|go on|go ahead|get on with it|pay|paid|i'?ll pay|take it|very well|"
+    r"alright|all right|please do|worth it)\b", re.I)
+# Turning one down, so a refusal clears the offer instead of leaving it hanging all floor.
+DECLINE_PATTERNS = re.compile(
+    r"\b(no|nope|never|forget it|too (much|expensive|steep|dear)|not worth|"
+    r"can'?t afford|no deal|leave it|nevermind|never mind)\b", re.I)
+
+def agrees_to_quote(says):
+    """True/False/None -- accepted, declined, or said something else entirely."""
+    low = (says or "")
+    if DECLINE_PATTERNS.search(low):   # checked first: "no deal" contains "deal"
+        return False
+    if AGREE_PATTERNS.search(low):
+        return True
+    return None
+
+def is_merc(st):
+    return st.get("allegiance") == "self_interested"
+
+def merc_quote(st, kind, floor, gold_here=0):
+    """Put a price on the table. Returns the price, and remembers the offer so the next thing
+    the player says can accept it."""
+    price = merc_price(kind, floor, gold_here)
+    st["quote"] = {"kind": kind, "price": price, "floor": floor}
+    return price
+
+def merc_settled(st, kind):
+    """Has the player already agreed this man's rate for this kind of work? Terms are
+    negotiated once and then he simply bills -- which is how hiring someone actually works,
+    and it keeps the second identify of a run from re-opening the haggle."""
+    return kind in st.get("agreed", ())
+
+def merc_agree(st, kind, price):
+    st.setdefault("agreed", {})[kind] = price
+    st.pop("quote", None)
+
+def merc_can_afford(gold, price):
+    return int(gold or 0) >= int(price or 0)
 
 def adjust(st, **deltas):
     """Move relationship dimensions, clamped to 0..100. The only way any of them change."""
@@ -1133,6 +1211,9 @@ def reset_run():
     # "minotaur" against that uid. Barony recycles uids across runs, so the next run's follower
     # could pop it and start a countdown nobody provoked -- on floor 1, or in town.
     LAST_SABOTAGE.clear()
+    LAST_CHARGE.clear()
+    LAST_FAVOUR.clear()
+    LAST_QUOTE.clear()
     npc_state.clear()
     PERSISTENT_IDENTITY.clear()
     _NAMES_TAKEN.clear()   # names actually revealed are held by name_history.json instead
@@ -1525,8 +1606,15 @@ SOKOBAN_CHANCE         = 0.75
 
 GUARD_STATE = {"minotaur": False, "sokoban": False}   # once per run each
 
-def favour_roll(kind, st):
-    """Does this follower do it? Server-side, once per run per kind."""
+def favour_roll(kind, st, gold=0, gold_here=0, floor=0, says=""):
+    """Does this follower do it? Server-side, once per run per kind.
+
+    Returns True (does it), False (does not), or the string "quote" -- a mercenary naming his
+    price and doing nothing until the player agrees. The quote is remembered on `st`, so the
+    next thing the player says in ordinary conversation can accept it.
+
+    ⚠ For a mercenary the relationship gate is REPLACED by the fee, not added to. He will do
+    this at friendship 0 if he is paid; the loyal follower still does it free at 20."""
     if GUARD_STATE.get(kind):
         return False
     if st.get("allegiance") == "spy":
@@ -1544,20 +1632,108 @@ def favour_roll(kind, st):
         if st.get("allegiance") == "fearful":
             need = GUARD_FEARFUL_TRUST
             chance = GUARD_FEARFUL_CHANCE
-        elif st.get("allegiance") == "self_interested":
-            need = GUARD_MIN_TRUST + MERC_FAVOUR_TAX
-        if st.get("trust", 0) < need or random.random() >= chance:
+        if is_merc(st):
+            pass                          # he is not doing this out of trust; see below
+        elif st.get("trust", 0) < need or random.random() >= chance:
             return False
     elif kind == "sokoban":
-        need_f = SOKOBAN_MIN_FRIENDSHIP
-        if st.get("allegiance") == "self_interested":
-            need_f += MERC_FAVOUR_TAX     # they will do it, once you are clearly worth it
-        if st.get("friendship", 0) < need_f or random.random() >= SOKOBAN_CHANCE:
+        if is_merc(st):
+            pass
+        elif (st.get("friendship", 0) < SOKOBAN_MIN_FRIENDSHIP
+              or random.random() >= SOKOBAN_CHANCE):
             return False
     else:
         return False
+    # The mercenary route: quote, or bill an already-agreed rate. He never latches GUARD_STATE
+    # on a quote -- the job has not been done, and the offer must survive to be accepted.
+    if is_merc(st):
+        price = merc_price(kind, floor, gold_here)
+        if not merc_settled(st, kind) and agrees_to_quote(says) is not True:
+            merc_quote(st, kind, floor, gold_here)
+            return "quote"
+        if not merc_can_afford(gold, price):
+            st["quote"] = {"kind": kind, "price": price, "floor": floor}
+            return "broke"
+        merc_agree(st, kind, price)
+        LAST_CHARGE[st.get("uid", 0)] = price
+        GUARD_STATE[kind] = True
+        return "paid"
     GUARD_STATE[kind] = True
     return True
+
+# ⚠ HE MUST NEVER SAY THE NUMBER. Measured in the haggle work: left to itself the model
+# answered "I can give ya the sword for 25 gold instead of 30" -- an invented figure, quoted
+# beside a shop window showing the real price. The engine owns the arithmetic and prints the
+# figure; the mercenary owns only the attitude. Same split as the haggle, where "the price
+# movement IS the feature and the player reads the number, not a line about it."
+MERC_NO_NUMBERS = ("Do NOT state a price, a number, an amount of gold or any figure at all — "
+                   "not in coins, not in any other form. They will be told the figure "
+                   "separately. Naming any number is WRONG.\n")
+
+MERC_JOB_WORDS = {
+    "identify": "telling them what a thing they are carrying actually is",
+    "minotaur": "dealing with the trouble you can feel on this floor",
+    "sokoban":  "clearing this room of boulders for them",
+}
+
+def merc_quote_section(kind, standing=False):
+    """He names a price and does nothing until it is agreed."""
+    job = MERC_JOB_WORDS.get(kind, "the job")
+    return ("YOU WORK FOR PAY. They want " + job + ", and you will do it — for a fee. Say so "
+            "plainly and without apology: you are willing, and it will cost them. You are not "
+            "being rude and you are not haggling; this is simply your trade and they knew that "
+            "when they kept you around. Wait for them to agree before you lift a finger.\n"
+            + MERC_NO_NUMBERS
+            + ("Do NOT do the job yet. Offering to do it for free, or doing it anyway because "
+               "you like them, is WRONG — you are not their friend, you are their hire.\n"))
+
+# ⚠ When the deal is struck in CONVERSATION rather than in the favour prompt, this block is the
+# only thing telling him what the finished job sounds like -- build_guard_prompt's careful
+# wording is not in the conversation path at all. Measured without these lines: 6/6 stamped the
+# fee correctly but only ~3/6 actually reported the work, and the rest drifted into travelogue
+# ("we're on the 8th level of the Swamp, it's a Goblin infestation") or invented a mechanism
+# ("I set up a few traps"). Naming the required speech act is the fix, the same lesson the spy
+# crack and the hard limits both taught.
+MERC_JOB_DONE = {
+    "minotaur": ("Say, shortly and in your own words, that you found what was wrong and put a "
+                 "stop to it. Do NOT explain how you did it, do NOT name what it was, and do "
+                 "NOT describe the floor or what else lives on it. Rambling about the area "
+                 "instead of reporting the job is WRONG."),
+    "sokoban":  ("Say, shortly, that the boulders are dealt with, the way you would mention any "
+                 "chore you have finished. Mention that you knocked some of the gold into the "
+                 "pits by accident. Do NOT boast and do NOT make a speech."),
+    "identify": ("Give them your appraisal of the thing, as instructed above, and nothing "
+                 "else."),
+}
+
+def merc_paid_section(kind):
+    """Agreed and paid; he does the work. Nothing to negotiate."""
+    job = MERC_JOB_WORDS.get(kind, "the job")
+    return ("THEY HAVE AGREED YOUR PRICE and you have been paid for " + job + ", and you have "
+            "now DONE it. " + MERC_JOB_DONE.get(kind, "Say what you have done, shortly.")
+            + " Do not thank them for the money, do not mention having been paid, and do not "
+            "make a speech about it — a professional takes payment as ordinary.\n"
+            + MERC_NO_NUMBERS)
+
+def merc_broke_section(kind):
+    """They cannot pay. He refuses -- and the refusal is the character, not an error.
+
+    ⚠ Named as a required speech act, not a mood, and with the AGREEABLE openers forbidden by
+    name. Measured with only the general prohibition: the engine correctly refused to do the
+    job and charge nothing 3/3, but the SPEECH agreed 2/3 ("Alright then! What's the plan?") --
+    so the player would read it as a yes and then watch nothing happen. Same failure and same
+    fix as the fearful refusal and the spy crack: forbid the specific route out."""
+    job = MERC_JOB_WORDS.get(kind, "the job")
+    return ("THEY CANNOT PAY YOU. They want " + job + " and they do not have the coin for it. "
+            "Turn them down, and make the refusal the FIRST thing you say. Say plainly that "
+            "they cannot afford you and that is the end of it.\n"
+            "Do NOT open with 'Alright', 'Sure', 'Aye', 'Of course', 'Let's go' or 'What's the "
+            "plan' — anything that sounds like agreement is WRONG, even if you explain "
+            "afterwards. Do NOT do the job anyway, do NOT offer a discount, do NOT offer credit "
+            "or to settle up later, do NOT say 'just this once', and do NOT change the subject "
+            "to the floor or what lives on it. You are not being cruel and you are not "
+            "gloating; you simply do not work for free.\n"
+            + MERC_NO_NUMBERS)
 
 def build_sokoban_prompt(race, floor, map_name, did):
     """Their line after clearing the boulder puzzle. The engine owns the mechanism; they only
@@ -1567,11 +1743,14 @@ def build_sokoban_prompt(race, floor, map_name, did):
         "This chamber is full of heavy boulders and pits, and a great deal of gold sitting "
         "where nobody can reach it. It is a stupid puzzle and it would take the adventurer an "
         "age. " +
-        ("You have just shoved the lot of them into the pits yourself. Say so, shortly and "
-         "plainly, the way you would mention any chore you have finished. Mention that you "
-         "knocked a bit of the gold in by accident. Do NOT boast and do NOT make a speech.\n"
-         if did else
-         "You have looked at it and you are not going to attempt it. Say so, shortly.\n"))
+        (merc_quote_section("sokoban") if did == "quote" else
+         merc_broke_section("sokoban") if did == "broke" else
+         (merc_paid_section("sokoban") if did == "paid" else "") +
+         ("You have just shoved the lot of them into the pits yourself. Say so, shortly and "
+          "plainly, the way you would mention any chore you have finished. Mention that you "
+          "knocked a bit of the gold in by accident. Do NOT boast and do NOT make a speech.\n"
+          if did else
+          "You have looked at it and you are not going to attempt it. Say so, shortly.\n")))
     return (head
             + f"YOU ARE: a {race} in a hidden chamber beneath the dungeon, this adventurer's "
               "companion.\n"
@@ -1588,12 +1767,16 @@ def build_guard_prompt(race, floor, map_name, caught):
     situation = (
         "Something is badly wrong on this floor — you can feel it, the way an animal feels a "
         "storm coming. " +
-        ("You have just dealt with it. Say so, shortly, in your own words: that you found "
-         "something and put a stop to it. Do NOT explain the mechanism, do NOT name a minotaur, "
-         "and do NOT make a speech — you are reporting, not boasting.\n"
-         if caught else
-         "You cannot do anything about it. Say so, shortly — tell them something is coming and "
-         "that you cannot stop it. Do NOT name a minotaur and do NOT explain what it is.\n"))
+        (merc_quote_section("minotaur") if caught == "quote" else
+         merc_broke_section("minotaur") if caught == "broke" else
+         (merc_paid_section("minotaur") if caught == "paid" else "") +
+         ("You have just dealt with it. Say so, shortly, in your own words: that you found "
+          "something and put a stop to it. Do NOT explain the mechanism, do NOT name a "
+          "minotaur, and do NOT make a speech — you are reporting, not boasting.\n"
+          if caught else
+          "You cannot do anything about it. Say so, shortly — tell them something is coming "
+          "and that you cannot stop it. Do NOT name a minotaur and do NOT explain what it "
+          "is.\n")))
     return (head
             + (f"YOU ARE: a {race} in {where}, on dungeon floor {floor}, this adventurer's "
                "companion.\n" if where else
@@ -1624,6 +1807,13 @@ BOON_MAP_MIN_FRIENDSHIP = 20
 BOON_MAP_CHANCE = 0.25
 LAST_BOON = {}   # uid -> "item:TYPE:N" or "traps:" pending delivery to C++
 LAST_SABOTAGE = {}   # uid -> "minotaur", pending delivery to C++
+# ⚠ Both of these are per-run latches and MUST be cleared in reset_run. LAST_SABOTAGE was not,
+# and a stranded entry could start a minotaur countdown in a later run; LAST_CHARGE strands the
+# same way (stamped while the prompt is built, popped only after ask_ollama returns) and this
+# one takes the player's money.
+LAST_CHARGE = {}   # uid -> gold to deduct from the owning player, pending delivery to C++
+LAST_FAVOUR = {}   # uid -> "minotaur"/"sokoban" the engine should now actually perform
+LAST_QUOTE  = {}   # uid -> "kind:price" for the engine to print; the model never says a number
 
 def boon_roll(st, floor, player=0):
     """One boon per follower per floor, chance scaling with friendship.
@@ -1703,6 +1893,48 @@ def _boon_section(uid, st, race_l, floor, player=0):
     iname = val.split(":")[0].replace("_", " ").lower()
     return ("UNPROMPTED: you are giving them something you came by honestly — "
             + iname + ". Offer it in one short line, with a plausible reason you have it.\n")
+
+def merc_declined_section(kind):
+    job = MERC_JOB_WORDS.get(kind, "the job")
+    return ("THEY HAVE TURNED DOWN YOUR PRICE for " + job + ". Let it go without argument. Do "
+            "NOT lower your price, do NOT offer a compromise, and do NOT do it for free after "
+            "all — all three are WRONG. It is their business if they would rather go without.\n"
+            + MERC_NO_NUMBERS)
+
+def _merc_section(uid, st, floor, says, gold=0):
+    """Settle a quote the player is answering. Returns the prompt block, and stamps the
+    engine-side latches when a deal is actually struck.
+
+    ⚠ The acceptance has to be read HERE, in ordinary conversation, because the favour path is
+    a one-shot request/response the engine initiates -- there is nobody to say yes to inside
+    it. So he quotes there and is answered here."""
+    q = st.get("quote")
+    if not q or not is_merc(st):
+        return ""
+    kind = q["kind"]
+    # A quote for work on THIS floor dies with the floor: the minotaur's clock and the boulder
+    # room are both left behind, and an offer that outlives the job is just clutter.
+    if kind in ("minotaur", "sokoban") and q.get("floor") != floor:
+        st.pop("quote", None)
+        return ""
+    ans = agrees_to_quote(says)
+    if ans is False:
+        st.pop("quote", None)
+        logrec("merc", uid=uid, what=kind, stage="declined", price=q["price"])
+        return merc_declined_section(kind)
+    if ans is not True:
+        return ""                      # still on the table; he does not nag
+    if not merc_can_afford(gold, q["price"]):
+        logrec("merc", uid=uid, what=kind, stage="broke", price=q["price"], gold=gold)
+        return merc_broke_section(kind)
+    merc_agree(st, kind, q["price"])
+    LAST_CHARGE[uid] = q["price"]
+    if kind in ("minotaur", "sokoban"):
+        LAST_FAVOUR[uid] = kind        # the engine performs it on this reply
+        GUARD_STATE[kind] = True       # and it is spent, whoever else asks
+    print(f"[SERVICE-DBG] mercenary {uid} hired for {kind}: {q['price']} gold")
+    logrec("merc", uid=uid, what=kind, stage="hired", price=q["price"], gold=gold, floor=floor)
+    return merc_paid_section(kind)
 
 def _secret_section(uid, st, race, says, floor=0):
     # What this follower has ALREADY told stays in the prompt as a consistency reminder -- but
@@ -2051,7 +2283,7 @@ def _follower_memory_block(st):
     return ("WHAT YOU ALREADY SAID TO THEM (stay consistent with this; do not contradict "
             "yourself):\n" + _bullets(lines) + "\n")
 
-def _follower_sections(uid, race, floor, says, player=0, ident=None):
+def _follower_sections(uid, race, floor, says, player=0, ident=None, gold=0):
     """The relationship half of the prompt. Order matters: boon and secret rolls
     consume randomness, and the sections read as one escalating block."""
     race_l = race.lower()
@@ -2061,7 +2293,10 @@ def _follower_sections(uid, race, floor, says, player=0, ident=None):
     relations = relationship_block(st) + disclosure_block(st)
     evlines = events_for_prompt(st)
     alleg = allegiance_section(st, says)
-    boon = _boon_section(uid, st, race_l, floor, player)
+    # Settled before the boon roll: a man who has just been hired is not also handing out
+    # free bread in the same breath.
+    merc = _merc_section(uid, st, floor, says, gold)
+    boon = "" if merc else _boon_section(uid, st, race_l, floor, player)
     secret = _secret_section(uid, st, race, says, floor)
     # ⚠ Not while a secret is being told: two unprompted behaviours in one reply and the later
     # one takes the turn. Unlike the Herx/crack pair -- which measured as ALIGNED, both being
@@ -2091,11 +2326,13 @@ def _follower_sections(uid, race, floor, says, player=0, ident=None):
     # `fixed` lands AFTER the obedience section on purpose: that block is about carrying out
     # orders, and at 8B whatever follows an instruction competes with it. An emplacement told
     # to obey and then told it cannot move gets the order of those two the right way round.
+    # `merc` lands after the obedience block for the same reason `fixed` does: that block is
+    # about carrying out orders, and a hire's terms have to win over "do as you are told".
     return (history + memory + relations + _name_section(st) + secret + boon + identify + alleg
-            + _obedience_section(st) + _fearful_section(st, floor) + fixed + sabotage)
+            + _obedience_section(st) + merc + _fearful_section(st, floor) + fixed + sabotage)
 
 def build_prompt(race, floor, says="", uid=0, player=0, player_name="", party=1, map_name="",
-                 ident=None):
+                 ident=None, gold=0):
     head, body, limits = _persona(race, True, floor, map_name)
     who = player_name.strip() if player_name else ""
     # In co-op the follower belongs to ONE adventurer but others are present; naming the
@@ -2118,7 +2355,7 @@ def build_prompt(race, floor, says="", uid=0, player=0, player_name="", party=1,
            f"YOU ARE: a {race} on dungeon floor {floor}, an ally the adventurer can command.\n")
         + body
         + party_line
-        + (_follower_sections(uid, race, floor, says, player, ident) if uid else "")
+        + (_follower_sections(uid, race, floor, says, player, ident, gold) if uid else "")
         # HARD LIMITS LAND HERE, AFTER the disclosure block inside _follower_sections.
         # Disclosure says "do not claim ignorance"; the limits say "say you do not know and
         # STOP". Whichever comes later wins, and it must be this one.
@@ -2651,6 +2888,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             player_name = (data.get("player_name") or "").strip()
             party = max(1, int(data.get("party", 1) or 1))
             map_name = (data.get("map") or "").strip()
+            # What the owning player is carrying. Only the engine knows it, and only the
+            # service may decide whether it is enough -- the model cannot check a balance,
+            # so affordability is resolved here like every other condition in this project.
+            gold = int(data.get("gold", 0) or 0)
             # How this follower came to be, and the part of its identity that outlives this
             # body (see the origin section). Empty for an ordinary recruit.
             origin = (data.get("origin") or "").strip()
@@ -2706,20 +2947,36 @@ class Handler(http.server.BaseHTTPRequestHandler):
             # follower heads it off. Answered before any conversation state is touched.
             favour = (data.get("favour") or "").strip()
             if favour:
+                # The engine counts the gold lying on this floor and sends it, because only the
+                # engine can know it -- that is what lets Sokoban be priced as a CUT of what he
+                # recovers rather than a flat fee.
+                gold_here = int(data.get("gold_here", 0) or 0)
                 with STATE_LOCK:
                     st_g = get_follower_state(uid, race, player) if uid else {}
-                    did = favour_roll(favour, st_g) if st_g else False
+                    did = (favour_roll(favour, st_g, gold=gold, gold_here=gold_here,
+                                       floor=floor, says=says) if st_g else False)
+                    charge_g = str(LAST_CHARGE.pop(uid, "")) if uid else ""
+                    quote_g = ""
+                    if did in ("quote", "broke") and st_g.get("quote"):
+                        quote_g = "%s:%d" % (favour, st_g["quote"]["price"])
                 prompt_g = (build_guard_prompt(race, floor, map_name, did)
                             if favour == "minotaur"
                             else build_sokoban_prompt(race, floor, map_name, did))
                 raw_g = ask_ollama(prompt_g)
                 line = (raw_g or "").strip().strip('"').split("\n")[0][:200]
-                print(f"[SERVICE] -> favour {favour}: {race} {'DID it' if did else 'did not'}: {line}")
+                # ⚠ "quote" and "broke" are truthy STRINGS. Acting on truthiness here would
+                # have the engine perform the favour the instant he named his price.
+                acted = did is True or did == "paid"
+                print(f"[SERVICE] -> favour {favour}: {race} "
+                      f"{'DID it' if acted else (did or 'did not')}: {line}")
                 logrec("favour", uid=uid, race=race, floor=floor, player=player, what=favour,
-                       did=did or None, trust=st_g.get("trust") if st_g else None,
+                       did=acted or None, outcome=(did if isinstance(did, str) else None),
+                       charge=(int(charge_g) if charge_g else None),
+                       trust=st_g.get("trust") if st_g else None,
                        friendship=st_g.get("friendship") if st_g else None, reply=line[:200])
                 tts_emit(line, race, uid, "favour", "", player)
-                return self._send_json({"reply": line, "act": "1" if did else "0"})
+                return self._send_json({"reply": line, "act": "1" if acted else "0",
+                                        "charge": charge_g, "quote": quote_g})
 
             evt = data.get("event", "")
             if evt:
@@ -2812,17 +3069,47 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     ident_line, ident_truthful, ident_kind = None, False, ""
                     if ident_req and uid:
                         st_i = get_follower_state(uid, race, player)
-                        ident_kind, claim, ident_truthful = identify_attempt(
-                            st_i, race, (ident_req.get("category") or "").lower(),
-                            ident_req.get("real") or "", ident_req.get("decoys") or [])
-                        ident_line = _identify_section(ident_kind, claim,
-                                                       ident_req.get("unid") or "thing")
-                        if ident_kind == "correct":
-                            adjust(st_i, respect=2)   # they proved they know their business
-                        print(f"[SERVICE-DBG] identify {ident_req.get('real')!r} -> "
-                              f"{ident_kind} claim={claim!r} truthful={ident_truthful}")
+                        # ⚠ A mercenary quotes before he appraises. Unlike the two favours,
+                        # ASKING AGAIN is the acceptance here: the player typed /aiidentify,
+                        # saw the price, and typed it again. That keeps the whole exchange in
+                        # one turn each way and needs no cross-turn item state -- the item is
+                        # simply left unidentified by the quote turn, which it would be anyway.
+                        _paid_line = ""
+                        _skip_ident = False
+                        if is_merc(st_i):
+                            _p = merc_price("identify", floor)
+                            _q = st_i.get("quote")
+                            _asked_again = bool(_q and _q.get("kind") == "identify")
+                            if not merc_settled(st_i, "identify") and not _asked_again:
+                                merc_quote(st_i, "identify", floor)
+                                LAST_QUOTE[uid] = "identify:%d" % _p
+                                ident_line = merc_quote_section("identify")
+                                _skip_ident = True
+                                logrec("merc", uid=uid, what="identify", stage="quoted",
+                                       price=_p, floor=floor)
+                            elif not merc_can_afford(gold, _p):
+                                ident_line = merc_broke_section("identify")
+                                _skip_ident = True
+                                logrec("merc", uid=uid, what="identify", stage="broke",
+                                       price=_p, gold=gold)
+                            else:
+                                merc_agree(st_i, "identify", _p)
+                                LAST_CHARGE[uid] = _p
+                                _paid_line = merc_paid_section("identify")
+                                logrec("merc", uid=uid, what="identify", stage="hired",
+                                       price=_p, gold=gold, floor=floor)
+                        if not _skip_ident:
+                            ident_kind, claim, ident_truthful = identify_attempt(
+                                st_i, race, (ident_req.get("category") or "").lower(),
+                                ident_req.get("real") or "", ident_req.get("decoys") or [])
+                            ident_line = _paid_line + _identify_section(
+                                ident_kind, claim, ident_req.get("unid") or "thing")
+                            if ident_kind == "correct":
+                                adjust(st_i, respect=2)   # they know their business
+                            print(f"[SERVICE-DBG] identify {ident_req.get('real')!r} -> "
+                                  f"{ident_kind} claim={claim!r} truthful={ident_truthful}")
                     prompt = build_prompt(race, floor, says, uid, player, player_name, party,
-                                          map_name, ident_line)
+                                          map_name, ident_line, gold)
             who = player_name or f"player{player}"
             kind = "NPC" if npc else "follower"
             print(f"[SERVICE] {race} floor {floor} [{kind}] ({who})")
@@ -2865,6 +3152,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                         "haggle": haggle_field})
 
             name, secret, boon, sabotage_field = "", "", "", ""
+            charge_field = favour_field = quote_field = ""
             with STATE_LOCK:
                 if uid:
                     st = get_follower_state(uid, race, player)
@@ -2884,6 +3172,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     record_follower_interaction(uid, says, floor, player, speech)
                     boon = LAST_BOON.pop(uid, "")
                     sabotage_field = LAST_SABOTAGE.pop(uid, "")
+                    charge_field = str(LAST_CHARGE.pop(uid, "") or "")
+                    favour_field = LAST_FAVOUR.pop(uid, "")
+                    quote_field = LAST_QUOTE.pop(uid, "")
                     print(f"[SERVICE-DBG] follower {uid} (player{player}) {dims_summary(st)}")
                 secret = herx_secret_field()
             print(f"[SERVICE] -> action={action} speech={speech}")
@@ -2904,6 +3195,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
                    dims={d: _st.get(d, 0) for d in DIMENSIONS} if _st else None)
             self._send_json({"reply": speech, "action": action, "name": name, "player": player,
                              "secret": secret, "boon": boon, "sabotage": sabotage_field,
+                             # The mercenary's fee, the job the engine should now actually
+                             # perform because he was just hired for it, and a price for the
+                             # engine to PRINT -- the model is forbidden from saying a number.
+                             "charge": charge_field, "favour": favour_field,
+                             "quote": quote_field,
                              # "1" ONLY when the claim was both correct and honest -- this is what
                              # actually sets item->identified engine-side.
                              "identify": ("1" if (ident_req and ident_truthful) else "0")})

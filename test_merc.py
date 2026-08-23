@@ -76,18 +76,99 @@ ck("a mercenary gets a better price", d_merc < d_loyal, (d_merc, d_loyal))
 ck("a loyal companion changes nothing", d_loyal == d_none, (d_loyal, d_none))
 ck("and the cap still holds", d_merc >= -S.HAGGLE_CAP, d_merc)
 
-# --- 4. favours cost more ----------------------------------------------------------------
+# --- 4. favours are PAID FOR, not earned --------------------------------------------------
+# ⚠ Gold replaces the relationship gate for a mercenary; it does not stack on top of it. The
+# old MERC_FAVOUR_TAX made him need you to like him MORE than a loyal follower does, which
+# made him a worse loyal follower rather than a different deal.
 S.reset_run()
-def solves(st):
+def outcome(st, gold=0, says="", gold_here=0, floor=6):
+    S.GUARD_STATE["sokoban"] = False
+    st.pop("quote", None); st.pop("agreed", None)
+    return S.favour_roll("sokoban", st, gold=gold, gold_here=gold_here, floor=floor, says=says)
+
+def solves(st, **kw):
     for _ in range(400):
-        S.GUARD_STATE["sokoban"] = False
-        if S.favour_roll("sokoban", st): return True
+        if outcome(st, **kw) in (True, "paid"): return True
     return False
-ck("a mercenary will not do a favour cheaply",
-   not solves(merc(10, f=S.SOKOBAN_MIN_FRIENDSHIP)))
-ck("a loyal one will", solves(loyal(11, f=S.SOKOBAN_MIN_FRIENDSHIP)))
-ck("but the mercenary will once you are worth it",
-   solves(merc(12, f=S.SOKOBAN_MIN_FRIENDSHIP + S.MERC_FAVOUR_TAX)))
+
+ck("a mercenary quotes instead of just doing it",
+   outcome(merc(10, f=80), gold=9999) == "quote")
+ck("a loyal one at friendship 20 just does it",
+   solves(loyal(11, f=S.SOKOBAN_MIN_FRIENDSHIP)))
+# The headline: no relationship at all, but the money is right.
+ck("a mercenary at friendship 0 works for money",
+   outcome(merc(12, f=0), gold=9999, says="yes, do it") == "paid")
+ck("and turns you down flat when you cannot pay",
+   outcome(merc(13, f=80), gold=0, says="yes, do it") == "broke")
+ck("a quote does not spend the once-per-run favour",
+   outcome(merc(14, f=80), gold=9999) == "quote" and not S.GUARD_STATE["sokoban"])
+
+# Sokoban is a CUT of the gold in the room, not a flat fee.
+ck("sokoban is priced as a cut of what he recovers",
+   S.merc_price("sokoban", 6, gold_here=2000) == 500)
+ck("with a floor under a thin room",
+   S.merc_price("sokoban", 6, gold_here=10) == S.MERC_RATES["sokoban"]["base"])
+ck("the flat services scale with depth",
+   S.merc_price("identify", 15) > S.merc_price("identify", 1))
+
+# --- 5. accepting, declining and the number the model must never say ----------------------
+S.reset_run()
+st = merc(20, f=40)
+S.merc_quote(st, "minotaur", 8)
+ck("saying no clears the offer",
+   "TURNED DOWN" in S._merc_section(20, st, 8, "no, too expensive", gold=9999)
+   and "quote" not in st)
+S.merc_quote(st, "minotaur", 8)
+ck("'no deal' is a refusal, not a deal", S.agrees_to_quote("no deal") is False)
+ck("saying nothing relevant leaves it on the table",
+   S._merc_section(20, st, 8, "what is down here?", gold=9999) == "" and "quote" in st)
+_sec = S._merc_section(20, st, 8, "fine, do it", gold=9999)
+ck("agreeing hires him", "THEY HAVE AGREED YOUR PRICE" in _sec)
+ck("and stamps the fee for the engine", S.LAST_CHARGE.get(20) == S.merc_price("minotaur", 8))
+ck("and tells the engine to perform the job", S.LAST_FAVOUR.get(20) == "minotaur")
+ck("every mercenary block forbids naming a figure",
+   all("Naming any number is WRONG" in b for b in
+       (S.merc_quote_section("identify"), S.merc_paid_section("identify"),
+        S.merc_broke_section("identify"), S.merc_declined_section("identify"))))
+S.merc_quote(st, "minotaur", 8)
+ck("a quote does not survive leaving the floor",
+   S._merc_section(20, st, 12, "yes", gold=9999) == "" and "quote" not in st)
+
+# --- 6. the fee latches must not leak into the next run -----------------------------------
+# ⚠ Same class as the LAST_SABOTAGE leak: stamped while the prompt is built, popped only after
+# ask_ollama returns -- so a generation that raises strands it. This one takes the player's money.
+S.LAST_CHARGE[999] = 250; S.LAST_FAVOUR[999] = "sokoban"; S.LAST_QUOTE[999] = "identify:50"
+S.reset_run()
+ck("a stranded fee does not survive new_run",
+   not S.LAST_CHARGE and not S.LAST_FAVOUR and not S.LAST_QUOTE)
+
+# --- 7. identify: asking again IS the acceptance -------------------------------------------
+# ⚠ Deliberately different from the two favours. The player typed /aiidentify, saw the price,
+# and typed it again -- that keeps the whole exchange to one turn each way and needs no
+# cross-turn item state. The quote turn simply leaves the item unidentified, which it would be
+# anyway, so nothing is consumed by asking.
+S.reset_run()
+st = merc(30, f=0)
+ck("he has not settled an identify rate yet", not S.merc_settled(st, "identify"))
+_p = S.merc_quote(st, "identify", 10)
+ck("the identify rate scales with depth", _p == 25 + 5 * 10, _p)
+ck("a quote is remembered so the re-ask can be read as consent",
+   st["quote"]["kind"] == "identify")
+S.merc_agree(st, "identify", _p)
+ck("once agreed he simply bills", S.merc_settled(st, "identify") and "quote" not in st)
+
+# --- 8. every service has a way to report the finished job ----------------------------------
+# ⚠ Without these the conversation path had no idea what a finished job sounds like --
+# build_guard_prompt's wording is not in the conversation prompt at all. Measured: 6/6 stamped
+# the fee correctly while only ~3/6 reported the work, the rest drifting into travelogue.
+ck("every priced service says how to report it",
+   all(k in S.MERC_JOB_DONE for k in S.MERC_RATES))
+ck("and every one has a name for the job", all(k in S.MERC_JOB_WORDS for k in S.MERC_RATES))
+# ⚠ The refusal has to forbid the AGREEABLE opener by name. With only a general prohibition the
+# engine refused correctly 3/3 but the speech agreed 2/3 -- so the player read a yes and then
+# watched nothing happen. Naming the openers took it to 5/5.
+ck("the refusal forbids sounding like agreement",
+   "Alright" in S.merc_broke_section("minotaur"))
 
 print("\n%d failure(s)" % len(fails), fails)
 sys.exit(1 if fails else 0)

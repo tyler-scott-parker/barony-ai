@@ -814,7 +814,7 @@ colouring it. Their price is paid in favours and information, never in your gear
 | **They never gift the good item** | boons skew to **information at 85%** (60% for everyone else); the once-per-run good item is off entirely — they would sell it |
 | **They know what they are holding** | identify accuracy **+20%**, capped at 95%. Outside their species' expertise this is the big one; inside it the cap bites |
 | **They talk merchants down** | a mercenary escorting you doubles the haggle step, 1% → **2%**. Measured: −2/−4/−5 across three shops against −1/−2/−3 with a loyal companion |
-| **Favours cost more** | +20 friendship on Sokoban, +20 trust on the minotaur guard — helping has to be worth their while |
+| **Favours are bought, not earned** | see below — gold **replaces** the relationship gate rather than raising it |
 
 **The engine sends only an `escort` uid** with the shop payload — never an allegiance. The
 service already knows what that follower is; the engine has no business knowing, same rule as
@@ -827,6 +827,84 @@ anyway. Sixty tokens in an already-crowded section for noise. The price movement
 feature and lands 100% of the time; the player reads the number, not a line about it.
 
 
+
+### The mercenary's fee — gold as a substitute for the relationship
+
+⚠ **`MERC_FAVOUR_TAX` is gone, and its removal is the point.** It made him need you to like him
+*more* than a loyal follower does (+20 friendship for Sokoban, +20 trust for the guard) — which
+quietly made him **a worse loyal follower**, the one thing the allegiance is not supposed to be.
+Inverted, the deal reads properly:
+
+> A loyal follower does it because they like you. A mercenary does it because you paid.
+
+So he will solve Sokoban at **friendship 0** if the money is right, and the loyal follower still
+does it free at 20. Verified: a friendship-0 mercenary cleared the room for 450 gold, and a loyal
+follower in the identical situation still acted immediately, free, with no quote.
+
+**No new packet.** `'GOLD'` (`net.cpp:4788`) is an **absolute set** of a client's gold that vanilla
+already sends after the host changes the value (`net.cpp:9426`), so a remote client resyncs for
+free — unlike `MYFG`/`MYHG`, which had no vanilla equivalent. `mymod_chargeGold()` deducts, clamps
+at zero, plays the coin sound and sends it.
+
+**The coin sound is the feedback.** `242 + rand%4` — the game's own, what `DGLD` plays when you
+drop gold (`net.cpp:8976`) and what a bounty pays out with. Paid **before** the job and before his
+line, so the player hears the money leave and then hears him report the work.
+
+| Service | Price | Why |
+|---|---|---|
+| identify | `25 + 5×floor` | the everyday repeatable |
+| minotaur guard | `100 + 25×floor` | it saves your run; it should hurt |
+| Sokoban | **25% of the gold in the room** (floor 100) | a *cut*, not a fee — self-balancing, and the engine counts it with `mymod_goldOnFloor()` |
+
+Calibrated against the real economy: a floor pile is `10 + rand%100 + currentlevel`
+(`maps.cpp:7775`), monsters carry ~15–50, and starting gold is **0–250 for most classes**
+(Merchant 1000; `stat_shared.cpp:70` is the 0 default). ⚠ **So a paid mercenary is a midgame
+unlock** — early on his value has to stay the free stuff (the identify bonus, the haggle step).
+
+**Consent is explicit, because taking gold unasked is theft and theft is the spy's job.** Quote →
+accept → charge on delivery. Nothing is billed for a job that did not happen.
+
+⚠ **The two favours are engine-initiated, so acceptance has to be read somewhere else.**
+`mymod_favourFetch` is a one-shot request/response with nobody to say yes to, so he quotes there
+and is answered in ordinary conversation (`_merc_section`), which stamps `LAST_FAVOUR` and lets
+`mymod_performFavour` run from the conversation path. That is why the favour logic is now split
+out of `mymod_favourTick`.
+
+⚠ **Identify is the exception: asking again IS the acceptance.** The player typed `/aiidentify`,
+saw the price, typed it again. One turn each way, and no cross-turn item state — the quote turn
+leaves the item unidentified, which it would have been anyway.
+
+⚠ **He must never say the number, and the engine prints it.** Settled by the haggle measurement,
+not re-litigated: asked to quote, the 8B invents a figure (*"25 gold instead of 30"*, beside a shop
+window showing the real price). `mymod_printQuote` states it; `MERC_NO_NUMBERS` is in all four
+blocks. Measured **0/6 named a figure**, and 5/6 clearly demanded payment.
+
+⚠ **Charging a remote client races with their own shop.** `buyItemFromShop` runs client-side
+(`interface/shopgui.cpp:1597` checks affordability against the client's own copy), so an absolute
+`'GOLD'` set landing mid-purchase clobbers a transaction in flight. `mymod_canChargeNow()` holds
+the fee while a shop is open.
+
+**Two prompt findings, both the same lesson this project keeps relearning — name the required
+speech act and forbid the specific route out:**
+
+1. ⚠ **The conversation path had no idea what a finished job sounds like.** `build_guard_prompt`'s
+   careful *"do NOT explain the mechanism, do NOT name a minotaur"* wording is not in the
+   conversation prompt at all, and the acceptance happens there. Measured: the fee stamped 6/6
+   while only ~3/6 reported the work — the rest drifted into travelogue (*"we're on the 8th level
+   of the Swamp, it's a Goblin infestation"*) or invented a method (*"I set up a few traps"*).
+   `MERC_JOB_DONE` carries the per-kind wording across; **4–5/6** after.
+2. ⚠ **The refusal has to forbid the agreeable OPENER by name.** With only a general prohibition
+   the engine refused correctly **3/3** — no charge, no job — but the *speech* agreed **2/3**
+   (*"Alright then! What's the plan?"*), so the player reads a yes and then watches nothing happen.
+   Forbidding `Alright / Sure / Aye / Of course / What's the plan` by name took it to **5/5**:
+   *"You can't afford me, and that's the end of it."*
+
+⚠ **`LAST_CHARGE` / `LAST_FAVOUR` / `LAST_QUOTE` are per-run latches and are cleared in
+`reset_run`** — the `LAST_SABOTAGE` leak class, and this one takes the player's money.
+
+**Not done:** the map boon still cannot fire for a mercenary at all (the `self_interested` branch
+in `boon_roll` returns before the map check), so his best product is unsellable. Charging for an
+*unprompted* gift does not fit the ask→quote→accept shape, so it needs its own offer path.
 
 ### Allegiance & spies
 Weighted roll at recruitment: **loyal 70 / self_interested 15 / fearful 8 / spy 7**. Never shown to the player. Spies get a motive and behavioral tells: deflect on personal history, over-interest in the player's gear and plans, hesitation at Herx's name. `allegiance_section(st, says)` detects probing questions and sharpens the tell.
