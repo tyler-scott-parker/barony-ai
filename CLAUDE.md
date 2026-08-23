@@ -1121,6 +1121,49 @@ get **me** out of the water"* — writing itself as the one drowning. Every haza
 says "this adventurer, not you": **0/10** after. Third time this exact clarification has been
 needed (drunk, hunger, now water); it is cheap and it always works, unlike naming a topic.
 
+#### When the adventurer dies — and in co-op, does not stay dead
+
+⚠ **Death is not one situation.** Two things decide the line, and the game itself draws the
+second: *whose* adventurer it was, and whether they are coming back.
+
+| | message |
+|---|---|
+| lang 577 | *"You die..."* |
+| lang 578 / 1141 | *"You will be revived if your party survives to the next level."* |
+| lang 1142 | *"As the rest of your party has perished,"* — the other ending |
+| lang 5264 | *"When a player dies, they retain their inventory when revived on the next level."* |
+| lang 6875 | *"Your spirit rejoins your body."* |
+
+So in a party the honest line is *"keep going, get down the stairs and we get them back"*, and
+alone — or with everyone down — it is simply the end. Four situations, from `(own, can_return)`.
+
+⚠ **Ask the game whether ghosts are even possible.** `Player::Ghost_t::gamemodeAllowsGhosts()` is
+true for multiplayer **and splitscreen**, and false in the tutorial. Deriving it from
+`multiplayer != SINGLE` by hand would get splitscreen wrong — `gamemodeAllowsGhosts` explicitly
+includes `multiplayer == SINGLE && splitscreen`.
+
+⚠ **Somebody has to be left to reach those stairs.** Survivors are counted before anything is
+promised; with the whole party down, nobody is coming back and the follower is told so.
+
+⚠ **The dead player's own follower is still findable, but only via `monsterAllyIndex`.** That is
+`skill[42]`, a plain replicated int, and it survives its leader's entity being destroyed —
+`mymod_ownerOf`'s `leader_uid → uidToEntity` fallback cannot resolve once the body is gone.
+`mymod_deathSpeaker` prefers the fallen player's own follower and falls back to somebody else's,
+and the request is routed through the **speaker's** conversation slot rather than the corpse's.
+
+⚠ **Do not let it invent a rescue.** Reviving is the party reaching the next floor and nothing
+else — no shrines, no rites, no potions, no bargains — so the block forbids inventing one by
+name. Measured: **0/5 invented a rescue**, 3/5 pointed at the stairs.
+
+⚠ **Barony descends.** Floors run 1 → 35 downward, and "get to the stairs" with no direction had
+a skeleton answer a death with *"Up the stairs."* The two revivable situations now say **DOWN**
+and *"the way on is always downward"*: **0/6** after.
+
+> *"Others must press on, down the stairs."* (skeleton, own, revivable)
+> *"Still lies here."* / *"Your burdens are mine now."* (skeleton, own, final)
+> *"Keep moving, get to the stairs!"* (human, another player's death)
+> *"Well, that's a client gone cold."* (mercenary)
+
 #### The party killing something
 
 ⚠ **`kills[]` is the game's own per-run tally** — credited to a player (`entity.cpp:18411` for

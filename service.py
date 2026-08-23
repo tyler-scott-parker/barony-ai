@@ -356,6 +356,9 @@ REMARK_SITUATION = {
                  "about in dungeon water with all their gear on."),
     "kill": ("Between you, you have just put down {look}. It is dead on the floor in front of "
              "you and the fight is off you for the moment."),
+    # Routed to build_death_prompt, which needs the own/can_return pair; this entry exists so
+    # the handler recognises the kind.
+    "death": "An adventurer has been killed.",
     "arrowtrap": ("An arrow trap has just gone off and put a shaft in them. They are hurt and "
                   "there may be more of it. This is happening RIGHT NOW.\n"
                   "Do NOT claim you warned them and do NOT say you saw it coming — you did not."),
@@ -561,6 +564,62 @@ def build_swim_prompt(race, floor, map_name, allegiance="loyal", medium="water",
     numbers = MERC_NO_NUMBERS if allegiance == "self_interested" else ""
     return (_remark_head(race, floor, map_name)
             + situation + "\n" + angle + "\n" + numbers + REMARK_TAIL)
+
+# ---- The adventurer dying ------------------------------------------------------------------
+# ⚠ Death is not one situation. It matters (a) whose adventurer it was and (b) whether they are
+# coming back, and the game itself draws the second line:
+#
+#   lang 578  "You will be revived if your party survives to the next level."
+#   lang 5264 "When a player dies, they retain their inventory when revived on the next level."
+#
+# So in a party the honest line is "keep going, reach the stairs and we get them back" -- and
+# with nobody left standing, or in singleplayer, it is simply the end. The engine decides which
+# by asking the game (gamemodeAllowsGhosts, which covers splitscreen too) and by counting who
+# is still alive; the follower is only told the outcome.
+DEATH_SITUATION = {
+    (True, True): ("YOUR adventurer — the one you follow, the one who took you on — has just "
+                   "been killed in front of you. They are down and they are not getting up.\n"
+                   "But this is not the end of them. Their spirit is still here, and if the "
+                   "rest of the party lives long enough to reach the next floor, they come "
+                   "back. Say it: the others have to keep going and get down those stairs. The way on is always downward."),
+    (True, False): ("YOUR adventurer — the one you follow, the one who took you on — has just "
+                    "been killed in front of you. They are down and they are not getting up, "
+                    "and there is nobody left to carry them out. This one is final. Whatever "
+                    "you were to each other ends here, on this floor."),
+    (False, True): ("One of the other adventurers has just been killed in front of you — not "
+                    "yours; yours is still standing. Their spirit is still here, and if the "
+                    "rest of you reach the next floor they come back. Say it: keep moving, get "
+                    "to the stairs. The way on is always downward."),
+    (False, False): ("One of the other adventurers has just been killed in front of you — not "
+                     "yours; yours is still standing. There is nobody left to carry them out. "
+                     "That one is not coming back."),
+}
+DEATH_ANGLE = {
+    "self_interested": ("A dead client is a contract ended. Say what that means for you — but "
+                        "you are not a monster, and you did travel with them."),
+    "fearful": "You are frightened and you may be next. Say so.",
+    "bound": "The one who called you has fallen. State it. You do not grieve.",
+    "machine": "Register it. You do not grieve.",
+    None: "React as YOUR kind would to a death you were standing next to.",
+}
+
+# The remark tables are declared earlier in the file; death shares this one rather than
+# duplicating it, and registering it here keeps the "every kind has a situation and angles"
+# test meaningful.
+REMARK_ANGLE["death"] = DEATH_ANGLE
+
+def build_death_prompt(race, floor, map_name, allegiance="loyal", own=True, can_return=True):
+    situation = DEATH_SITUATION[(bool(own), bool(can_return))]
+    numbers = MERC_NO_NUMBERS if allegiance == "self_interested" else ""
+    return (_remark_head(race, floor, map_name)
+            + situation + "\n"
+            + (DEATH_ANGLE.get(allegiance) or DEATH_ANGLE[None]) + "\n"
+            # ⚠ Do not let it invent a rescue the game does not offer. Reviving is the party
+            # reaching the next floor and nothing else -- no shrines, no potions, no bargains.
+            + "Do NOT invent a way to bring them back — no rites, no potions, no bargains with "
+              "anything. Say only what you have been told here.\n"
+            + numbers
+            + REMARK_TAIL)
 
 def build_hunger_prompt(state, race, floor, map_name, allegiance="loyal", blood=False):
     situation = HUNGER_SITUATION.get(state)
@@ -3602,7 +3661,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 _al = st_r.get("allegiance", "loyal")
                 if _al == "spy":
                     _al = "loyal"     # the disguise holds here too
-                if remark == "swimming":
+                if remark == "death":
+                    prompt_r = build_death_prompt(race, floor, map_name, _al,
+                                                  bool(data.get("own", True)),
+                                                  bool(data.get("canreturn", False)))
+                elif remark == "swimming":
                     prompt_r = build_swim_prompt(race, floor, map_name, _al,
                                                  (data.get("medium") or "water").strip(),
                                                  (data.get("hazard") or "").strip())

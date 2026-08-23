@@ -90,7 +90,8 @@ ck("the mercenary does not tout for the appraisal here",
    "do NOT offer to do it yourself" in S.VALUABLE_ANGLE["self_interested"])
 
 # --- chest, drunk and mimic -----------------------------------------------------------------
-for k in ("chest", "drunk", "mimic", "cleared", "swimming", "arrowtrap", "food", "kill"):
+for k in ("chest", "drunk", "mimic", "cleared", "swimming", "arrowtrap", "food", "kill",
+          "death"):
     pr = S.build_remark_prompt(k, "goblin", 7, "swamp", "loyal")
     ck("the %s remark is a short form" % k, tok(pr) < 500, tok(pr))
     ck("the %s remark knows where it is" % k, "Swamp" in pr or "swamp" in pr)
@@ -126,7 +127,8 @@ ck("the drunk situation names no topic to avoid",
    and "what lives here" not in S.REMARK_SITUATION["drunk"])
 
 # A spy has no reaction of its own for any kind; the handler maps it to loyal.
-for k in ("chest", "drunk", "mimic", "cleared", "swimming", "arrowtrap", "food", "kill"):
+for k in ("chest", "drunk", "mimic", "cleared", "swimming", "arrowtrap", "food", "kill",
+          "death"):
     ck("no spy-specific %s angle to leak" % k, "spy" not in S.REMARK_ANGLE[k])
     ck("every %s angle has a default" % k, S.REMARK_ANGLE[k].get(None))
 ck("a fearful follower dreads chests", "Traps" in S.REMARK_ANGLE["chest"]["fearful"])
@@ -254,6 +256,30 @@ ck("and falls back cleanly", "{look}" not in S.build_remark_prompt("kill", "rat"
                                                                    "loyal"))
 ck("it keeps the moment short", "Keep it to a breath" in S.REMARK_ANGLE["kill"][None])
 ck("a construct does not gloat", "not an achievement" in S.REMARK_ANGLE["kill"]["machine"])
+
+# --- the adventurer dying -------------------------------------------------------------------
+# ⚠ Death is not one situation. It matters whose adventurer it was AND whether they are coming
+# back, and the game itself draws the second line: lang 578 "You will be revived if your party
+# survives to the next level", lang 5264 "they retain their inventory when revived".
+ck("all four death situations exist",
+   set(S.DEATH_SITUATION) == {(True, True), (True, False), (False, True), (False, False)})
+_own_ret = S.build_death_prompt("human", 7, "swamp", "loyal", own=True, can_return=True)
+_own_end = S.build_death_prompt("human", 7, "swamp", "loyal", own=True, can_return=False)
+_oth_ret = S.build_death_prompt("human", 7, "swamp", "loyal", own=False, can_return=True)
+ck("a revivable death points at the next floor", "next floor" in _own_ret)
+ck("a final one says there is nobody to carry them out", "nobody left" in _own_end)
+ck("and does not promise a return", "come back" not in _own_end)
+ck("someone else's death says yours is still standing", "yours is still standing" in _oth_ret)
+ck("your own death says it was the one who took you on", "took you on" in _own_ret)
+
+# ⚠ The follower must not invent a rescue the game does not offer. Reviving is the party
+# reaching the next floor and nothing else. Measured 0/5 inventing one.
+for _p in (_own_ret, _own_end, _oth_ret):
+    ck("no invented resurrection is permitted", "Do NOT invent a way to bring them back" in _p)
+ck("a construct does not grieve", "not grieve" in S.DEATH_ANGLE["machine"])
+ck("a mercenary is still forbidden figures over a corpse",
+   "Naming any number is WRONG" in S.build_death_prompt("gnome", 7, "swamp", "self_interested"))
+ck("death is a short form", tok(_own_ret) < 500, tok(_own_ret))
 
 print("\n%d failure(s)" % len(fails), fails)
 sys.exit(1 if fails else 0)
