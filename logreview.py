@@ -176,6 +176,77 @@ def main():
                 shown = "  ".join(parts)
                 print(f"   uid {uid} ({race}{', '+name if name else ''}) x{len(rs)}: {shown or 'no change'}")
 
+        # --- ⚠ THE BIG ONE FOR THE FIRST PLAYTEST: does follower identity survive a staircase?
+        # follower_state is keyed by uid, and a level change RE-CREATES every follower as a new
+        # entity with a new uid (game.cpp:2438 -> summonMonster, entity_shared.cpp:490). If that
+        # is right, the same creature appears here twice under different uids -- and everything
+        # uid-keyed (friendship, allegiance, the event log, the name) silently starts over.
+        newf = [r for r in recs if r.get("kind") == "newfollower"]
+        if newf:
+            by_name = {}
+            for r in newf:
+                nm = (r.get("engine_name") or "").strip()
+                if nm:
+                    by_name.setdefault((nm, r.get("race", "?")), []).append(r)
+            repeats = {k: v for k, v in by_name.items() if len({x.get("uid") for x in v}) > 1}
+            print(f"\nFOLLOWER IDENTITY  {len(newf)} state row(s) created this run")
+            if repeats:
+                print("   !! UID CHURN CONFIRMED -- the same named creature got a NEW state row:")
+                for (nm, race), rs in repeats.items():
+                    uids = ", ".join(str(x.get("uid")) for x in rs)
+                    floors = ", ".join(str(x.get("floor")) for x in rs)
+                    alls = ", ".join(str(x.get("allegiance")) for x in rs)
+                    print(f"      {nm} ({race}): uids {uids}  on floors {floors}")
+                    print(f"          allegiance re-rolled each time: {alls}")
+                print("   -> friendship, events, allegiance and the assigned name all restart")
+                print("      at every staircase. The Herx secret (friendship 50 + 4 fights) is")
+                print("      unreachable in real play while this holds.")
+            elif len(newf) > 1:
+                print("   no repeated names -- either identity held, or nothing was named yet.")
+                print("   (an UNNAMED follower cannot be tracked here; talk to one until it")
+                print("    names itself, then take a staircase, and check this section again)")
+
+        # --- ⚠ CHATTER VOLUME: the thing most likely to need tuning on a first run ---
+        rem = [r for r in recs if r.get("kind") in ("remark", "valuable")]
+        if rem:
+            dur_min = max((recs[-1]["t"] - recs[0]["t"]) / 60.0, 0.01)
+            TIERS = {0: "reactive", 1: "event", 2: "idle", -1: "?"}
+            per_kind, per_tier = {}, {}
+            for r in rem:
+                k = r.get("what") or r.get("kind")
+                per_kind[k] = per_kind.get(k, 0) + 1
+                per_tier[TIERS.get(r.get("tier", -1), "?")] = \
+                    per_tier.get(TIERS.get(r.get("tier", -1), "?"), 0) + 1
+            print(f"\nCHATTER  {len(rem)} remarks in {dur_min:.1f} min "
+                  f"= {len(rem)/dur_min:.1f}/min")
+            print("   by tier: " + "  ".join(f"{k} {v}" for k, v in sorted(per_tier.items())))
+            top = sorted(per_kind.items(), key=lambda kv: -kv[1])[:12]
+            print("   by kind: " + "  ".join(f"{k} {v}" for k, v in top))
+            gaps = [rem[i]["t"] - rem[i-1]["t"] for i in range(1, len(rem))]
+            if gaps:
+                tight = sorted(gaps)[:3]
+                print(f"   closest together: {', '.join(f'{g:.1f}s' for g in tight)}")
+                if len(rem) / dur_min > 3:
+                    print("   !! over 3/min -- consider raising MYMOD_TIER_GAP for idle/event")
+
+        # --- the mercenary's economy ---
+        merc = [r for r in recs if r.get("kind") == "merc"]
+        if merc:
+            print(f"\nMERCENARY ({len(merc)})")
+            for r in merc[:14]:
+                print(f"   t={r['t']:>8.1f}  {r.get('what','?'):<9} {r.get('stage','?'):<8} "
+                      f"price={r.get('price')} gold={r.get('gold')}")
+
+        # --- the rat ---
+        rat = [r for r in recs if r.get("kind") == "ratfear"]
+        if rat:
+            print(f"\nTHE RAT ({len(rat)})")
+            for r in rat:
+                tag = "LEGEND" if r.get("legend") else "first"
+                nm = r.get("ratname") or "(unnamed)"
+                print(f"   t={r['t']:>8.1f}  {tag}  {r.get('boss')}  rat={nm}")
+                print(f"      \"{r.get('reply','')}\"")
+
         # --- special outcomes ---
         for label, key in (("BOONS", "boon"), ("HERX SECRET", "secret"), ("IDENTIFY", "identify")):
             hits = [r for r in recs if r.get(key)]

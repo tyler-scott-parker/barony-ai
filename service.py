@@ -1548,6 +1548,12 @@ def get_follower_state(uid, race, player=0, origin="", origin_key=""):
                                "motive": random.choice(SPY_MOTIVES) if al == "spy" else ""})
         if pid:
             PERSISTENT_IDENTITY[pid] = follower_state[uid]
+        # ⚠ THE UID-CHURN PROBE. follower_state is keyed by uid, and a level change re-creates
+        # every follower as a NEW entity with a NEW uid (game.cpp:2438 -> summonMonster), which
+        # would orphan this row at every staircase. Stat->name survives the transition, so
+        # logging it here lets logreview spot the same creature reappearing under a second uid.
+        logrec("newfollower", uid=uid, race=race, player=player, allegiance=al,
+               engine_name=(_ENGINE_NAME_HINT or None), floor=_FLOOR_HINT or None)
         print(f"[SERVICE-DBG] follower {uid} allegiance={al} owner=player{player}"
               + (f" origin={origin} identity={pid}" if origin else ""))
         # The single most important line for reading a playthrough back: everything a follower
@@ -2978,6 +2984,11 @@ def _secret_override(uid):
 # actually spoken in play. Reserved-but-never-revealed names are released back, or a long
 # session would burn the pool for nothing.
 
+# Set by the request handler before it touches follower state, so get_follower_state can log
+# the engine-side name and floor without threading two more parameters through every call site.
+_ENGINE_NAME_HINT = ""
+_FLOOR_HINT = 0
+
 FOLLOWER_NAMES    = _load_json("follower_names.json")
 NAME_HISTORY_PATH = os.environ.get("BARONY_AI_NAMEHIST",
                                    os.path.join(BASE_DIR, "name_history.json"))
@@ -4137,6 +4148,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             # ⚠ NOT player_race -- see _kin_section. That field is the shapeshift form and drives
             # the comprehension filter; this is what the adventurer actually is.
             player_kind = (data.get("player_kind") or "").strip()
+            global _ENGINE_NAME_HINT, _FLOOR_HINT
+            _ENGINE_NAME_HINT = (data.get("follower_name") or "").strip()
+            _FLOOR_HINT = floor
             # How this follower came to be, and the part of its identity that outlives this
             # body (see the origin section). Empty for an ordinary recruit.
             origin = (data.get("origin") or "").strip()
@@ -4239,6 +4253,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 line_h = (raw_h or "").strip().strip('"').split("\n")[0][:200]
                 print(f"[SERVICE] -> hunger ({_state}): {race}: {line_h}")
                 logrec("remark", uid=uid, race=race, floor=floor, player=player, what="hunger",
+                       tier=int(data.get("tier", -1) or -1),
                        state=_state, blood=bool(data.get("blood")) or None,
                        allegiance=st_h.get("allegiance"), reply=line_h[:200])
                 tts_emit(line_h, race, uid, "remark", "", player)
@@ -4285,6 +4300,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 line_r = (raw_r or "").strip().strip('"').split("\n")[0][:200]
                 print(f"[SERVICE] -> remark {remark}: {race}: {line_r}")
                 logrec("remark", uid=uid, race=race, floor=floor, player=player, what=remark,
+                       tier=int(data.get("tier", -1) or -1),
                        allegiance=st_r.get("allegiance"), reply=line_r[:200])
                 tts_emit(line_r, race, uid, "remark", "", player)
                 return self._send_json({"reply": line_r, "action": "NONE"})
