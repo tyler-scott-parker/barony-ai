@@ -1231,6 +1231,32 @@ The *service's* row is not.
 > *"I will... I'll show you the true meaning of torment, adventurer, but first... GET IT AWAY FROM ME!"*
 > *"Please, get... that thing off my floor."*
 
+### ⚠ The world channel needed the same lesson — measured in the first real session
+
+Taunts and ambient babble predate the remark tiers and had only a **per-enemy** cooldown. Each
+monster keeps its own 20s timer, so five skeletons in one fight produce five taunts back to back
+and five more twenty seconds later. And `inflight` ("one world line at a time") is **not** a
+cadence: a generation takes ~0.4s, so back-to-back speakers simply queue.
+
+First real session, 6.8 minutes: **5.3 taunts/min with gaps of 0.4s**, and **8.2 chat lines/min**
+overall — a wall of text arriving exactly when the player is busiest.
+
+| | before | after |
+|---|---|---|
+| world lines | 5.6/min | **1.3/min** |
+| chat log | 8.2/min | **2.6/min** |
+
+Two fixes, both already precedented elsewhere in the mod:
+
+- ⚠ **`MYMOD_WORLD_GAP` (25s) is the actual spacing** — a global gap between *any* two world
+  lines, the same thing the remark tiers do. The per-enemy cooldown stays, so one monster still
+  cannot dominate.
+- ⚠ **A taunt is a BUBBLE, not a chat line.** The shared feed is where the real conversation
+  lives, and taunts push it off the screen during the fight the player is trying to read. This is
+  the call the dummybot heckler already made, for the same reason, and the line still appears
+  over the monster's head — which is where the player is looking anyway. **Ambient babble keeps
+  its chat line**: it is rare (0.3/min measured) and it is scene-setting rather than combat noise.
+
 ### ⚠ Remark cadence: three tiers, because one cooldown was the wrong shape
 
 With **31 kinds** of remark, a single shared cooldown either lets flavour crowd out the things
