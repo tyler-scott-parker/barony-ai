@@ -93,7 +93,7 @@ ck("the mercenary does not tout for the appraisal here",
 for k in ("chest", "drunk", "mimic", "cleared", "swimming", "arrowtrap", "food", "kill",
           "death", "bossfight", "bossdown", "area", "minotaur", "minotimer", "minotaurdown",
           "equip", "equiplegend", "gift", "wealth", "naked", "levitate", "boulderhit",
-          "boulderpush"):
+          "boulderpush", "dig"):
     pr = S.build_remark_prompt(k, "goblin", 7, "swamp", "loyal")
     ck("the %s remark is a short form" % k, tok(pr) < 500, tok(pr))
     ck("the %s remark knows where it is" % k, "Swamp" in pr or "swamp" in pr)
@@ -132,7 +132,7 @@ ck("the drunk situation names no topic to avoid",
 for k in ("chest", "drunk", "mimic", "cleared", "swimming", "arrowtrap", "food", "kill",
           "death", "bossfight", "bossdown", "area", "minotaur", "minotimer", "minotaurdown",
           "equip", "equiplegend", "gift", "wealth", "naked", "levitate", "boulderhit",
-          "boulderpush", "skillbest", "skillworst"):
+          "boulderpush", "dig", "fountain", "biome", "bridge", "skillbest", "skillworst"):
     ck("no spy-specific %s angle to leak" % k, "spy" not in S.REMARK_ANGLE[k])
     ck("every %s angle has a default" % k, S.REMARK_ANGLE[k].get(None))
 ck("a fearful follower dreads chests", "Traps" in S.REMARK_ANGLE["chest"]["fearful"])
@@ -464,6 +464,52 @@ for k in ("naked", "levitate", "boulderhit", "kill", "chest"):
     ck("the %s remark carries it" % k,
        "not about them" in S.build_remark_prompt(k, "human", 7, "swamp", "loyal"))
 ck("and it still asks for one spoken line", "ONLY one short spoken line" in S.REMARK_TAIL)
+
+# --- biome, digging, bridges and fountains -----------------------------------------------------
+# ⚠ Biome is keyed on the region floor_to_region already resolves -- by map.name first, so secret
+# levels and DLC maps land correctly and there is no second table to keep in step.
+ck("every region the mod resolves has a biome line",
+   set(S.BIOME_SITUATION) >= {"mines", "swamp", "sand_labyrinth", "ruins", "hell", "hamlet"})
+ck("the mines read as the mines", "ore in the walls" in
+   S.build_remark_prompt("biome", "goblin", 3, "mine", "loyal"))
+ck("the swamp reads as the swamp", "standing water" in
+   S.build_remark_prompt("biome", "goblin", 7, "swamp", "loyal"))
+ck("an unresolvable region says nothing rather than something generic",
+   S.build_remark_prompt("biome", "goblin", 5, "minetoswamp", "loyal") in ("", None)
+   or "You are" in S.build_remark_prompt("biome", "goblin", 5, "minetoswamp", "loyal"))
+
+# ⚠ Any route counts -- pickaxe, bomb, spell. The engine counts obstacle tiles, so it cannot say
+# HOW and does not need to.
+ck("digging does not claim a tool", "pickaxe" not in S.REMARK_SITUATION["dig"])
+ck("but it says the way through is through", "way THROUGH" in S.REMARK_SITUATION["dig"])
+
+# ⚠ The fountain documents itself (actfountain.cpp:88): skill[1] is 0 succubus, 1 hunger,
+# 2 potion, 3 bless, and skill[0] falls to 0 on use. No guessing at the outcome.
+ck("all four fountain outcomes are covered",
+   set(S.FOUNTAIN_SITUATION) == {"succubus", "hunger", "potion", "bless"})
+ck("the succubus one is the nasty surprise", "CAME OUT OF IT" in S.FOUNTAIN_SITUATION["succubus"])
+ck("the potion one admits not knowing what it did",
+   "not certain what it was" in S.FOUNTAIN_SITUATION["potion"])
+# ⚠ THEY drank, not you. A goblin answered the hunger fountain with "Me feel good, yes!".
+for _e in S.FOUNTAIN_SITUATION.values():
+    ck("the fountain line says who drank", "not you" in _e)
+ck("an unknown effect falls back rather than breaking",
+   bool(S.build_remark_prompt("fountain", "human", 7, "swamp", "loyal", {"effect": "sparkles"})))
+
+# ⚠ The hunger claim is only made when the map ACTUALLY sets MFLAG_DISABLEHUNGER, which genuinely
+# gates hunger (entity.cpp:4656). The engine reads the flag; the mod never assumes which maps
+# have it, so the line can never be a lie.
+_br_on = S.build_remark_prompt("bridge", "human", 5, "minetoswamp", "loyal", {"nohunger": True})
+_br_off = S.build_remark_prompt("bridge", "human", 5, "minetoswamp", "loyal", {"nohunger": False})
+ck("the bridge is a lull either way", "Almost nothing lives here" in _br_off)
+ck("the hunger effect is claimed when the flag is set", "holds hunger off" in _br_on)
+ck("and never when it is not", "holds hunger off" not in _br_off)
+
+# ⚠ "React as YOUR kind would" invites ordinary monster behaviour, including treating the
+# adventurer as an intruder -- a goblin answered a biome remark with "You stinkin' human come in
+# here? This be mine place!". The positive role statement that fixed the swimming angle now lives
+# in the shared tail: 0/5 territorial after. FOURTH place this same fix has paid.
+ck("every remark names the follower's role", "the one you follow and travel with" in S.REMARK_TAIL)
 
 print("\n%d failure(s)" % len(fails), fails)
 sys.exit(1 if fails else 0)

@@ -397,6 +397,14 @@ REMARK_SITUATION = {
                    "getting up out of the dirt. This is happening RIGHT NOW."),
     "boulderpush": ("They have just set a boulder rolling with their own hands. It is moving now, "
                     "and it will go where it goes."),
+    # ⚠ Any route counts: a pickaxe, a bomb, a spell. The engine counts obstacle tiles, so it
+    # cannot say HOW -- and does not need to. What matters is that the dungeon's shape just
+    # changed because somebody decided it should.
+    "dig": ("A wall has just come down. Somebody has decided the way through is the way THROUGH, "
+            "and there is now a hole in this dungeon that was not there a moment ago."),
+    "fountain": "FOUNTAIN",   # replaced per effect below; see FOUNTAIN_SITUATION
+    "biome": "BIOME",         # replaced per region below; see BIOME_SITUATION
+    "bridge": "BRIDGE",       # replaced below; the hunger line depends on the map flag
     # Routed to build_skill_prompt, which needs the skill/tier pair; these exist so the handler
     # recognises the kinds.
     "skillbest": "You have seen what this adventurer is good at.",
@@ -504,6 +512,34 @@ REMARK_ANGLE = {
         "bound": "State the outcome.",
         "machine": "State the outcome.",
         None: "React as YOUR kind would to the thing that was hunting you lying dead.",
+    },
+    "dig": {
+        "self_interested": "Doors are free and walls are work. Say what you make of the effort.",
+        "fearful": "A hole works both ways, and things come through holes. Say so.",
+        "bound": "Note the opening. It is a change in the ground, nothing more.",
+        "machine": "Note the opening. It is a change in the ground, nothing more.",
+        None: "React as YOUR kind would to someone digging their own way through solid rock — approval, alarm at the noise, or an old opinion about what lives behind walls.",
+    },
+    "fountain": {
+        "self_interested": "You have seen people do worse things for less. Say what you make of the gamble.",
+        "fearful": "Drinking from a hole in the ground in a place like this frightens you. Say so.",
+        "bound": "Note what the water did. You are not curious about it.",
+        "machine": "Note what the water did. You are not curious about it.",
+        None: "React as YOUR kind would to what the water just did to them.",
+    },
+    "biome": {
+        "self_interested": "You have worked places like this before. Say what it means for the job.",
+        "fearful": "You do not like it here. Say what specifically bothers you about this place.",
+        "bound": "Note where you are. Nothing more.",
+        "machine": "Note where you are. Nothing more.",
+        None: "React as YOUR kind would to being HERE specifically — what your sort knows about this kind of place, what it smells of, what usually happens in it.",
+    },
+    "bridge": {
+        "self_interested": "A stretch with nothing in it is a stretch nobody pays you for. Say something dry about the quiet.",
+        "fearful": "You are safe for the moment and you know it will not last. Say so.",
+        "bound": "Note the crossing. Nothing more.",
+        "machine": "Note the crossing. Nothing more.",
+        None: "React as YOUR kind would to a lull between two bad places — relief, wariness, or a practical word about using it while it lasts.",
     },
     "naked": {
         "self_interested": "A client with no armour is a client about to become a corpse, and a corpse does not settle up. Say so, dryly.",
@@ -677,7 +713,8 @@ def _remark_head(race, floor, map_name):
 # with "Bless their curiosity, I suppose", which is remarking to a bystander. The same one-line
 # subject clarification that fixed the skill remarks and the hunger block, applied to all of them.
 REMARK_TAIL = ("You are speaking straight to this adventurer, face to face — say it TO them, not "
-               "about them.\n"
+               "about them. This is YOUR adventurer, the one you follow and travel with, and you "
+               "are speaking to them as their companion.\n"
                "Respond with ONLY one short spoken line. No narration, no quotes, no JSON.")
 
 # ---- Water, lava, and the two races that water hurts ---------------------------------------
@@ -899,6 +936,29 @@ WEALTH_SITUATION = {
              "trouble, and enough to be worth killing for, if the wrong sort noticed."),
 }
 
+# ⚠ Keyed on the region floor_to_region already resolves -- by map.name first, so secret levels
+# and DLC maps land correctly and there is no second table to keep in step.
+BIOME_SITUATION = {
+    "mines":          "You are down in the Mines: hewn rock, old timber, ore in the walls, and the smell of stone dust.",
+    "swamp":          "You are in the Swamps: standing water, rot, biting things, and ground that gives under you.",
+    "sand_labyrinth": "You are in the Labyrinth: dry sandstone passages that all look the same, and the certainty that you have passed this corner before.",
+    "ruins":          "You are in the Ruins: worked stone gone to pieces, something built here once, and whatever moved in after.",
+    "underworld":     "You are in the Underworld, deeper than anything living has business being.",
+    "hell":           "You are in Hell.",
+    "hamlet":         "You are in Hamlet — a town, of all things, buried down here with people still living in it.",
+    "crystal_caves":  "You are in the Crystal Caves: glass underfoot, light where there should be none, and everything ringing faintly.",
+    "citadel":        "You are in the Arcane Citadel, where the Guild built upward and did not care what it cost.",
+}
+FOUNTAIN_SITUATION = {
+    "succubus":       ("THEY drank from the fountain — this adventurer, not you — and something CAME OUT OF IT — a succubus, "
+                       "pulled up out of the water, and it is here now."),
+    "hunger":         "THEY drank from the fountain — this adventurer, not you — and it has taken the edge off THEIR hunger. You did not drink.",
+    "potion":         ("THEY drank from the fountain — this adventurer, not you — and it has done something to them — you "
+                       "watched it happen and you are not certain what it was."),
+    "bless":          ("THEY drank from the fountain — this adventurer, not you — and THEIR gear has come up blessed — the "
+                       "metal looks different, and so does the way they are standing."),
+}
+
 def build_remark_prompt(kind, race, floor, map_name, allegiance="loyal", ctx=None):
     # Remarks made in Hell carry the dread too; a cheerful word about a chest is wrong down there.
     # ⚠ A mercenary told to think about "what the take is worth" invents a figure -- measured,
@@ -908,6 +968,24 @@ def build_remark_prompt(kind, race, floor, map_name, allegiance="loyal", ctx=Non
     numbers = MERC_NO_NUMBERS if allegiance == "self_interested" else ""
     situation = REMARK_SITUATION.get(kind, "Something has happened.")
     c = ctx or {}
+    if kind == "biome":
+        region = floor_to_region(floor, map_name)
+        situation = BIOME_SITUATION.get(region)
+        if not situation:
+            return ""      # nowhere worth remarking on; better silent than generic
+    if kind == "fountain":
+        situation = FOUNTAIN_SITUATION.get(c.get("effect") or "potion",
+                                           FOUNTAIN_SITUATION["potion"])
+    if kind == "bridge":
+        situation = ("This is one of the crossings between two parts of the dungeon — a stretch "
+                     "of nothing much, between where you have been and where you are going. "
+                     "Almost nothing lives here.")
+        # ⚠ Only claimed when the map ACTUALLY sets the flag. MFLAG_DISABLEHUNGER genuinely
+        # gates hunger (entity.cpp:4656); the engine reads it rather than the mod assuming
+        # which maps have it, so this line is never a lie.
+        if c.get("nohunger"):
+            situation += (" And something about this place holds hunger off — you do not feel "
+                          "it here the way you do everywhere else, and neither do they.")
     if kind == "wealth":
         situation = WEALTH_SITUATION.get(c.get("band") or "poor", WEALTH_SITUATION["poor"])
         # ⚠ Nobody states an amount. Same rule as the mercenary's prices.
@@ -4031,7 +4109,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
                         remark, race, floor, map_name, _al,
                         {"look": (data.get("look") or "").strip(),
                          "slot": (data.get("slot") or "").strip(),
-                         "band": (data.get("band") or "").strip()})
+                         "band": (data.get("band") or "").strip(),
+                         "effect": (data.get("effect") or "").strip(),
+                         "nohunger": bool(data.get("nohunger"))})
+                if not prompt_r:
+                    return self._send_json({"reply": "", "action": "NONE"})
                 raw_r = ask_ollama(prompt_r)
                 line_r = (raw_r or "").strip().strip('"').split("\n")[0][:200]
                 print(f"[SERVICE] -> remark {remark}: {race}: {line_r}")

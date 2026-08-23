@@ -1121,6 +1121,59 @@ get **me** out of the water"* — writing itself as the one drowning. Every haza
 says "this adventurer, not you": **0/10** after. Third time this exact clarification has been
 needed (drunk, hunger, now water); it is cheap and it always works, unlike naming a topic.
 
+#### Biomes, digging, bridges, and fountains
+
+| kind | fires on | |
+|---|---|---|
+| `biome` | once per floor | **18%** — keyed on the region `floor_to_region` already resolves |
+| `dig` | the obstacle-tile count dropping | counted, not hooked — catches **every** route |
+| `bridge` | a map whose internal name contains "Transit" | the hunger line is gated on the real flag |
+| `fountain` | a fountain's `skill[0]` falling to 0 | the fountain documents its own outcomes |
+
+⚠ **Digging is COUNTED, not hooked, and that is what makes it right.** Walls come down at
+`entity.cpp:16709` (`map.tiles[OBSTACLELAYER..] = 0`) via a pickaxe — but also via bombs, magic and
+whatever else. Counting how many obstacle tiles remain catches every route into *"we made our own
+way through"*, which is the actual feature, and adds nothing to the upstream diff. One pass per
+second is a few thousand comparisons. The engine cannot say **how** the wall came down, and does
+not need to — the line never claims a tool.
+
+⚠ **The fountain documents itself** (`actfountain.cpp:88`): `skill[0]` is 1 until used and 0 after,
+and `skill[1]` is what it does — **0 spawn succubus, 1 raise hunger, 2 random potion effect,
+3 bless equipment**. So watching `skill[0]` fall catches the drink and `skill[1]` says what the
+follower just watched happen. Nothing is guessed, and the `potion` line honestly admits it does
+not know which effect it was.
+
+⚠ **The bridge's hunger effect is READ, never assumed.** `MFLAG_DISABLEHUNGER` genuinely gates
+hunger (`entity.cpp:4656` builds `processHunger` from it), so the engine sends the actual flag and
+the follower only mentions it when it is really set. ⚠ **I could not confirm offline that the four
+transition maps set it** — my `.lmp` header parse came back 0 for every map including ones that
+should differ, so it was misaligned rather than informative. Driving the line from the runtime flag
+means the claim is correct either way: if the maps set it the follower says so, and if they do not,
+the line simply never appears. Worth checking in play.
+
+> *"Me know Swamp. Me know stink, me know bite, me no like."* (goblin, swamp)
+> *"Ugga ugga! Bad place. Humans done here before. Smells like blood and old meat."* (ruins)
+> *"You takin' me deeper, friend? I thought we done widda sandstone already!"* (labyrinth)
+> *"Whatever was in that fountain's going to make your life worse."* (succubus)
+> *"Begun is the corruption."* (skeleton, unknown potion) · *"Water bad! Make eyes go wrong!"*
+> *"About time someone broke through that old rock, eh?"* (gnome, a wall down)
+
+#### ⚠ "This is YOUR adventurer" is now in REMARK_TAIL too — the fourth time this fix has paid
+
+*"React as YOUR kind would"* appears in most angles and is doing real work — it is what makes a rat
+sound like a rat. But it also invites **ordinary monster behaviour**, including treating the
+adventurer as an intruder. A goblin answered a biome remark with *"You stinkin' human come in here?
+This be mine place!"* and *"You take scraps from me, or leave now!"*
+
+The positive role statement that fixed the swimming angle now sits in the shared tail alongside the
+person fix: **0/5 territorial after**, and the lines got better rather than blander.
+
+That is now **four** distinct places the same subject/role clarification has paid — drunk & hunger,
+the skill remarks, all remarks (person), and now all remarks (role). ⚠ It has **never once
+backfired**, in direct contrast to naming a forbidden *topic*, which has backfired every single
+time it was tried. If a follower is behaving as the wrong person or in the wrong relationship, say
+who they are; never say what not to talk about.
+
 #### No clothes, floating, and boulders
 
 | kind | fires on | |
