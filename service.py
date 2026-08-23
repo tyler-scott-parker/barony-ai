@@ -1218,6 +1218,7 @@ def reset_run():
     LAST_FAVOUR.clear()
     LAST_QUOTE.clear()
     MERC_LATE.clear()
+    LAST_HINT.clear()
     npc_state.clear()
     PERSISTENT_IDENTITY.clear()
     _NAMES_TAKEN.clear()   # names actually revealed are held by name_history.json instead
@@ -1857,7 +1858,13 @@ LAST_QUOTE  = {}   # uid -> "kind:price" for the engine to print; the model neve
 # in the ordinary boon slot: the quote stamped correctly and the price was right, and the model
 # ignored the pitch 4/4, making small talk about goblins instead. This is the same ordering bug
 # the Herx secret had, and it takes the same fix -- see _secret_override.
-MERC_LATE = {}     # uid -> prompt text to emit after `limits`
+# The general LATE channel: prompt text emitted in the very last slot, after `limits` and after
+# the action rules. Used by anything that has to win against the rest of the prompt -- the map
+# pitch and delivery (which the limits actively forbid) and the introduction (which the model
+# otherwise buries under invented biography). One entry per uid: whatever is in here owns that
+# turn, which is also how "one special behaviour per reply" is enforced between them.
+MERC_LATE = {}     # uid -> prompt text to emit last
+LAST_HINT = {}     # uid -> "1" when the engine should print the command hints (once per run)
 
 def boon_roll(st, floor, player=0):
     """One boon per follower per floor, chance scaling with friendship.
@@ -2348,6 +2355,102 @@ def _fearful_section(st, floor):
                 "reassure you first, in this conversation.\n")
     return out
 
+# ---- The introduction: what this follower is FOR ------------------------------------------
+# The follower system is deep and almost entirely invisible -- a new player has no idea they can
+# ask for an appraisal, that a companion will volunteer what it knows, or that a gnome can make
+# a floor's traps safe. The mercenary states his terms because that is what a mercenary does,
+# and once he is doing it the same beat works for everyone else: the first thing a new follower
+# says is what they are willing to do for you.
+#
+# ⚠ EVERY LINE MUST BE TRUE OF THIS PARTICULAR FOLLOWER. An introduction that promises something
+# the game then refuses is worse than no introduction at all -- it reads as the system being
+# broken rather than as the character declining. So the list is assembled server-side from the
+# same gates the features actually use, never invented by the model.
+SERVICE_LINES = {
+    "orders":     "you will go where they point you, hold ground when told, and fight when it comes to that",
+    "hold":       "you cannot walk, but you will hold whatever ground you are set on and shoot what comes",
+    "knowledge":  "you will tell them what you know about these depths, and you know things they do not",
+    "appraise":   "you will put a name to anything they are carrying that they cannot identify",
+    # ⚠ Gated on IDENTIFY_MIN_TRUST/FRIENDSHIP for everyone but a mercenary, so for everyone
+    # else this has to be phrased as a thing that comes LATER. Promising it now would be a lie
+    # the very next /aiidentify would expose.
+    "appraise_later": "once you know each other better you will look over anything they cannot put a name to",
+    "traps":      "you have an eye for mechanisms, and given the chance you can make a floor's traps safe",
+    "haggle":     "you know what things are worth, and a shopkeeper will come down for you where they would not for them",
+}
+
+# ⚠ Measured without this line: 2.7 of 4 services stated, and every single reply opened with
+# invented biography ("Name's Joe, shopkeeper, been runnin' this stall for years...") before
+# getting to the terms -- one never got there at all. The model reads "introduce yourself" as
+# "give a life story", which eats the reply. Naming the forbidden route is the fix, the same
+# one the broke-refusal and the fearful refusal both needed.
+INTRO_NO_BACKSTORY = (
+    "Lead with what you do. Do NOT open with your name, your life story, how long you have "
+    "been down here or what you used to be — a line or two of that at the END is fine, but "
+    "spending the reply on it instead of on what you are offering is WRONG. Do NOT ask them "
+    "questions about themselves instead.\n")
+
+def _service_list(st, race):
+    """What is genuinely available from THIS follower, in the order it should be said."""
+    race_l = (race or "").lower()
+    out = ["hold" if is_emplacement(race_l) else "orders", "knowledge"]
+    # A summon or a bot has no trade and no pockets; it also has no history down here to draw
+    # on, so it does not offer knowledge it does not have.
+    if st.get("origin") in NO_BOON_ORIGINS:
+        out = ["hold" if is_emplacement(race_l) else "orders"]
+    elif is_merc(st):
+        out += ["appraise", "haggle"]
+        if race_l in BOON_TRAP_RACES:
+            out.insert(2, "traps")
+    else:
+        out.append("appraise_later")
+        if race_l in BOON_TRAP_RACES:
+            out.append("traps")
+    return out
+
+def _introduction_section(uid, st, race):
+    """Fires once, on the first exchange with a new follower.
+
+    ⚠ A SPY GETS THE LOYAL INTRODUCTION, word for word. The whole disguise is that a spy looks
+    like an ordinary recruit, and an introduction keyed on the real allegiance would hand the
+    player the one thing the system is built to keep hidden. Everything else here is fair game:
+    a mercenary announcing he works for pay is not a leak, it is his character, and the player
+    finds out the moment he quotes a price anyway."""
+    if st.get("introduced"):
+        return ""
+    st["introduced"] = True
+    items = [SERVICE_LINES[k] for k in _service_list(st, race)]
+    offer = "; ".join(items)
+    LAST_HINT[uid] = "1"          # the engine prints the actual commands, once per run
+    alleg = st.get("allegiance", "loyal")
+    logrec("intro", uid=uid, race=race, allegiance=alleg, offers=_service_list(st, race))
+    if alleg == "self_interested":
+        return ("YOU ARE STATING YOUR TERMS. This is the first time you and this adventurer have "
+                "properly spoken, and you are a hired sword who says up front what he does.\n"
+                "SAY THIS, in your own words, and make it the WHOLE of your reply: what they get "
+                "out of keeping you around is that " + offer + " — and that none of it is free.\n"
+                "Say it as a man stating his trade: matter of fact, a little dry, not a boast and "
+                "not a sales pitch.\n" + INTRO_NO_BACKSTORY + MERC_NO_NUMBERS)
+    if alleg == "fearful":
+        return ("YOU ARE INTRODUCING YOURSELF. This is the first time you and this adventurer have "
+                "properly spoken.\n"
+                "SAY THIS, in your own words, and make it the WHOLE of your reply: what you are "
+                "willing to do for them is that " + offer + ".\n"
+                "Say it plainly — but you are uneasy about being down here at all, so let that "
+                "show in how you say it rather than in what you promise.\n" + INTRO_NO_BACKSTORY)
+    if alleg in ("bound", "machine"):
+        return ("YOU ARE STATING WHAT YOU ARE FOR. You have just been called into being at this "
+                "adventurer's hand, and this is the first thing you say to them.\n"
+                "SAY THIS, in your own words, and make it the WHOLE of your reply: " + offer + ".\n"
+                "Say it flatly and briefly. You are not making friends, you have no past worth "
+                "recounting, and you are not asking them anything.\n")
+    return ("YOU ARE INTRODUCING YOURSELF. This is the first time you and this adventurer have "
+            "properly spoken, and you have thrown in with them.\n"
+            "SAY THIS, in your own words, and make it the WHOLE of your reply: what you are "
+            "willing to do for them is that " + offer + ".\n"
+            "Say it plainly and without ceremony, the way you would tell someone what you are "
+            "good for.\n" + INTRO_NO_BACKSTORY)
+
 def _obedience_section(st):
     """Willingness to act on an order. Friendship alone was never the right input: someone can
     obey out of respect without warmth, or out of fear without loyalty, and resentment eats
@@ -2442,8 +2545,22 @@ def _follower_sections(uid, race, floor, says, player=0, ident=None, gold=0):
     # to obey and then told it cannot move gets the order of those two the right way round.
     # `merc` lands after the obedience block for the same reason `fixed` does: that block is
     # about carrying out orders, and a hire's terms have to win over "do as you are told".
+    # ⚠ The introduction suppresses the other unprompted behaviours on that one turn. It fires
+    # on the very first exchange, when friendship is 0 and most of them cannot fire anyway --
+    # but a boon or a map pitch landing in the same breath as "here is what I do" is two
+    # mandatory behaviours in one reply, and the later one takes the turn. Spec 35/36.
+    intro = _introduction_section(uid, st, race)
+    if intro:
+        boon = ""
+        # ⚠ Into the LATE channel, replacing any map pitch. Measured emitted here, five blocks
+        # from the end with `limits` and the action rules after it: 2.5 of 4 services stated,
+        # and the "do not open with your life story" line was ignored outright. Position is the
+        # lever -- the same finding as the map pitch and the spy crack.
+        MERC_LATE[uid] = intro
+        intro = ""
     return (history + memory + relations + _name_section(st) + secret + boon + identify + alleg
-            + _obedience_section(st) + merc + _fearful_section(st, floor) + fixed + sabotage)
+            + _obedience_section(st) + merc + intro + _fearful_section(st, floor) + fixed
+            + sabotage)
 
 def build_prompt(race, floor, says="", uid=0, player=0, player_name="", party=1, map_name="",
                  ident=None, gold=0):
@@ -2541,7 +2658,12 @@ IDENT_SPY_LIE_CHANCE  = 0.55
 def identify_attempt(st, race, category, real_name, decoys):
     """Returns (kind, claim, truthful). kind in refuse|correct|mistaken|lie."""
     race_l = (race or "").lower()
-    if st.get("trust", 0) < IDENTIFY_MIN_TRUST and st.get("friendship", 0) < IDENTIFY_MIN_FRIENDSHIP:
+    # ⚠ A mercenary who has been PAID does not then refuse on acquaintance. The stranger gate
+    # is about not wanting to handle the belongings of someone you barely know; money settles
+    # exactly that, the same way it replaces the relationship gate on his favours. Without this
+    # you could agree his fee, be charged, and be told he does not know you well enough.
+    if not is_merc(st) and (st.get("trust", 0) < IDENTIFY_MIN_TRUST
+                            and st.get("friendship", 0) < IDENTIFY_MIN_FRIENDSHIP):
         return ("refuse", "", False)
     wrong = random.choice(decoys) if decoys else ""
     # A spy will take a free opportunity to mislead -- but only if it has somewhere to point.
@@ -3274,7 +3396,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                         "haggle": haggle_field})
 
             name, secret, boon, sabotage_field = "", "", "", ""
-            charge_field = favour_field = quote_field = ""
+            charge_field = favour_field = quote_field = hint_field = ""
             with STATE_LOCK:
                 if uid:
                     st = get_follower_state(uid, race, player)
@@ -3297,6 +3419,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     charge_field = str(LAST_CHARGE.pop(uid, "") or "")
                     favour_field = LAST_FAVOUR.pop(uid, "")
                     quote_field = LAST_QUOTE.pop(uid, "")
+                    hint_field = LAST_HINT.pop(uid, "")
                     print(f"[SERVICE-DBG] follower {uid} (player{player}) {dims_summary(st)}")
                 secret = herx_secret_field()
             print(f"[SERVICE] -> action={action} speech={speech}")
@@ -3322,6 +3445,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                              # engine to PRINT -- the model is forbidden from saying a number.
                              "charge": charge_field, "favour": favour_field,
                              "quote": quote_field,
+                             # The engine owns the command names, so it prints them; the
+                             # service only decides WHEN. Same split as the price figures.
+                             "hint": hint_field,
                              # "1" ONLY when the claim was both correct and honest -- this is what
                              # actually sets item->identified engine-side.
                              "identify": ("1" if (ident_req and ident_truthful) else "0")})

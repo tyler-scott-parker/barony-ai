@@ -237,5 +237,59 @@ _b = S._merc_section(44, st, 9, "yes", gold=0)
 ck("too poor for the map means no map", "CANNOT PAY" in _b
    and 44 not in S.LAST_BOON and 0 not in S.BOON_STATE["map_used"])
 
+# --- 10. the introduction: what this follower is FOR ---------------------------------------
+# The mercenary states his terms because that is what a mercenary does; once he is doing it the
+# same beat introduces the whole follower system, for every allegiance.
+S.reset_run()
+def intro(alleg, race="human", origin="", uid=60):
+    S.follower_state.pop(uid, None)
+    st = S.get_follower_state(uid, race, 0)
+    st.update(allegiance=alleg, origin=origin, friendship=0)
+    return S._introduction_section(uid, st, race), st
+
+_loyal, _ = intro("loyal")
+_spy, _   = intro("spy")
+# ⚠ THE ONE THAT MATTERS. A spy is disguised as an ordinary recruit; an introduction keyed on
+# the true allegiance would hand the player the single thing the system exists to hide.
+ck("a spy's introduction is byte-identical to a loyal one", _loyal == _spy)
+ck("a mercenary's is not", intro("self_interested")[0] != _loyal)
+ck("a fearful one's is not", intro("fearful")[0] != _loyal)
+
+# ⚠ Every line must be TRUE of this follower. An introduction that promises something the game
+# then refuses reads as the system being broken, not as the character declining.
+ck("a loyal follower promises appraisal only LATER, matching the identify gate",
+   "once you know each other better" in _loyal)
+ck("a mercenary promises it now, because money replaces that gate",
+   "put a name to anything" in intro("self_interested")[0])
+ck("a paid mercenary then does NOT refuse on acquaintance",
+   S.identify_attempt(dict(allegiance="self_interested", trust=0, friendship=0),
+                      "human", "potion", "potion of healing", ["x"])[0] != "refuse")
+ck("while a loyal stranger still does",
+   S.identify_attempt(dict(allegiance="loyal", trust=0, friendship=0),
+                      "human", "potion", "potion of healing", ["x"])[0] == "refuse")
+ck("a trap-capable race offers traps", "mechanisms" in intro("loyal", "gnome")[0])
+ck("and one that cannot does not", "mechanisms" not in _loyal)
+# ⚠ An emplacement promising to follow is a lie the game contradicts on the next order.
+_bot, _ = intro("machine", "sentrybot", origin="bot")
+ck("a turret never promises to move", "go where they point" not in _bot)
+ck("it promises to hold ground instead", "hold whatever ground" in _bot)
+
+# Once only, and it asks the engine for the command hints.
+_txt, _st = intro("loyal", uid=61)
+ck("the introduction fires", bool(_txt))
+ck("and asks the engine to print the commands", S.LAST_HINT.get(61) == "1")
+ck("and never fires twice", S._introduction_section(61, _st, "human") == "")
+S.LAST_HINT.clear()
+ck("the hint latch is per-run", not S.LAST_HINT)
+
+# ⚠ Placement: measured five blocks from the end it stated 2.5 of 4 services and ignored the
+# "do not open with your life story" line outright; in the LAST slot, 3.0+.
+_st2 = S.get_follower_state(62, "human", 0); _st2.update(allegiance="loyal", friendship=0)
+S._follower_sections(62, "human", 3, "who are you?", 0)
+ck("the introduction is emitted through the LATE channel", 62 in S.MERC_LATE)
+ck("and it forbids the backstory opener by name",
+   "Do NOT open with your name, your life story" in S.MERC_LATE[62])
+S.MERC_LATE.clear()
+
 print("\n%d failure(s)" % len(fails), fails)
 sys.exit(1 if fails else 0)

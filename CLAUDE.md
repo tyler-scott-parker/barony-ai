@@ -956,6 +956,64 @@ the outputs before believing the number — the same lesson the sabotage-tell pr
 regardless, and the engine prints *"(Skarn wants 140 gold for the layout of this floor. Say yes to
 agree.)"* whether or not the pitch was spoken.
 
+### The introduction: what a follower is FOR
+
+The follower system is deep and almost entirely invisible — a new player has no idea they can ask
+for an appraisal, that a companion volunteers what it knows, or that a gnome can make a floor's
+traps safe. **The mercenary states his terms because that is what a mercenary does**, and once he
+is doing it the same beat works for everyone: the first thing a new follower says is what it is
+willing to do for you. Fires once per follower, on the first exchange.
+
+⚠ **EVERY LINE MUST BE TRUE OF THAT PARTICULAR FOLLOWER.** An introduction that promises something
+the game then refuses reads as the system being *broken*, not as the character declining. So the
+list is assembled server-side (`_service_list`) from the same gates the features actually use:
+
+| | |
+|---|---|
+| a loyal follower | promises appraisal **only later** — `identify_attempt` refuses below `IDENTIFY_MIN_TRUST`/`FRIENDSHIP` |
+| a mercenary | promises it **now**, because money replaces that gate, and adds haggling |
+| gnome/automaton/kobold/goblin | offer traps; nobody else mentions them |
+| a sentrybot | never promises to move — it offers to hold ground and shoot |
+| a summon or bot | offers no knowledge of the depths; it has no history here |
+
+⚠ **A SPY GETS THE LOYAL INTRODUCTION, BYTE FOR BYTE.** The whole disguise is that a spy looks like
+an ordinary recruit, and an introduction keyed on the true allegiance would hand the player the one
+thing the system exists to hide. There is a test asserting the two strings are identical. A
+mercenary announcing he works for pay is *not* a leak — it is his character, and the player learns
+it the moment he quotes a price anyway.
+
+⚠ **A defect this surfaced: a PAID mercenary still refused to appraise.** `identify_attempt`'s
+stranger gate ("you do not know them well enough to want to handle their belongings") ran ahead of
+everything, so you could agree his fee, be charged, and be told he does not know you. Money settles
+exactly that objection, the same way it replaces the relationship gate on his favours. Found by
+asking what the introduction was allowed to promise.
+
+**Two prompt findings, both already familiar:**
+
+1. ⚠ **Position, again.** Emitted five blocks from the end — with `limits` and the action rules
+   after it — it stated **2.5 of 4** services and ignored the "do not open with your life story"
+   line outright. Moved to the **LAST slot** (the `MERC_LATE` channel, now the general late
+   channel shared with the map pitch): **3.0+**, the slot the spy crack measures 20/20 from.
+2. ⚠ **"Introduce yourself" reads to the 8B as "give a life story".** Every reply opened with
+   invented biography — *"Name's Joe, shopkeeper, been runnin' this stall for years…"* — and one
+   never reached the terms at all. `INTRO_NO_BACKSTORY` forbids the route by name and allows a
+   line of it at the END, which is where it belongs.
+
+⚠ **The introduction suppresses the other unprompted behaviours for that turn** (boon, map pitch).
+Two mandatory behaviours in one reply and the later one takes the turn — spec §35/§36 again.
+
+**The engine names the commands, the follower does not.** Same split as the price figures: asking
+an 8B to recite `/aicommand` is non-diegetic and it would get it wrong, while the engine knows it
+for certain. `mymod_printHints()` prints two lines **once per run**, after the follower's line so
+it reads as a footnote rather than a banner:
+
+> *(Talk to them with /aicommand &lt;what you want to say&gt;, or hold V to speak aloud.)*
+> *(/aiidentify has a companion appraise an unidentified item. They do it for someone they trust — or for coin.)*
+
+Measured sample, mercenary: *"What you get out of keeping me around is that I'll go where you point
+me, hold ground when told, and fight when it comes to that; I'll tell you what I know about these
+depths… and if you've got something strange on you, I can probably identify it."*
+
 ### Allegiance & spies
 Weighted roll at recruitment: **loyal 70 / self_interested 15 / fearful 8 / spy 7**. Never shown to the player. Spies get a motive and behavioral tells: deflect on personal history, over-interest in the player's gear and plans, hesitation at Herx's name. `allegiance_section(st, says)` detects probing questions and sharpens the tell.
 
