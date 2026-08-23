@@ -584,7 +584,10 @@ MERC_HAGGLE_STEP  = 1       # a mercenary at your shoulder talks the merchant do
 # by the midgame -- which makes a paid mercenary a midgame unlock, deliberately.
 MERC_RATES = {
     #  kind        base  per_floor   what it buys
-    "identify":  {"base":  25, "per_floor":  5},   # the everyday repeatable
+    # ⚠ A cut as well as a flat fee: he prices by what the thing is worth, which is his whole
+    # character, and it means a valuable appraisal is a real decision rather than pocket change.
+    # A 1200-gold spellbook costs 240; an ordinary dagger costs the flat rate.
+    "identify":  {"base":  25, "per_floor":  5, "cut": 0.20},
     # ⚠ His best product, and the only one he OFFERS rather than being asked for. Priced
     # between the two: dearer than an appraisal, well under heading off the minotaur.
     "map":       {"base":  50, "per_floor": 10},
@@ -601,9 +604,10 @@ def merc_price(kind, floor, gold_here=0):
     r = MERC_RATES.get(kind)
     if not r:
         return 0
+    flat = r.get("base", 0) + r.get("per_floor", 0) * max(0, floor)
     if "cut" in r:
-        return max(r["base"], int(gold_here * r["cut"]))
-    return r["base"] + r["per_floor"] * max(0, floor)
+        return max(flat, int(gold_here * r["cut"]))
+    return flat
 
 # Accepting a quote. Deliberately generous and deliberately NOT a general yes-detector: it only
 # ever runs while a quote from THIS follower is on the table, so "fine" and "deal" cannot be
@@ -2370,11 +2374,13 @@ SERVICE_LINES = {
     "orders":     "you will go where they point you, hold ground when told, and fight when it comes to that",
     "hold":       "you cannot walk, but you will hold whatever ground you are set on and shoot what comes",
     "knowledge":  "you will tell them what you know about these depths, and you know things they do not",
-    "appraise":   "you will put a name to anything they are carrying that they cannot identify",
+    # ⚠ "anything" was a lie once the competence ceiling existed -- the truly rare is beyond
+    # every follower in the game. Same rule as the rest of this list: it must be TRUE.
+    "appraise":   "you will put a name to most of what they are carrying that they cannot identify, short of the genuinely rare",
     # ⚠ Gated on IDENTIFY_MIN_TRUST/FRIENDSHIP for everyone but a mercenary, so for everyone
     # else this has to be phrased as a thing that comes LATER. Promising it now would be a lie
     # the very next /aiidentify would expose.
-    "appraise_later": "once you know each other better you will look over anything they cannot put a name to",
+    "appraise_later": "once you know each other better you will look over most of what they cannot put a name to, though the truly rare is past you",
     "traps":      "you have an eye for mechanisms, and given the chance you can make a floor's traps safe",
     "haggle":     "you know what things are worth, and a shopkeeper will come down for you where they would not for them",
 }
@@ -2655,8 +2661,49 @@ IDENT_EXPERT_ACCURACY = 0.85
 IDENT_LAY_ACCURACY    = 0.30
 IDENT_SPY_LIE_CHANCE  = 0.55
 
-def identify_attempt(st, race, category, real_name, decoys):
-    """Returns (kind, claim, truthful). kind in refuse|correct|mistaken|lie."""
+# ---- How far a follower's eye actually reaches --------------------------------------------
+# ⚠ Expressed in the GAME'S OWN CURRENCY, not as a blocklist. Barony gates appraisal on the
+# item's gold value against the player's PRO_APPRAISAL skill, in a data-driven table
+# (data/appraisal_tables.json, read by Appraisal_t::appraisalPossible):
+#
+#     skill 0 -> 30 gold | 20 -> 200 | 30 -> 320 | 35 -> 425 | 40 -> 1500 | 50 -> anything
+#
+# So the 1500 line is the game saying "past here you need a near-master appraiser." There are
+# 23 items above it -- all ten artifacts (the Sokoban gloves among them), the amulet of
+# lifesaving, the big gems, and the strongest spellbooks -- and handing those to the player for
+# a few coins would skip a progression the game deliberately gates behind a maxed skill.
+#
+# NOBODY REACHES THE TOP TIER. A companion is not a master appraiser, and that tier is the
+# player's own to earn. Below it, competence is what the follower plausibly knows:
+#
+#   ordinary follower   300   ~= the skill-30 breakpoint; covers 69% of items in the game
+#   expert for the kind 1500  the skill-40 breakpoint; a gnome and a ring, a goblin and an axe
+#   mercenary           1500  handling goods is his trade -- but he charges by what it is worth
+#
+# Using the game's own numbers means DLC and modded items are covered automatically, with no
+# list to maintain.
+IDENT_REACH_LAY    = 300
+IDENT_REACH_EXPERT = 1500
+IDENT_REACH_CEILING = 1500     # the skill-50 tier belongs to the player, not to a companion
+
+def ident_reach(st, race, category):
+    """The most valuable thing this follower could plausibly put a name to."""
+    if is_merc(st):
+        return IDENT_REACH_EXPERT
+    if (race or "").lower() in IDENT_EXPERTISE.get(category, ()):
+        return IDENT_REACH_EXPERT
+    return IDENT_REACH_LAY
+
+def identify_beyond(st, race, category, value):
+    """Is this simply out of their depth? Distinct from refusing on acquaintance, and from
+    guessing wrong -- they can tell that it is beyond them, which is itself information."""
+    v = int(value or 0)
+    if v <= 0:
+        return False
+    return v > min(ident_reach(st, race, category), IDENT_REACH_CEILING)
+
+def identify_attempt(st, race, category, real_name, decoys, value=0):
+    """Returns (kind, claim, truthful). kind in refuse|beyond|correct|mistaken|lie."""
     race_l = (race or "").lower()
     # ⚠ A mercenary who has been PAID does not then refuse on acquaintance. The stranger gate
     # is about not wanting to handle the belongings of someone you barely know; money settles
@@ -2665,6 +2712,11 @@ def identify_attempt(st, race, category, real_name, decoys):
     if not is_merc(st) and (st.get("trust", 0) < IDENTIFY_MIN_TRUST
                             and st.get("friendship", 0) < IDENTIFY_MIN_FRIENDSHIP):
         return ("refuse", "", False)
+    # ⚠ Checked BEFORE the spy branch on purpose: a spy who cannot tell what something is has
+    # nothing to lie about either, and a confident false name for an artifact would be exactly
+    # the balance hole this closes -- from the one follower most motivated to create it.
+    if identify_beyond(st, race, category, value):
+        return ("beyond", "", False)
     wrong = random.choice(decoys) if decoys else ""
     # A spy will take a free opportunity to mislead -- but only if it has somewhere to point.
     if st.get("allegiance") == "spy" and wrong and random.random() < IDENT_SPY_LIE_CHANCE:
@@ -2680,6 +2732,20 @@ def identify_attempt(st, race, category, real_name, decoys):
     return ("mistaken", wrong or real_name, wrong == "")
 
 def _identify_section(kind, claim, unid_name):
+    if kind == "beyond":
+        # ⚠ NOT "I do not know" and not a guess. They can see it is far beyond them, and saying
+        # so is real information: it tells the player the thing is worth carrying to someone who
+        # can read it. The forbidden route is the one the model reaches for by default -- naming
+        # it anyway with a hedge -- so it is named, the way LIMITS_HEADER names its routes.
+        return ("THEY ARE ASKING YOU TO IDENTIFY SOMETHING: a " + unid_name + ". This is far "
+                "beyond you. Whatever it is, it is old or finely made or deeply enchanted, and "
+                "reading it properly would take a real appraiser — a master of the craft, which "
+                "you are not.\n"
+                "Say so plainly: that it is beyond your reckoning, and that they will need "
+                "someone who truly knows such things. You may say it looks valuable, because "
+                "that much is obvious. Do NOT name it, do NOT guess at what it might be, and do "
+                "NOT hedge a name — 'it could be...', 'it looks like a...', 'some say such "
+                "things are...' followed by a name counts as naming it and is WRONG.\n")
     if kind == "refuse":
         return ("THEY ARE ASKING YOU TO IDENTIFY SOMETHING: a " + unid_name + ". You do not know "
                 "them well enough to want to handle their belongings. Decline — briefly, without "
@@ -3318,14 +3384,26 @@ class Handler(http.server.BaseHTTPRequestHandler):
                         # saw the price, and typed it again. That keeps the whole exchange in
                         # one turn each way and needs no cross-turn item state -- the item is
                         # simply left unidentified by the quote turn, which it would be anyway.
+                        _ivalue = int(ident_req.get("value", 0) or 0)
+                        _icat = (ident_req.get("category") or "").lower()
                         _paid_line = ""
                         _skip_ident = False
-                        if is_merc(st_i):
-                            _p = merc_price("identify", floor)
+                        # ⚠ Out of his depth means he does not take the job, and is NOT paid for
+                        # it. Quoting and charging for an appraisal he cannot make would be the
+                        # worst version of this feature: you hand over real money for "it is
+                        # beyond me". He says so for free.
+                        if is_merc(st_i) and identify_beyond(st_i, race, _icat, _ivalue):
+                            ident_line = _identify_section("beyond", "",
+                                                           ident_req.get("unid") or "thing")
+                            _skip_ident = True
+                            logrec("merc", uid=uid, what="identify", stage="beyond",
+                                   value=_ivalue, floor=floor)
+                        elif is_merc(st_i):
+                            _p = merc_price("identify", floor, _ivalue)
                             _q = st_i.get("quote")
                             _asked_again = bool(_q and _q.get("kind") == "identify")
                             if not merc_settled(st_i, "identify") and not _asked_again:
-                                merc_quote(st_i, "identify", floor)
+                                merc_quote(st_i, "identify", floor, _ivalue)
                                 LAST_QUOTE[uid] = "identify:%d" % _p
                                 ident_line = merc_quote_section("identify")
                                 _skip_ident = True
@@ -3344,8 +3422,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                        price=_p, gold=gold, floor=floor)
                         if not _skip_ident:
                             ident_kind, claim, ident_truthful = identify_attempt(
-                                st_i, race, (ident_req.get("category") or "").lower(),
-                                ident_req.get("real") or "", ident_req.get("decoys") or [])
+                                st_i, race, _icat,
+                                ident_req.get("real") or "", ident_req.get("decoys") or [],
+                                _ivalue)
                             ident_line = _paid_line + _identify_section(
                                 ident_kind, claim, ident_req.get("unid") or "thing")
                             if ident_kind == "correct":

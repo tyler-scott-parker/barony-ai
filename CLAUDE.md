@@ -956,6 +956,74 @@ the outputs before believing the number — the same lesson the sabotage-tell pr
 regardless, and the engine prints *"(Skarn wants 140 gold for the layout of this floor. Say yes to
 agree.)"* whether or not the pitch was spoken.
 
+### How far a follower's eye reaches — the legendary tier is nobody's to appraise
+
+⚠ **Expressed in the GAME'S OWN CURRENCY, not as a blocklist.** Barony gates appraisal on the
+item's gold value against `PRO_APPRAISAL`, in a data-driven table (`data/appraisal_tables.json`,
+read by `Appraisal_t::appraisalPossible`, `interface/identify_and_appraise.cpp:372`):
+
+| skill (+PER×`per_stat_mult`, shipped as 1) | can identify up to |
+|---|---|
+| 0 / 10 / 20 / 30 | 30 / 100 / 200 / 320 gold |
+| 35 | 425 |
+| **40** | **1500** |
+| **50** | anything |
+
+So **1500 is the game saying "past here you need a near-master appraiser."** There are exactly
+**23 items above that line**: all ten artifacts (**including the Sokoban gloves the mercenary can
+now win for you**), `mask_artifact_visor`, the amulet of lifesaving (5000), the big gems
+(diamond/ruby/sapphire/emerald/jacinth), rings of regeneration and levitation, the vampire
+doublet, and the three strongest spellbooks (steal weapon, drain soul, dominate). Handing those
+over for a few coins skips a progression the game deliberately gates behind a maxed skill.
+
+**Nobody reaches the top tier.** A companion is not a master appraiser, and that tier is the
+player's own to earn:
+
+| | reach | why |
+|---|---|---|
+| ordinary follower | **300** | ≈ the skill-30 breakpoint; covers **69%** of items in the game |
+| expert for that kind (`IDENT_EXPERTISE`) | **1500** | the skill-40 breakpoint — a gnome and a ring, a goblin and an axe |
+| mercenary | **1500** | handling goods is his trade — but he charges by what it is worth |
+| **anyone, ever** | **ceiling 1500** | the 23 legendary items are excluded outright |
+
+Using the game's own numbers means **DLC and modded items are covered automatically**, with no
+list to maintain. Distribution: 69% of items ≤300, 27% in 301–1500, **4.4% above**.
+
+⚠ **The check runs BEFORE the spy branch.** A spy who cannot read the thing has nothing to lie
+about either — and a confident false name for an artifact is exactly the hole this closes, from
+the one follower most motivated to create it.
+
+⚠ **`GEM_GLASS` is weighed at 1000**, mirroring `appraisalPossible` exactly. A worthless gem that
+looks valuable is *supposed* to be hard to tell from a real one; skipping that would let a
+follower spot the joke for free.
+
+**"Beyond me" is a fourth outcome, not a refusal and not a guess** (`refuse | beyond | correct |
+mistaken | lie`). Saying so is real information: it tells the player the thing is worth carrying
+to someone who can read it. The block permits *"it looks valuable"* — that much is obvious — and
+forbids the route the model reaches for by default, naming it anyway behind a hedge (*"it could
+be…", "it looks like a…"*), the way `LIMITS_HEADER` names its routes. Measured on an artifact
+sword: **0/8 named or hedged a name**, 7/8 pointed the player at a real appraiser.
+
+⚠ **The mercenary is not paid for a job he cannot do.** He says it is beyond him for free —
+quoting and charging for "it is beyond me" would be the worst version of this feature.
+
+**Below the line he prices by what the thing is worth**, the Sokoban-cut precedent again:
+`max(25 + 5×floor, 20% of value)`. A 1200-gold spellbook costs **240**; an ordinary dagger costs
+the flat rate. That makes a valuable appraisal a real decision rather than pocket change.
+
+**The engine sends the value** (`mymod_appraisalValue`, mirroring `appraisalPossible`), because
+only the engine knows it. For a remote client it rides in `MYID` **after the counted decoys**, so
+it cannot be confused with one, and the fixed header offsets are untouched; `packtest.cpp` covers
+it, including an artifact-tier 5000 value. Worst realistic packet is now 143 bytes of 512.
+
+⚠ **The introduction had to stop saying "anything".** It promised a mercenary would *"put a name
+to anything they are carrying"*, which the ceiling made false — the same truthfulness rule the
+rest of that list follows.
+
+⚠ **`identify_attempt` is probabilistic, so `== "correct"` is a flaky assertion.** Tests assert
+the follower ATTEMPTED it (`correct | mistaken | lie`) rather than got it right; the first
+version failed intermittently, a different line each run.
+
 ### The introduction: what a follower is FOR
 
 The follower system is deep and almost entirely invisible — a new player has no idea they can ask

@@ -260,7 +260,7 @@ ck("a fearful one's is not", intro("fearful")[0] != _loyal)
 ck("a loyal follower promises appraisal only LATER, matching the identify gate",
    "once you know each other better" in _loyal)
 ck("a mercenary promises it now, because money replaces that gate",
-   "put a name to anything" in intro("self_interested")[0])
+   "put a name to most of what" in intro("self_interested")[0])
 ck("a paid mercenary then does NOT refuse on acquaintance",
    S.identify_attempt(dict(allegiance="self_interested", trust=0, friendship=0),
                       "human", "potion", "potion of healing", ["x"])[0] != "refuse")
@@ -290,6 +290,70 @@ ck("the introduction is emitted through the LATE channel", 62 in S.MERC_LATE)
 ck("and it forbids the backstory opener by name",
    "Do NOT open with your name, your life story" in S.MERC_LATE[62])
 S.MERC_LATE.clear()
+
+# --- 11. the legendary tier is nobody's to appraise ----------------------------------------
+# ⚠ Expressed in the GAME'S currency, not a blocklist. Barony gates appraisal on gold value
+# against PRO_APPRAISAL (data/appraisal_tables.json): skill 40 reaches 1500, skill 50 reaches
+# anything. 23 items sit above that line -- all ten artifacts (the Sokoban gloves included),
+# the amulet of lifesaving, the big gems and the strongest spellbooks -- and handing those over
+# for a few coins skips a progression the game gates behind a maxed skill.
+def _who(alleg="loyal", trust=60, friendship=60):
+    return dict(allegiance=alleg, trust=trust, friendship=friendship)
+def kind(alleg, race, cat, val, trust=60, friendship=60):
+    return S.identify_attempt(_who(alleg, trust, friendship), race, cat,
+                              "real", ["d1", "d2"], val)[0]
+
+ck("an artifact is beyond a loyal companion", kind("loyal", "human", "weapon", 3000) == "beyond")
+ck("beyond an EXPERT in that very category", kind("loyal", "goblin", "weapon", 3000) == "beyond")
+ck("beyond the mercenary, however well paid",
+   kind("self_interested", "human", "weapon", 3000) == "beyond")
+# ⚠ Checked before the spy branch: a spy who cannot read it has nothing to lie about either,
+# and a confident false name for an artifact is exactly the hole this closes.
+ck("and a spy cannot lie about one either", kind("spy", "human", "weapon", 3000) == "beyond")
+ck("the amulet of lifesaving too", kind("loyal", "gnome", "amulet", 5000) == "beyond")
+ck("nothing reaches past the ceiling",
+   all(S.ident_reach(_who(a), r, "weapon") <= S.IDENT_REACH_CEILING
+       for a in ("loyal", "self_interested", "spy", "fearful") for r in ("human", "goblin")))
+
+# Below the line it still works, and expertise is what widens the reach.
+# ⚠ Assert they ATTEMPT it, not that they get it right: identify_attempt is probabilistic
+# (85% expert, ~30% lay), so "== correct" is a flaky assertion -- it failed intermittently,
+# a different line each run, before this.
+TRIED = ("correct", "mistaken", "lie")
+ck("an ordinary find is still attempted", kind("loyal", "human", "weapon", 60) in TRIED)
+ck("an expert reaches the 1500 tier", kind("loyal", "human", "spellbook", 1200) in TRIED)
+ck("a layman does not", kind("loyal", "rat", "spellbook", 1200) == "beyond")
+ck("expert reach is the game's skill-40 breakpoint",
+   S.ident_reach(_who(), "gnome", "ring") == S.IDENT_REACH_EXPERT == 1500)
+ck("lay reach is around the skill-30 breakpoint", S.ident_reach(_who(), "human", "ring") == 300)
+# ⚠ Mirrors appraisalPossible's GEM_GLASS special case, which the engine sends as 1000: a
+# worthless gem that looks valuable is supposed to be hard to tell from a real one.
+ck("glass is not free to spot", kind("loyal", "human", "gem", 1000) == "beyond")
+ck("a stranger still refuses before any of this",
+   kind("loyal", "human", "weapon", 60, trust=0, friendship=0) == "refuse")
+
+# The refusal must not become a hedged guess -- that is the whole balance risk.
+_b = S._identify_section("beyond", "", "curved sword")
+ck("the beyond line forbids naming it", "Do NOT name it" in _b)
+ck("and forbids the hedged name by name", "counts as naming it and is WRONG" in _b)
+ck("but allows 'it looks valuable', which is honest", "looks valuable" in _b)
+
+# ⚠ He must not be paid for a job he cannot do.
+ck("the mercenary charges by what the thing is worth",
+   S.merc_price("identify", 10, 1200) == 240)
+ck("and falls back to the flat rate for ordinary goods",
+   S.merc_price("identify", 10, 60) == 25 + 5 * 10)
+ck("the Sokoban cut is unchanged by that", S.merc_price("sokoban", 6, 2000) == 500)
+ck("identify_beyond is what gates the quote",
+   S.identify_beyond(_who("self_interested"), "human", "weapon", 3000)
+   and not S.identify_beyond(_who("self_interested"), "human", "weapon", 400))
+
+# The introduction must not promise what the ceiling forbids.
+S.reset_run()
+_st = S.get_follower_state(70, "human", 0); _st.update(allegiance="self_interested")
+_i = S._introduction_section(70, _st, "human")
+ck("the mercenary's introduction no longer promises 'anything'", "anything" not in _i)
+ck("it says the genuinely rare is past him", "genuinely rare" in _i)
 
 print("\n%d failure(s)" % len(fails), fails)
 sys.exit(1 if fails else 0)
