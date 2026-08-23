@@ -1121,6 +1121,65 @@ get **me** out of the water"* — writing itself as the one drowning. Every haza
 says "this adventurer, not you": **0/10** after. Third time this exact clarification has been
 needed (drunk, hunger, now water); it is cheap and it always works, unlike naming a topic.
 
+#### A monster-race adventurer
+
+Barony's DLC makes skeletons, goblins, rats, trolls, vampires and the rest playable, and **a
+goblin taking orders from a goblin is not the same conversation as a goblin taking orders from a
+human**. A standing modifier, not a remark: it colours everything they say to that person.
+
+| | |
+|---|---|
+| human adventurer | nothing changes — ordinary play is untouched |
+| **same race as the follower** | kinship: easier, blunter, assumes shared experience |
+| a different monster race | they notice, and their own kind's opinion of that kind is the thing to draw on |
+
+⚠ **Fed by `player_kind`, NOT `player_race` — and the difference is load-bearing.** `player_race`
+is already taken: it is the **shapeshift form** and it feeds `can_understand()`. Putting the chosen
+race in that field would mean a vampire, succubus or incubus player — none of which are in a
+comprehension group — suddenly understands nobody, which is precisely the bug the polymorph work
+exists to avoid. Two fields, two meanings; there is a test for each.
+
+⚠ **Placed first, it lost.** A goblin follower told its **goblin** leader *"she's still a human.
+Can't trust 'em as far as I can spit."* The rest of the prompt says "adventurer" a dozen times and
+the 8B reads that as *human* by default, so the kin block has to land late, beside the other
+standing modifiers. After moving it, asked *"what am I?"*:
+
+> *"you're a rat like me, but you have more fur and less stink"*
+> *"You're one of us, a skeleton like me."*
+> *"you're goblin, same as me. i see the mark of a hunt on your face"*
+> *"Ah, Ada... you're a goblin, ain't ya?"* (human follower, goblin leader)
+
+⚠ **Measured 5/6, and the "miss" was *"you're one of us"*** — correct kinship that simply did not
+say the word. An earlier probe scored 2/6 by flagging any mention of "human", including a goblin
+correctly *contrasting* its leader with them (*"Not a stinkin' human tryin' to kill me"*). **Fifth
+bad scorer this session.**
+
+#### Legendary kit, gifts, and the purse
+
+| kind | fires on | |
+|---|---|---|
+| `equiplegend` | equipping anything over **1500 gold** | **always** — an artifact is not a 35% event |
+| `gift` | an item appearing in a FOLLOWER's equipment slot | watched, not hooked |
+| `wealth` | gold crossing under 25 or over 2000 | edge-triggered, like hunger |
+
+⚠ **"Legendary" reuses the appraisal ceiling** rather than listing `ARTIFACT_*`, so there is one
+definition of the word in the mod and DLC or modded items are covered for free.
+
+⚠ **Gifts are watched, not hooked.** A player can arm a follower through the follower inventory,
+by dropping something, or through the ally command path — watching the slots catches all of it and
+adds nothing to the upstream diff. Seeded silently on first sight, or a recruit's own gear reads
+as a gift; most dungeon creatures come armed.
+
+⚠ **Wealth is sent as a BAND, never a figure** — same rule as the mercenary's prices, and for the
+same reason: the amount is a number the character has no way to know.
+
+> *"Consider yourself worth a small kingdom now, friend."* (mercenary, artifact)
+> *"Krael's Teeth... walked among the living."* (skeleton, artifact)
+> *"Me keep axe! Me smash human for give!"* (goblin, armed)
+> *"Perhaps death's grasp won't close as swiftly now."* (skeleton, given a shield)
+> *"Foolish mortal, burdened by gold that cannot save."* (skeleton, rich)
+> *"Looks like I'm carrying your financial future as well as your adventuring gear."* (mercenary, broke)
+
 #### Kit, skills, and the minotaur
 
 | kind | fires on | |

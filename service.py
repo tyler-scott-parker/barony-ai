@@ -376,6 +376,16 @@ REMARK_SITUATION = {
                      "its own is not enough."),
     # ⚠ {look} and {slot} come from the engine: the real item and the real slot it went into.
     "equip": ("They have just put on {look} — it is their {slot} now. You watched them do it."),
+    # ⚠ An artifact is not just another helm. Anything over the appraisal ceiling (1500 gold, the
+    # tier the game reserves for a near-master appraiser) is legendary, so this covers the ten
+    # artifacts without a list to maintain.
+    "equiplegend": ("They have just put on {look} — it is their {slot} now, and it is no ordinary "
+                    "piece. A thing like that is spoken about; most people who go down here never "
+                    "see one, let alone wear one. You are standing next to someone carrying it."),
+    # ⚠ {look} went to YOU, not to them.
+    "gift": ("They have just handed YOU {look} — your {slot} now. This adventurer has armed you "
+             "out of their own kit, which is not a thing most of them do."),
+    "wealth": "WEALTH",   # replaced per band below; see WEALTH_SITUATION
     # Routed to build_skill_prompt, which needs the skill/tier pair; these exist so the handler
     # recognises the kinds.
     "skillbest": "You have seen what this adventurer is good at.",
@@ -483,6 +493,27 @@ REMARK_ANGLE = {
         "bound": "State the outcome.",
         "machine": "State the outcome.",
         None: "React as YOUR kind would to the thing that was hunting you lying dead.",
+    },
+    "equiplegend": {
+        "self_interested": "You have never had a client carrying one of those. Say what it is worth — and what it makes them, walking around with it.",
+        "fearful": "Anything that grand attracts attention, and attention is what kills people. Say so.",
+        "bound": "Note the item. Its reputation is nothing to you.",
+        "machine": "Note the item. Its reputation is nothing to you.",
+        None: "React as YOUR kind would to seeing a thing out of stories worn in front of you — awe, envy, unease, or an old tale about one like it.",
+    },
+    "gift": {
+        "self_interested": "Payment in kind is still payment, and this is better than most. Say so, without gushing.",
+        "fearful": "Being armed makes you feel a little less likely to die down here. Say so.",
+        "bound": "Acknowledge the equipment. You did not expect it and you do not need it.",
+        "machine": "Acknowledge the equipment. You do not need it.",
+        None: "React as YOUR kind would to being armed by the person you follow — gratitude, surprise, suspicion, or a promise about what you will do with it.",
+    },
+    "wealth": {
+        "self_interested": "Their purse is your business more than anyone's. Say what you make of it.",
+        "fearful": "Money is what keeps you both fed and alive down here. Say what this means for that.",
+        "bound": "Note the state of their purse. It means nothing to you.",
+        "machine": "Note the state of their purse. It means nothing to you.",
+        None: "React as YOUR kind would to what they are carrying — sympathy, envy, an opinion about spending it, or an old view about wealth.",
     },
     "equip": {
         "self_interested": "You price gear by habit. Say what you make of it as a piece of kit — good buy, bad buy, or wasted coin.",
@@ -813,6 +844,16 @@ def build_hunger_prompt(state, race, floor, map_name, allegiance="loyal", blood=
             + numbers
             + REMARK_TAIL)
 
+# ⚠ Bands, not figures. The engine sends which band they are in; the follower never states an
+# amount, for the same reason a mercenary may not quote a price -- it is a number the character
+# has no way to know.
+WEALTH_SITUATION = {
+    "poor": ("They are broke — genuinely, embarrassingly broke. There is not enough in their "
+             "purse to buy anything worth having, and you both know it."),
+    "rich": ("They are carrying a serious amount of gold. Enough to buy their way out of most "
+             "trouble, and enough to be worth killing for, if the wrong sort noticed."),
+}
+
 def build_remark_prompt(kind, race, floor, map_name, allegiance="loyal", ctx=None):
     # Remarks made in Hell carry the dread too; a cheerful word about a chest is wrong down there.
     # ⚠ A mercenary told to think about "what the take is worth" invents a figure -- measured,
@@ -822,6 +863,10 @@ def build_remark_prompt(kind, race, floor, map_name, allegiance="loyal", ctx=Non
     numbers = MERC_NO_NUMBERS if allegiance == "self_interested" else ""
     situation = REMARK_SITUATION.get(kind, "Something has happened.")
     c = ctx or {}
+    if kind == "wealth":
+        situation = WEALTH_SITUATION.get(c.get("band") or "poor", WEALTH_SITUATION["poor"])
+        # ⚠ Nobody states an amount. Same rule as the mercenary's prices.
+        situation += "\n" + MERC_NO_NUMBERS.rstrip("\n")
     if "{look}" in situation:
         situation = situation.replace("{look}", (c.get("look") or "something"))
     if "{slot}" in situation:
@@ -3021,6 +3066,34 @@ HELL_BAPHOMET = (
     "and that he is somewhere below — but you have not seen him and you do NOT know what he "
     "looks like, what he can do, or what he wants. Do not invent any of it.\n")
 
+# ---- Who is giving the orders --------------------------------------------------------------
+# ⚠ Barony's DLC makes skeletons, goblins, rats, trolls, vampires and the rest playable, and a
+# goblin taking orders from a goblin is not the same conversation as a goblin taking orders from
+# a human. Standing modifier, not a remark: it colours everything they say to that person.
+#
+# ⚠ Fed by `player_kind`, NOT `player_race`. The latter is already the SHAPESHIFT form and feeds
+# can_understand() -- putting the chosen race there would mean a vampire, succubus or incubus
+# player understands nobody, which is the exact bug the polymorph work exists to avoid.
+KIN_SAME = (
+    "⚠ THIS ADVENTURER IS ONE OF YOUR OWN KIND — a {kind}, the same as you. That is not a small "
+    "thing down here. You are easier with them than you would be with a human: you can say "
+    "things to them you would not say to an outsider, you assume they already understand what "
+    "your sort has to put up with, and there is a bluntness between you that needs no "
+    "explaining. It does not make you obedient — it makes you familiar.\n")
+KIN_OTHER = (
+    "⚠ THIS ADVENTURER IS A {KIND}, not a human. Whatever you expected when you threw in with an "
+    "adventurer, this was not it, and you notice it. Let it show in how you speak to them — "
+    "curiosity, wariness, fellow-feeling as one dungeon creature to another, or grim amusement "
+    "at the pair you make. Your own kind's opinion of theirs is the thing to draw on.\n")
+
+def _kin_section(follower_race, player_kind):
+    kind = (player_kind or "").strip()
+    if not kind:
+        return ""          # a human adventurer: the ordinary case, unchanged
+    if _lore_key(kind) == _lore_key(follower_race or ""):
+        return KIN_SAME.replace("{kind}", kind)
+    return KIN_OTHER.replace("{KIND}", kind.upper())
+
 def _dread_section(floor, map_name=""):
     if floor_to_region(floor, map_name) != "hell":
         return ""
@@ -3073,7 +3146,8 @@ def _follower_memory_block(st):
             "NOT mean repeating those sentences. If the same ground comes up again, say it a "
             "different way.\n")
 
-def _follower_sections(uid, race, floor, says, player=0, ident=None, gold=0, map_name=""):
+def _follower_sections(uid, race, floor, says, player=0, ident=None, gold=0, map_name="",
+                       player_kind=""):
     """The relationship half of the prompt. Order matters: boon and secret rolls
     consume randomness, and the sections read as one escalating block."""
     race_l = race.lower()
@@ -3142,10 +3216,15 @@ def _follower_sections(uid, race, floor, says, player=0, ident=None, gold=0, map
         intro = ""
     return (history + memory + relations + _name_section(st) + secret + boon + identify + alleg
             + _obedience_section(st) + merc + intro + _fearful_section(st, floor)
+            # ⚠ Late, beside the other standing modifiers. Placed FIRST it lost: a goblin
+            # follower told its GOBLIN leader "she's still a human, can't trust 'em as far as I
+            # can spit". Everything after a block competes with it, and the rest of the prompt
+            # says "adventurer" a dozen times, which the 8B reads as "human" by default.
+            + _kin_section(race, player_kind)
             + _dread_section(floor, map_name) + fixed + sabotage)
 
 def build_prompt(race, floor, says="", uid=0, player=0, player_name="", party=1, map_name="",
-                 ident=None, gold=0):
+                 ident=None, gold=0, player_kind=""):
     head, body, limits = _persona(race, True, floor, map_name)
     who = player_name.strip() if player_name else ""
     # In co-op the follower belongs to ONE adventurer but others are present; naming the
@@ -3168,7 +3247,7 @@ def build_prompt(race, floor, says="", uid=0, player=0, player_name="", party=1,
            f"YOU ARE: a {race} on dungeon floor {floor}, an ally the adventurer can command.\n")
         + body
         + party_line
-        + (_follower_sections(uid, race, floor, says, player, ident, gold, map_name)
+        + (_follower_sections(uid, race, floor, says, player, ident, gold, map_name, player_kind)
            if uid else "")
         # HARD LIMITS LAND HERE, AFTER the disclosure block inside _follower_sections.
         # Disclosure says "do not claim ignorance"; the limits say "say you do not know and
@@ -3799,6 +3878,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             # service may decide whether it is enough -- the model cannot check a balance,
             # so affordability is resolved here like every other condition in this project.
             gold = int(data.get("gold", 0) or 0)
+            # ⚠ NOT player_race -- see _kin_section. That field is the shapeshift form and drives
+            # the comprehension filter; this is what the adventurer actually is.
+            player_kind = (data.get("player_kind") or "").strip()
             # How this follower came to be, and the part of its identity that outlives this
             # body (see the origin section). Empty for an ordinary recruit.
             origin = (data.get("origin") or "").strip()
@@ -3897,10 +3979,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                                  (data.get("medium") or "water").strip(),
                                                  (data.get("hazard") or "").strip())
                 else:
+                    # A legendary piece gets its own situation, not the ordinary kit line.
+                    if remark == "equip" and data.get("legendary"):
+                        remark = "equiplegend"
                     prompt_r = build_remark_prompt(
                         remark, race, floor, map_name, _al,
                         {"look": (data.get("look") or "").strip(),
-                         "slot": (data.get("slot") or "").strip()})
+                         "slot": (data.get("slot") or "").strip(),
+                         "band": (data.get("band") or "").strip()})
                 raw_r = ask_ollama(prompt_r)
                 line_r = (raw_r or "").strip().strip('"').split("\n")[0][:200]
                 print(f"[SERVICE] -> remark {remark}: {race}: {line_r}")
@@ -4109,7 +4195,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                             print(f"[SERVICE-DBG] identify {ident_req.get('real')!r} -> "
                                   f"{ident_kind} claim={claim!r} truthful={ident_truthful}")
                     prompt = build_prompt(race, floor, says, uid, player, player_name, party,
-                                          map_name, ident_line, gold)
+                                          map_name, ident_line, gold, player_kind)
             who = player_name or f"player{player}"
             kind = "NPC" if npc else "follower"
             print(f"[SERVICE] {race} floor {floor} [{kind}] ({who})")

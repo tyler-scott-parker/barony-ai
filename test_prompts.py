@@ -92,7 +92,7 @@ ck("the mercenary does not tout for the appraisal here",
 # --- chest, drunk and mimic -----------------------------------------------------------------
 for k in ("chest", "drunk", "mimic", "cleared", "swimming", "arrowtrap", "food", "kill",
           "death", "bossfight", "bossdown", "area", "minotaur", "minotimer", "minotaurdown",
-          "equip"):
+          "equip", "equiplegend", "gift", "wealth"):
     pr = S.build_remark_prompt(k, "goblin", 7, "swamp", "loyal")
     ck("the %s remark is a short form" % k, tok(pr) < 500, tok(pr))
     ck("the %s remark knows where it is" % k, "Swamp" in pr or "swamp" in pr)
@@ -130,7 +130,7 @@ ck("the drunk situation names no topic to avoid",
 # A spy has no reaction of its own for any kind; the handler maps it to loyal.
 for k in ("chest", "drunk", "mimic", "cleared", "swimming", "arrowtrap", "food", "kill",
           "death", "bossfight", "bossdown", "area", "minotaur", "minotimer", "minotaurdown",
-          "equip", "skillbest", "skillworst"):
+          "equip", "equiplegend", "gift", "wealth", "skillbest", "skillworst"):
     ck("no spy-specific %s angle to leak" % k, "spy" not in S.REMARK_ANGLE[k])
     ck("every %s angle has a default" % k, S.REMARK_ANGLE[k].get(None))
 ck("a fearful follower dreads chests", "Traps" in S.REMARK_ANGLE["chest"]["fearful"])
@@ -393,6 +393,53 @@ ck("no prompt without a skill and a tier",
 ck("a mercenary is still forbidden figures there",
    "Naming any number is WRONG" in S.build_skill_prompt(
        "skillbest", "gnome", 7, "swamp", "self_interested", "trading", "a master", 60))
+
+# --- a monster-race adventurer ----------------------------------------------------------------
+# ⚠ Barony's DLC makes skeletons, goblins, rats, trolls and the rest playable, and a goblin taking
+# orders from a goblin is not the same conversation as a goblin taking orders from a human.
+ck("a human leader changes nothing", S._kin_section("goblin", "") == "")
+ck("one of your own kind is recognised", "ONE OF YOUR OWN KIND" in S._kin_section("goblin", "goblin"))
+ck("and named", "a goblin, the same as you" in S._kin_section("goblin", "goblin"))
+ck("a different monster race is its own thing",
+   "IS A RAT" in S._kin_section("goblin", "rat"))
+ck("kinship is matched through _lore_key, not raw text",
+   "ONE OF YOUR OWN KIND" in S._kin_section("crystal golem", "crystal_golem"))
+# ⚠ FED BY player_kind, NOT player_race. player_race is the SHAPESHIFT form and drives
+# can_understand(); putting the chosen race there would mean a vampire, succubus or incubus
+# player understands nobody -- the exact bug the polymorph work exists to avoid.
+ck("comprehension still keys off the shapeshift field",
+   S.can_understand("", "goblin") is True)
+_p = S.build_prompt("goblin", 7, "hello", 1, 0, "Ada", 1, "swamp", None, 0, "goblin")
+ck("the kin block reaches the prompt", "ONE OF YOUR OWN KIND" in _p)
+# ⚠ Placed FIRST it lost: a goblin follower told its GOBLIN leader "she's still a human". The
+# rest of the prompt says "adventurer" a dozen times, which the 8B reads as human by default.
+ck("and lands late, after the obedience block",
+   _p.index("ONE OF YOUR OWN KIND") > _p.index("OBEDIENCE"))
+
+# --- legendary kit, gifts, and the purse -------------------------------------------------------
+# ⚠ "Legendary" reuses the appraisal ceiling rather than listing ARTIFACT_*, so there is one
+# definition of the word in the mod and DLC items are covered for free.
+_leg = S.build_remark_prompt("equiplegend", "human", 18, "ruins", "loyal",
+                             {"look": "artifact sword", "slot": "weapon"})
+ck("a legendary piece gets its own situation", "no ordinary" in _leg)
+ck("and names the item", "artifact sword" in _leg)
+ck("while ordinary kit stays ordinary",
+   "no ordinary" not in S.build_remark_prompt("equip", "human", 18, "ruins", "loyal",
+                                              {"look": "iron helm", "slot": "helm"}))
+# ⚠ The gift went to the FOLLOWER, not to the player.
+_gift = S.build_remark_prompt("gift", "goblin", 7, "swamp", "loyal",
+                              {"look": "steel axe", "slot": "weapon"})
+ck("a gift is handed TO the follower", "handed YOU" in _gift)
+ck("and it is theirs now", "your weapon now" in _gift)
+# ⚠ Bands, never figures -- same rule as the mercenary's prices.
+ck("being broke is a band", "genuinely, embarrassingly broke" in
+   S.build_remark_prompt("wealth", "human", 7, "swamp", "loyal", {"band": "poor"}))
+ck("so is being rich", "worth killing for" in
+   S.build_remark_prompt("wealth", "human", 7, "swamp", "loyal", {"band": "rich"}))
+ck("and nobody states an amount", "Naming any number is WRONG" in
+   S.build_remark_prompt("wealth", "human", 7, "swamp", "loyal", {"band": "rich"}))
+ck("an unknown band falls back rather than breaking",
+   bool(S.build_remark_prompt("wealth", "human", 7, "swamp", "loyal", {"band": "gilded"})))
 
 print("\n%d failure(s)" % len(fails), fails)
 sys.exit(1 if fails else 0)
