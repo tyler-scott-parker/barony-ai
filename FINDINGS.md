@@ -2185,6 +2185,47 @@ recently has been exercised in a real run.
 your own follower. Previously the only exits were walking 8 tiles off or clicking someone else,
 neither of which is discoverable.
 
+#### ⚠ ENTITY UIDS ARE RECYCLED — audit every per-floor set keyed by one
+
+A second audit pass found two more of the same class, and the root cause is worth stating plainly
+because it invalidates the obvious assumption: **a uid does not identify a creature for the length
+of a run.** `entity_uids` resets to **1** on a new game (`menu.cpp:8650`) and is **decremented**
+in dozens of places (`actgib.cpp`, `actflame.cpp`, `actgeneral.cpp`) for entities that must not
+consume one — so the counter oscillates and hands the same numbers out repeatedly.
+
+So any set keyed by uid that means *"already handled on this floor"* must be cleared **on a level
+change**, not only on `new_run`. The failure is a **false negative** and therefore silent: the
+thing simply never speaks, and nothing logs.
+
+| | was | effect |
+|---|---|---|
+| `mymod_seenMimics` | cleared on `new_run` only | a mimic whose uid was seen on an earlier floor is skipped — and it is a REACTIVE remark that deliberately bypasses the cooldown *and* the combat guard, because a late warning is worthless |
+| `mymod_haggle` | **never cleared at all** | a merchant inherits a percentage nobody negotiated. On a new run uids restart at 1, so the collision is near-certain, and `buyValue`/`sellValue` both read it — the wrong price is **shown and charged**, consistently enough not to look like a bug |
+
+⚠ **The haggle clear has to sit ABOVE the host gate in `mymod_pollAI`.** Clients keep their own
+copy for display (`MYHG`) and the `new_run` reset block is host-only, so clearing it there would
+have fixed the host and left every client wrong.
+
+⚠ **`mymod_taunt_cooldowns` is the same shape but benign** — a stale tick is in the past, so the
+cooldown reads as already expired. Left alone deliberately; noted so the next audit does not
+re-open it.
+
+**How to find the rest:** list the file-static containers and diff them against the level-change
+and `new_run` blocks. Every sibling in the same watch (`boulderPushed`, `fountainSeen`, `bossSeen`,
+`bossAnnounced`, `ratfearRolled`) is cleared in **both** places — an entry appearing in only one is
+the tell.
+
+#### Packet strings are read until a NUL the sender is trusted to have written
+
+Three receive paths built a `std::string` straight from `net_packet->data`. A malformed, truncated
+or hostile datagram need not contain a NUL anywhere in the 512 bytes, and the read then walks off
+the allocation. `mymod_packetString(off)` bounds by `net_packet->len` **and** by the buffer.
+
+⚠ **Vanilla does exactly this throughout** (`net.cpp:3860`, `:4799`), so this is hardening, not a
+regression the mod introduced — worth knowing before "fixing" it upstream. `MYAI` is the one that
+genuinely matters: it is the only path carrying free text from another machine. 9 assertions in
+`packtest.cpp`, every one of which overruns the buffer without the bound.
+
 ### Class companions — summons, charms and bots are not recruits
 
 Conjurer summons, Mesmer charms and Machinist bots are all followers, but they arrive by
