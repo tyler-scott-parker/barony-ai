@@ -2318,7 +2318,7 @@ on, Sparkle Face!"*, *"Pebble Brain, what are you waiting for?"*, *"Rocky Road w
 
 `parse_heckle_lines` strips numbering, bullets and quotes (the 8B numbers lists however firmly it
 is told not to), drops preambles and trailing notes, dedupes case-insensitively, and cuts at 90
-chars on a word boundary so a bubble stays glanceable. 21 assertions in `test_heckle.py`.
+chars on a word boundary so a bubble stays glanceable. 20 assertions in `test_heckle.py`.
 
 Heckles honour comprehension like any other overheard line — a polymorphed player who cannot
 understand a construct gets noises, sampled at refill (so a mid-magazine polymorph is stale until
