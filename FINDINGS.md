@@ -2215,6 +2215,34 @@ and `new_run` blocks. Every sibling in the same watch (`boulderPushed`, `fountai
 `bossAnnounced`, `ratfearRolled`) is cleared in **both** places — an entry appearing in only one is
 the tell.
 
+**Running that recipe found two more, and they are the worst of the family so far** because both
+are keyed by a *follower* uid. Follower uids do not merely recycle eventually — a level change
+re-creates every follower as a new entity, so a collision is available at the very next staircase
+rather than at some point in the run.
+
+| | was | effect |
+|---|---|---|
+| `mymod_inCombat` | cleared **nowhere at all** — not on `new_run`, not per floor | two ways. A stale `true` fails the `!inFight` gate in `mymod_remarkSpeaker`, which **silently gags that follower for the whole floor**. And a stale `true` read while the creature is calm takes the `!inCombat && wasInCombat` branch and fires a **`fought_alongside` nobody earned** — trust from a fight that never happened |
+| `mymod_followerKit` | `new_run` only | a recycled uid is already `known`, so the silent first-sight seed is skipped and the creature's **own** gear diffs against the previous holder's slots: a `gift` remark for nothing given. The comment two lines below the seed warns about exactly this outcome; it just did not cover this route in |
+
+⚠ **The clear has to sit at the TOP of `mymod_ambientTick`, above the three tick helpers.** Both
+maps are *read* before the point where `mymod_watch` resets: `mymod_followerKit` by
+`mymod_remarkTick()`, `mymod_inCombat` by the fight-survival scan itself. Clearing them down beside
+`mymod_watch.clear()` still lets the stale value fire once, on the arrival frame — which is the
+only frame that matters. `mymod_watch` itself is fine where it is because nothing reads it earlier.
+
+⚠ **`mymod_inCombat` was also subscripted, not looked up** — `mymod_inCombat[f->getUID()]` on a
+per-frame path, and `std::map::operator[]` *inserts*. The map grew without bound over a run. Now
+`find()`.
+
+⚠ **The tick-shaped maps really are benign, but for a reason worth writing down**, because it is
+not the one you would assume. `ticks = 0` sits in the *same block* as `entity_uids = 1`
+(`menu.cpp:8649-8650`), so after a new run a stale `last` is in the **future**, not the past. What
+saves them is that `ticks - last` is unsigned: it wraps to a huge value and still reads as expired.
+`mymod_taunt_cooldowns`, `mymod_fightCooldown` and `mymod_hurtCooldown` are all safe by
+wraparound rather than by ordering — which would stop being true the moment anyone widened those
+to a signed or 64-bit type.
+
 #### Packet strings are read until a NUL the sender is trusted to have written
 
 Three receive paths built a `std::string` straight from `net_packet->data`. A malformed, truncated
