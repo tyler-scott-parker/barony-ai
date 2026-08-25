@@ -81,8 +81,70 @@ validation renders without playing anything. All 33 referenced espeak variants c
 The validator lives in the scratchpad rather than the repo; it is worth re-running after any cast
 edit, because a bad sox chain fails for exactly one race and nothing else notices.
 
-**Still open:** `cave crawler`, `cyclops` and `dwarf` are VOICES keys that match no race the game
-can return — harmless, but they are cast for creatures that never arrive.
+**Still open:** `cyclops` and `dwarf` are VOICES keys that match no race the game
+can return — harmless, but they are cast for creatures that never arrive. (`cave crawler` was the
+third; it has been removed from `comprehension.json`, where it had also been sitting in the `beast`
+group. There is no such monster in the 5.0.2 enum.)
+
+#### ⚠ The audit was of the ENUM, and one follower race is not in it — `fire sprite`
+
+`getMonsterLocalizedName` does not always return a species. For a `MOTH_SMALL` whose `Stat->name`
+matches the special-NPC key, it returns **that name** (`actmonster.cpp:230`) — and `SPELL_FIRE_SPRITE`
+sets exactly that (`magic/magic.cpp:3357`) before calling `forceFollower` (`:3366`). So a fire
+sprite is a **player follower like any other**, and its race string is `"fire sprite"`, which was
+in none of the three per-race data files.
+
+⚠ **The failure is silent and plausible, which is why it survived the enum audit.** Nothing errors;
+every lookup has a fallback, and the follower still talks. Measured before the fix:
+
+| | resolved to | should be |
+|---|---|---|
+| `race_lore` | `default` — *"A creature of the dungeon depths… Crude and wary of intruders"* | its own persona |
+| `_name_tiers` | `[0, 0, 99]` — the generic pool only, no race or group flavour | a pool of its own |
+| `_group_of` | `None` | `fey` |
+| `noise_for` | `*a low growl*` (`default_beast`), for a creature made of fire | sparks |
+| `can_understand` | **False for every polymorph form** — a group of `None` matches nothing | its group's |
+
+Only the last is conditional: an un-polymorphed player sends no `player_race`, and
+`can_understand` opens with `if not player_race: return True`. The other four are unconditional.
+
+**Deliberately NOT given an entry in `barony_lore_full.json`.** It has no
+`denizen_context_profiles` or `individual_denizen_research` row and will keep falling through
+`build_lore_context` (which skips cleanly — `if e:`). That file is researched canon; a conjured
+summon from a spell has none, and inventing some there would put fabrication into the one source
+the grounding block treats as authoritative. `race_lore.json` is the mod's own persona layer and
+is the right home for it.
+
+⚠ **Grouped with `fey` (beside `flame elemental` and `earth sprite`), NOT with `moth` in `beast`.**
+A judgement call with no measurement behind it: the engine says the entity is a moth, the fiction
+says it is conjured fire. Consistency with the persona and the noise pool decided it. Worth
+revisiting if a polymorphed-moth player ever finds it strange.
+
+**`test_racecover.py` now parses the live `Monster` enum out of a Barony checkout** (`BARONY_SRC`,
+or the usual sibling paths) and resolves each one through `lang/en.txt`, falling back to a frozen
+5.0.2 list when no checkout is reachable. 158 assertions: every engine race has lore, a group and a
+name pool; the four files agree with each other in both directions; no race sits in two groups.
+Verified to fail on the pre-fix state. **It cannot catch a second `fire sprite`** — a name reached
+only through a spell is not in the enum, so that one is listed explicitly and the next one will
+have to be too.
+
+#### ⚠ The arachnophobia filter renames spiders, and this is NOT a bug in single-player
+
+With the filter on, `getMonsterLocalizedName(SPIDER)` returns **`"crab"`** (`actmonster.cpp:248` →
+`Language::get(102)`), so a spider follower gets crab lore, crab names and crab noises. That looks
+alarming and was initially written up as a defect. It is not: the filter is a *total* substitution —
+model (`monster_spider.cpp:35`), sound pitch (`:417`) and name — so the player is looking at a crab,
+hearing a crab, and being told it is a crab. A follower that called itself a spider would be the
+accessibility feature failing. **Left alone deliberately; noted so the next audit does not
+"fix" it.**
+
+⚠ **In CO-OP it is a real defect, in one direction.** `arachnophobia_filter` is a per-machine
+render setting (`game.cpp:248`) but the service is host-authoritative, so the race string is always
+computed with the **host's** setting. Client filter ON + host filter OFF means that client's
+follower talks about spiders — the filter failing for the person who needs it. The reverse
+(client sees spiders, follower says crab) is only confusing. Fixing it properly means carrying the
+requesting player's filter into the payload and substituting on the way out, and it belongs with
+the rest of the untested multiplayer work rather than ahead of it.
 
 ### Comprehension — polymorph only (was dead code)
 

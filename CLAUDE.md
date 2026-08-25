@@ -392,7 +392,31 @@ is unchanged from the single-player path that already works. Untested in an actu
 
 **Designed, not built — the peaceful Herx route.** `actWinningPortal` already contains the answer: the portal **exists on the boss floor, invisible**, and reveals itself when its per-tick scan finds no `LICH` or `DEVIL` alive. So a spared-Herx ending needs only (a) a flag excluding a pacified Herx from that scan and (b) clearing his hostility. No new entity, no replaced code path. The chain that *earns* it — merchants, testimony, leverage — is the real project and is undesigned. Design the failure mode first: a half-fired peaceful path could strand the player with a non-hostile boss and no exit.
 
-**DLC:** *Deserters & Disciples* shipped Jan 29 2026 with *Instruments of Destruction Part 1* (which removed Magic/Casting/Swimming and revamped magic into Sorcery/Thaumaturgy/Mysticism). **Part 2 is the upcoming one.** New races will need entries in `race_lore.json`, `comprehension.json`, and the lore file's denizen profiles or they fall through to generic defaults. (`follower_names.json` is the exception — an unknown race still draws from its comprehension group, so naming degrades to a fitting pool rather than a broken one.) **Answered Aug 21 2026: a `STEAMWORKS_ENABLED=OFF` build can NOT** — it compiles the GOG `.key` branch and locks everything. `barony-modded-steam` (SDK 1.53a, `-DSTEAMWORKS`) unlocks all three packs against real Steam entitlement; all DLC races confirmed present in character creation. See **The DLC build** under Build & run. The lore-file gap above is now live, not hypothetical.
+**DLC:** *Deserters & Disciples* shipped Jan 29 2026 with *Instruments of Destruction Part 1* (which removed Magic/Casting/Swimming and revamped magic into Sorcery/Thaumaturgy/Mysticism). **Part 2 is the upcoming one.** **Answered Aug 21 2026: a `STEAMWORKS_ENABLED=OFF` build can NOT** — it compiles the GOG `.key` branch and locks everything. `barony-modded-steam` (SDK 1.53a, `-DSTEAMWORKS`) unlocks all three packs against real Steam entitlement; all DLC races confirmed present in character creation. See **The DLC build** under Build & run.
+
+**Race coverage is CLOSED for everything currently shipping** (verified Aug 25 2026, not assumed).
+All 49 races `getMonsterLocalizedName` can return — D&D and IoD Part 1 included — resolve in
+`race_lore.json`, `comprehension.json`, `follower_names.json`, and the lore file's
+`denizen_context_profiles` *and* `individual_denizen_research`. **`test_racecover.py` asserts
+this**, parsing the live `Monster` enum out of a Barony checkout (`BARONY_SRC`, or the usual
+sibling paths) and resolving each entry through `lang/en.txt`, with a frozen 5.0.2 list as the
+fallback. Run it after Part 2 lands and it will name anything missing.
+
+⚠ **The enum is not the whole list.** `getMonsterLocalizedName` returns a **special-NPC name**
+rather than a species for a `MOTH_SMALL` matching one (`actmonster.cpp:230`), and `SPELL_FIRE_SPRITE`
+sets exactly that before calling `forceFollower` — so **`fire sprite` is a follower race that no
+enum audit can find**. It fell through all three per-race files until Aug 25 2026: generic persona,
+no name pool, `*a low growl*` for a creature made of fire, and outside comprehension entirely. It
+still has no `barony_lore_full.json` profile, on purpose — that file is researched canon and a
+conjured summon has none. Fixed and
+listed explicitly in the test; **a second one would be just as invisible**, so check the
+special-NPC paths, not only the enum, when Part 2 adds summons. Full measurements in `FINDINGS.md`.
+
+⚠ **`follower_names.json` is not the safe one.** It degrades gracefully only for a race that has a
+**comprehension group** — the group tier is what a race with no pool of its own draws from. A race
+missing from `comprehension.json` too (which is what "unknown" actually means) gets `_group_of ==
+None` and falls straight to the generic default, *and* becomes unintelligible to every polymorph
+form. Group membership is the load-bearing entry; add it first.
 
 ---
 
