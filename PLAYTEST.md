@@ -9,7 +9,7 @@ that are most likely to be wrong, roughly in order of how much they matter.
 ## Before you start
 
 ```bash
-python3 ~/barony-ai/service.py                 # terminal 1 — leave it visible, it prints a lot
+python3 ~/Projects/barony-ai/service.py                 # terminal 1 — leave it visible, it prints a lot
 cd ~/.local/share/Steam/steamapps/common/Barony && ./barony-modded
 ```
 
@@ -33,7 +33,7 @@ into the timeline instead of to your follower:
 the review shows what it actually heard next to the reply it produced — which is how you tell a
 transcription failure from a model failure.
 
-Afterwards: `python3 ~/barony-ai/logreview.py`
+Afterwards: `python3 ~/Projects/barony-ai/logreview.py`
 
 ---
 

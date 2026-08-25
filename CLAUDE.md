@@ -27,8 +27,8 @@ from this file alone will re-introduce them.
 
 | Repo | Path | Remote |
 |---|---|---|
-| Python service | `~/barony-ai/` | `origin` → `tyler-scott-parker/barony-ai` |
-| Barony fork | `~/Barony/` (branch `mymod`) | `origin` → TurningWheel upstream; `mine` → `tyler-scott-parker/barony-mymod` |
+| Python service | `~/Projects/barony-ai/` | `origin` → `tyler-scott-parker/barony-ai` |
+| Barony fork | `~/Projects/Barony/` (branch `mymod`) | `origin` → TurningWheel upstream; `mine` → `tyler-scott-parker/barony-mymod` |
 
 Fetch upstream with `git fetch origin`; push your work with `git push mine mymod`.
 
@@ -36,7 +36,7 @@ Fetch upstream with `git fetch origin`; push your work with `git push mine mymod
 
 - All mod C++ now lives in **`src/mymod/mymod.cpp`** + `mymod.hpp` (extracted so upstream merges stay clean)
 - Listed in `src/CMakeLists.txt` under `GAME_SOURCES` — **not** in `EDITOR_SOURCES`
-- Service: `~/barony-ai/service.py` (port 5001), plus `barony_lore_full.json` (449KB, 45 sections), `barony_lore.json` (**only** source of `world.setting` — its wording differs from the full file's, so they are not interchangeable), `race_lore.json`, `race_books.json`, `comprehension.json`, `follower_names.json`, `voice_bridge.py`, `tts_bridge.py` (optional voice output, off by default; its `.venv-tts/` and `voices/` are gitignored)
+- Service: `~/Projects/barony-ai/service.py` (port 5001), plus `barony_lore_full.json` (449KB, 45 sections), `barony_lore.json` (**only** source of `world.setting` — its wording differs from the full file's, so they are not interchangeable), `race_lore.json`, `race_books.json`, `comprehension.json`, `follower_names.json`, `voice_bridge.py`, `tts_bridge.py` (optional voice output, off by default; its `.venv-tts/` and `voices/` are gitignored)
 - Data files are resolved relative to `service.py`, so the repo can live anywhere
 - Dev binary: `~/.local/share/Steam/steamapps/common/Barony/barony-modded`
 - IPC is a **direct TCP POST via SDL_net** (`src/mymod/mymod_net.hpp`) — no curl, no python3,
@@ -101,28 +101,43 @@ build (`CMakeLists.txt` lists sources explicitly), same arrangement as `packtest
 ## Build & run
 
 ```bash
-cd ~/Barony/build && make -j$(nproc) 2>&1 | tail -10
-cp ~/Barony/build/barony ~/.local/share/Steam/steamapps/common/Barony/barony-modded
+cd ~/Projects/Barony/build && make -j$(nproc) 2>&1 | tail -10
+cp ~/Projects/Barony/build/barony ~/.local/share/Steam/steamapps/common/Barony/barony-modded
 cd ~/.local/share/Steam/steamapps/common/Barony && ./barony-modded 2>&1 | grep -E 'MYMOD|AI'
 ```
 
-Configure (only needed if CMakeLists changes):
+Configure (needed if CMakeLists changes — **or if either repo is moved**):
 ```bash
 cmake .. -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DOPENAL_ENABLED=OFF -DFMOD_ENABLED=OFF -DSTEAMWORKS_ENABLED=OFF -DEOS_ENABLED=OFF
 ```
 
+⚠ **A CMake build tree is pinned to an ABSOLUTE source path, so moving the repo breaks it** —
+`CMAKE_HOME_DIRECTORY` in `CMakeCache.txt` still names the old location. Both trees broke this way
+when the repos moved from `~/` to `~/Projects/` (fixed Aug 25 2026). The failure is loud but
+misleading: `make` reports *"The source directory /home/tyler/Barony does not exist"*, which reads
+like a missing checkout rather than a stale cache, and **re-running `cmake ..` does not fix it** —
+it refuses, because the cache was generated for a different source dir. `rm -rf CMakeCache.txt
+CMakeFiles` in the build dir first, then configure. A full rebuild is ~2 min at `-j8`.
+
+⚠ **`build-steam/` has to be reconfigured separately, with its own env**, and both dependencies
+live outside either repo: `STEAMWORKS_ROOT=~/Dev/steamworks-153`, `NFD_DIR=~/Dev/nfd-stub`. Confirm
+you picked the right SDK — `~/Dev/steamworks` is the **1.65** one and will not work (see below):
+```bash
+grep -o "SteamUtils0[0-9][0-9]" ~/Dev/steamworks-153/sdk/public/steam/isteamutils.h | head -1   # SteamUtils010 = 1.53a
+```
+
 Service + voice in separate terminals:
 ```bash
-python3 ~/barony-ai/service.py
-python3 ~/barony-ai/voice_bridge.py          # optional: push-to-talk INPUT
+python3 ~/Projects/barony-ai/service.py
+python3 ~/Projects/barony-ai/voice_bridge.py          # optional: push-to-talk INPUT
 ```
 
 Voice OUTPUT (TTS) is off unless both halves are turned on — this machine deliberately runs
 without it:
 ```bash
-python3 ~/barony-ai/tts_bridge.py --setup    # one time: venv + piper + 77MB voice model
-BARONY_AI_TTS=1 python3 ~/barony-ai/service.py
-python3 ~/barony-ai/tts_bridge.py            # optional: spoken OUTPUT
+python3 ~/Projects/barony-ai/tts_bridge.py --setup    # one time: venv + piper + 77MB voice model
+BARONY_AI_TTS=1 python3 ~/Projects/barony-ai/service.py
+python3 ~/Projects/barony-ai/tts_bridge.py            # optional: spoken OUTPUT
 ```
 `.venv-tts/` and `voices/` are gitignored — the ONNX model must never be committed.
 
@@ -167,13 +182,13 @@ zero source patches, nothing in the Steam install touched.
 
 ⚠ **Steamworks makes `nativefiledialog` a REQUIRED dependency** (`CMakeLists.txt:366`) for one
 call — `NFD_PickFolder` for the Workshop mod-upload picker (`MainMenu.cpp:31110`). The real
-library needs GTK3 headers. `~/nfd-stub` is an API-compatible stub (`libnfd.a`, enum order matches
+library needs GTK3 headers. `~/Dev/nfd-stub` is an API-compatible stub (`libnfd.a`, enum order matches
 upstream so the real lib drops in later); every entry point reports cancelled, so only that one
 Workshop dialog is inert.
 
 ```bash
-# one time: SDK 1.53a from partner.steamgames.com -> ~/steamworks-153 (must contain sdk/public)
-cd ~/Barony/build-steam && STEAMWORKS_ROOT=~/steamworks-153 NFD_DIR=~/nfd-stub cmake .. \
+# one time: SDK 1.53a from partner.steamgames.com -> ~/Dev/steamworks-153 (must contain sdk/public)
+cd ~/Projects/Barony/build-steam && STEAMWORKS_ROOT=~/Dev/steamworks-153 NFD_DIR=~/Dev/nfd-stub cmake .. \
   -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DSTEAMWORKS_ENABLED=ON \
   -DOPENAL_ENABLED=OFF -DFMOD_ENABLED=OFF -DEOS_ENABLED=OFF \
   -DCMAKE_C_FLAGS="-DSTEAMWORKS" -DCMAKE_CXX_FLAGS="-DSTEAMWORKS"
