@@ -854,6 +854,48 @@ that size. Budget n=45+ per cell for a 10-point question, or expect to re-derive
 diagnosed: Python block-buffers into a pipe, and piping through `tail` withholds everything until
 EOF. Use `python3 -u` and no full-buffering filter in the pipeline.
 
+### The confession branch sits at 48% and nothing in the block moves it (four nulls)
+
+The crack's confession branch produces an almost-confession **48% of the time (59/122)**. Four
+hypotheses, ~500 generations, none of them moved it:
+
+| tried | result |
+|---|---|
+| remove the example / dilute it to three | 31-33% vs 44% — *lower*, see the pool-size section |
+| delete the topic-naming prohibition | 53% vs 48% — z < 1, no effect |
+| rewrite the prohibition as a speech act | 60% (n=15) — inside noise |
+| remove the four quoted WARM answers (rule 10) | 55% (34/62) vs 48% — z = 0.83, no effect |
+| move the MUST line into the genuinely last slot (rules 2/3) | 38% (12/32) — z = −1.10, no effect |
+
+So the 48% is **not** caused by the example, the prohibition, the quoted bad answers, or the
+position of the demand inside the block. That is four fewer places to look, each plausible enough
+that someone would otherwise try it. Whether it is a real capability limit of the 8B or something
+outside the block (the reply must also answer the player's question — rule 9) is untested.
+
+⚠ **THE VARIANCE IS THE FINDING, AND IT IS BIG.** Identical settings, same code, same model:
+
+  * the unchanged block scored **53%, 67%, 33%** on three runs of n=15
+  * cell I scored **67% then 40%** on two runs of n=30
+
+That is ±13 points at n=15 and ±9 at n=30. **An n=15 cell cannot resolve less than ~25 points;
+n=30 cannot resolve less than ~18.** Detecting a 10-point effect here needs n≈400 per cell —
+about an hour of GPU per hypothesis, which is why this line of enquiry was stopped rather than
+continued.
+
+⚠ **This has implications for the older probes in this notebook.** Many findings here rest on
+n=8 or n=10 (`3/8`, `2/10`, `7/8 → 2/8`). Those sample sizes sit well inside the noise band
+measured above, so a lone 3/8 → 6/8 cannot by itself support a conclusion. It does **not** follow
+that they are wrong — several are corroborated by an independent mechanism, by a second variant
+landing in the same place, or by an effect far larger than the band (`0/8 → 8/8` is safe at any
+n). But an uncorroborated small-n result should be read as provisional, and **re-measured at
+n≥45 before anything is built on it.** The cheapest guard is the one that worked twice today:
+build two independent variants and see whether they agree with each other.
+
+⚠ **Replication changed the answer, twice.** Cell I at n=30 looked like a 20-point win (p ≈ 0.06)
+and would have been shipped on a single run; its replicate came back at 40%. The weak-keyword
+detector fix earlier in this work was likewise reversed by measurement. Neither error was
+detectable by reading the code or the reply transcripts — only by running it again.
+
 ### The fearful allegiance (8%)
 
 ⚠ **`self_interested` and `fearful` had one prompt line each and no mechanics** — 23% of recruits
