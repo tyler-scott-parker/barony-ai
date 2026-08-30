@@ -210,5 +210,45 @@ r = _last_herx()
 ck("a drop with no hits at all records no near", "near" not in r, r)
 
 
+# --- 12. the spy crack stands down for a pending secret -----------------------------------
+# Both are mandatory unprompted behaviours and the crack is appended LAST, so without this it
+# takes the turn. The comment at the call site always said it stood down for a pending secret;
+# the condition did not implement it. Measured 30% vs 71% conversion for the twins false
+# secret (herx 70% vs 71%, i.e. unaffected -- its truths are short enough to fit alongside).
+def crack_prompt(uid, offer):
+    S.HERX_STATE.update({"revealed": False, "variant": None, "uid": 0, "pending": {},
+                         "is_false": False, "player": 0})
+    for b in S.BOSS_SECRETS:
+        S.SECRET_STATE[b]["pending"].clear()
+        S.SECRET_STATE[b]["revealed"] = False
+    cfg = S.BOSS_SECRETS["twins"]
+    S.follower_state.pop(uid, None)
+    st = S.get_follower_state(uid, cfg["races"][0], 0)
+    st.update(allegiance="spy", name="Kalthok", friendship=cfg["friendship"] + 10,
+              introduced=True)
+    st["event_log"] = [{"type": "fought_alongside", "floor": 3, "claim": "x",
+                        "importance": "notable", "provenance": "participated"}
+                       for _ in range(cfg["fights"] + 2)]
+    _roll = S.secret_roll
+    S.secret_roll = (lambda *a, **k: True) if offer else (lambda *a, **k: False)
+    try:
+        return S.build_prompt(cfg["races"][0], 25,
+                              "what do you know about the Archmagisters?", uid, 0, "Ada", 1, "")
+    finally:
+        S.secret_roll = _roll
+
+p_offer = crack_prompt(90, True)
+ck("an offer suppresses the spy crack", "YOU ARE CRACKING" not in p_offer)
+ck("and the secret offer is still there", "A SECRET YOU HAVE CARRIED" in p_offer)
+ck("a cracking spy with no offer still cracks", "YOU ARE CRACKING" in crack_prompt(91, False))
+# secret_pending is what the stand-down keys on, so assert it directly rather than inferring
+# it from the prompt text.
+crack_prompt(92, True)
+ck("secret_pending is True while an offer is outstanding", S.secret_pending(92) is True)
+ck("and False for a follower with no offer", S.secret_pending(9999) is False)
+S.herx_detect(92, "{}", "Nice weather for it.", 0)
+ck("and False again once the offer is resolved", S.secret_pending(92) is False)
+
+
 print("\n%d failure(s)" % len(fails), fails)
 sys.exit(1 if fails else 0)

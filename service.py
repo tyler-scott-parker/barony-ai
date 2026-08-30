@@ -2303,6 +2303,15 @@ def secret_roll(boss, st, says):
         chance = min(0.95, chance + 0.25)   # a spy wants you to believe it
     return random.random() < chance
 
+def secret_pending(uid):
+    """True while ANY boss's secret has been offered to this follower and not yet resolved.
+    ⚠ Used to stand the spy crack down. Both are mandatory unprompted behaviours and the crack
+    is appended last, so without this it takes the turn -- measured 30% vs 71% conversion for
+    the twins false secret. Herx is unaffected (70% vs 71%): its truths are short enough to
+    fit alongside a crack line, the twins' are not."""
+    return any(uid in SECRET_STATE[b]["pending"] for b in BOSS_SECRETS)
+
+
 def herx_eligible(st, race):
     # ⚠ A conjurer's skeleton knight reports race "skeleton" -- getMonsterLocalizedName does
     # not distinguish it -- so without this a creature conjured ninety seconds ago could hold
@@ -3621,7 +3630,8 @@ def build_prompt(race, floor, says="", uid=0, player=0, player_name="", party=1,
         # ⚠ Stands down for a map sale too, for the reason given above: the sale is a mandatory
         # unprompted behaviour and so is the crack, and the later one takes the turn.
         + (spy_crack_section(get_follower_state(uid, race, player))
-           if (uid and not ident and uid not in LAST_SABOTAGE and uid not in MERC_LATE) else "")
+           if (uid and not ident and uid not in LAST_SABOTAGE and uid not in MERC_LATE
+               and not secret_pending(uid)) else "")
         # ⚠ THE LAST THING IN THE PROMPT, which is the slot the spy crack measured 20/20 from.
         # It has to be after `limits` (it is a knowledge claim about a place, which the limits
         # forbid at length — the Herx carve-out has the same problem) AND after the action
