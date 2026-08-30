@@ -88,7 +88,7 @@ ck("a recruit still can (control)",
 # --- 8. no Herx secret from something conjured minutes ago -----------------------------
 S.reset_run()
 def herx_ready(st):
-    st.update(name="Vessik", friendship=60)
+    st.update(name="Vessik", friendship=60, introduced=True)
     st["event_log"] = [{"type": "fought_alongside"} for _ in range(6)]
     return st
 ck("a skeleton knight cannot hold the Baron's secret",

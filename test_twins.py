@@ -16,7 +16,7 @@ def ready(uid, alleg="loyal", race="human", fights=8):
         S.SECRET_STATE[b].clear(); S.SECRET_STATE[b].update(S._fresh_secret_state())
     S.follower_state.pop(uid, None)
     st = S.get_follower_state(uid, race, 0)
-    st.update(allegiance=alleg, name="Kalthok", friendship=70)
+    st.update(allegiance=alleg, name="Kalthok", friendship=70, introduced=True)
     st["event_log"] = [{"type": "fought_alongside", "floor": 30, "claim": "x",
                         "importance": "notable", "provenance": "participated"}
                        for _ in range(fights)]
@@ -37,7 +37,7 @@ for b in S.SECRET_STATE:
     S.SECRET_STATE[b].clear(); S.SECRET_STATE[b].update(S._fresh_secret_state())
 S.follower_state.pop(4, None)
 _sum = S.get_follower_state(4, "human", 0, "summon", "skeleton knight")
-_sum.update(name="Kalthok", friendship=70, allegiance="loyal")
+_sum.update(name="Kalthok", friendship=70, allegiance="loyal", introduced=True)
 _sum["event_log"] = [{"type": "fought_alongside", "floor": 30, "claim": "x",
                       "importance": "notable", "provenance": "participated"} for _ in range(8)]
 ck("a summon never can", not S.secret_eligible("twins", _sum, "human", 30))

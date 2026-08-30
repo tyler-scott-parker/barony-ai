@@ -740,6 +740,38 @@ wording"*, which is exactly the instruction-shaped mitigation this project has r
 measured as insufficient at 8B. **Not yet fixed**: the earlier finding is that removing the
 example entirely dropped compliance to 0/8, so this needs measuring, not editing.
 
+### Prompt-block ordering is now asserted, not just described
+
+Later-instruction-wins has been measured six times here, and three of those were bugs that only
+showed up as a subsystem quietly underperforming: the offer's override sitting before the limits
+(40% → 81%), the spy crack landing after the override (30% → 71%), and the introduction landing
+after it as well (0/8). **Every one was documented in a comment at the time. None was enforced.**
+
+`test_prompt_order.py` asserts the rules instead. Two kinds of check:
+
+* **ORDER** — canon → limits, offer → limits, obedience → limits, and the override AFTER limits.
+* **STAND-DOWN** — the general form of two of the three bugs: *when a mandatory unprompted
+  behaviour is on this turn, no OTHER one may land after it.* `MANDATORY` lists the blocks that
+  tell the model it MUST say something; adding a block to that list is the whole maintenance
+  burden.
+
+It also pins the negative side, so a stand-down cannot be widened until the block never fires:
+a cracking spy with no offer still cracks, and the crack is still last, after the action rules.
+
+⚠ **The assertions are mutation-tested.** Reverting the crack stand-down fails 2 of them
+(`crack at 12467, override at 11563`); removing the `introduced` gate fails 2 more. A marker
+string that drifts out of sync with `service.py` would make the file vacuously pass, so every
+block is also asserted *present* before its position is checked.
+
+**`secret_eligible` now requires `introduced`.** The introduction goes into `MERC_LATE` and is
+popped at the very END of `build_prompt`, after the override, so it takes the turn. The call
+site already said "the introduction suppresses the other unprompted behaviours on that one
+turn"; this makes the secret one of them. Unreachable in play — the gate needs a name, and
+naming happens in conversation, which is what sets `introduced` — so it is the existing
+invariant made explicit rather than a behaviour change. Four test fixtures had to start setting
+`introduced`, which is worth noting on its own: they were building followers that could never
+exist in play.
+
 ### The fearful allegiance (8%)
 
 ⚠ **`self_interested` and `fearful` had one prompt line each and no mechanics** — 23% of recruits

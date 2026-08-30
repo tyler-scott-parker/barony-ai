@@ -2282,7 +2282,15 @@ def _fight_count(st):
 def secret_eligible(boss, st, race, floor=0):
     """The same gate for every boss, with that boss's own numbers."""
     cfg = BOSS_SECRETS[boss]
+    # ⚠ Never on the introduction turn. The intro goes into MERC_LATE and is popped at the very
+    # END of build_prompt -- after the override -- so it takes the turn and the secret is talked
+    # around (0/8 measured). The call site already states the principle: "the introduction
+    # suppresses the other unprompted behaviours on that one turn". This makes the secret one of
+    # them. Unreachable in play (the gate below needs a name, and naming happens in conversation,
+    # which is what sets `introduced`), so this is the invariant made explicit rather than a
+    # behaviour change.
     return (not SECRET_STATE[boss]["revealed"]
+            and st.get("introduced")
             and st.get("origin") not in NO_SECRET_ORIGINS
             and race.lower() in cfg["races"]
             and cfg["floor"] <= floor <= cfg.get("until", 99)

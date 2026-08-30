@@ -17,7 +17,7 @@ def ready(uid, alleg="loyal", race="human", origin=""):
                          "is_false": False, "player": 0})
     S.follower_state.pop(uid, None)
     st = S.get_follower_state(uid, race, 0, origin, origin and "skeleton knight")
-    st.update(allegiance=alleg, name="Kalthok", friendship=55)
+    st.update(allegiance=alleg, name="Kalthok", friendship=55, introduced=True)
     st["event_log"] = [{"type": "fought_alongside", "floor": 3, "claim": "x",
                         "importance": "notable", "provenance": "participated"} for _ in range(6)]
     return st
