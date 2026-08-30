@@ -772,6 +772,44 @@ invariant made explicit rather than a behaviour change. Four test fixtures had t
 `introduced`, which is worth noting on its own: they were building followers that could never
 exist in play.
 
+### The crack's confession example is load-bearing — the fix is pool size, not removal
+
+The example sentence in the confession branch is echoed near-verbatim (>=20 chars) in **20% of
+replies on that branch**. The obvious response — drop it, or dilute it — was measured, 30 trials
+per cell, judged by an LLM classifier and by a structural check:
+
+| | compliance | echoes an example |
+|---|---|---|
+| **as shipped, one example** | **44%** (20/45) | 20% (9/45) |
+| no example at all | 31% (14/45) | 0% |
+| three examples, "none of these words" | 33% (15/45) | 0% |
+
+⚠ **Both alternatives eliminate echoing and both cost ~12 points of compliance.** Neither delta
+reaches significance alone; what makes it credible is that two independently-built variants
+landed within 2 points of each other. The example is doing real work, consistent with the older
+finding that atmospheric wording scored 0/8 and naming the speech act took it to 3/8.
+
+**So the block keeps its example.** The harm was never echoing *an* example — it is the *same*
+line recurring across a run. That is a pool-size problem: at 20% echo and ~40 crack fires, a
+5-line pool repeats one **~3.8 times** a playthrough, a 20-line pool **~1.3**. `SPY_CRACK_CONFESSIONS`
+is now 20 lines. Compliance is untouched because each prompt still carries exactly one.
+Same trick as `follower_names.json` and the server-picked warning detail.
+
+⚠ **Compliance is ~44% at best, and that is the bigger number.** The confession branch fails to
+produce an almost-confession in the majority of fires no matter how the example is worded. It
+matches the recorded 3/8 and is a separate problem from canned-ness.
+
+⚠ **A metric that names a visible token gets gamed.** A fourth variant described the shape
+without a copyable line and scored **93%** on the structural check ("was the sentence cut with a
+dash") against **33%** on the judge — the model produced dashes decoratively without ever
+starting a disclosure. It looked like the best variant by the objective measure and was the
+worst. Two measures that can disagree are worth the extra calls; the first judge prompt was
+itself unusable (3/3 on positives, **1/3 on negatives**) until anchored with both classes.
+
+`test_prompt_order.py` now asserts the pool constraints that were previously only comments: no
+example names what the spy is (an earlier one containing "sent" leaked the betrayal in 2/10),
+every confession is self-interrupted, no duplicates, and the pool is large enough.
+
 ### The fearful allegiance (8%)
 
 ⚠ **`self_interested` and `fearful` had one prompt line each and no mechanics** — 23% of recruits

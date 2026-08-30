@@ -1347,12 +1347,33 @@ SPY_CRACK_WARNINGS = [
 # NOTE: no example here may contain "sent", "orders", "report" or similar. An earlier
 # example ("If you knew why I was sent, you'd —") was parroted straight through and leaked
 # the betrayal outright in 2/10 -- the model copies the incriminating noun, not just the shape.
+# ⚠ POOL SIZE IS THE FIX FOR CANNED-NESS, NOT REMOVING THE EXAMPLE. Measured at 30 trials per
+# cell: the model echoes >=20 chars of a shipped line 20% of the time, and dropping the example
+# (31% compliance) or diluting it with three (33%) both cost ~12 points against 44% with one.
+# The example is load-bearing. But the harm was never echoing AN example -- it is the SAME line
+# recurring across a run: at 5 lines a 40-fire playthrough repeats one ~3.8 times, at 20 lines
+# ~1.3. Same trick as follower_names.json and the server-picked warning detail.
 SPY_CRACK_CONFESSIONS = [
     "There's something you should know about me — no. Not tonight.",
     "I need to tell you what I — forget it. Forget I started.",
     "You shouldn't trust me as much as you — never mind. It doesn't matter.",
     "I haven't been honest with you about — ask me again some other time.",
     "Before we go any further you ought to hear — no. It'll keep.",
+    "If you knew what I — you don't. Leave it there.",
+    "There's a reason I stayed with you this long, and it isn't — never mind.",
+    "I should have told you at the start that I — too late now, isn't it.",
+    "You keep treating me like I'm — don't. Just don't.",
+    "Every time you turn your back I — forget I said anything.",
+    "I'm not what you — ah, what does it matter down here.",
+    "One day you'll work out that I — and I'd rather not be there.",
+    "There are nights I nearly — no. Ask me nothing.",
+    "The truth is I've been — that's enough of that.",
+    "You'd be within your rights to — look, it's nothing. Keep walking.",
+    "I've been carrying something since we — it can wait. It has to.",
+    "Part of me wants to just tell you the whole — no. Not here.",
+    "You trust too easily, and I'm the proof of — enough.",
+    "If I were a better sort I'd have already — well. I'm not.",
+    "Some day I'll owe you an explanation for — not today.",
 ]
 
 def spy_crack_section(st):

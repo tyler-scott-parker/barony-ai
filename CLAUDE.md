@@ -18,6 +18,8 @@ An AI-NPC mod for **Barony** (open-source C++ roguelike, v5.0.2), built from sou
 |---|---|---|
 | **`CLAUDE.md`** (this file) | every session | paths, hooks, build, the region map, diagnostics, and the *Hard-won prompt rules* digest |
 | **`FINDINGS.md`** | **on demand — read it** | the lab notebook: all 39 subsystem sections and the measurements behind them |
+| **`bench_secret.py`** | on demand | measures boss-secret conversion against the live model — whether a secret is TOLD is a property of the model, not the code |
+| **`test_prompt_order.py`** | on demand | asserts prompt-block ORDER and the stand-downs; add to its `MANDATORY` list whenever a new must-say block is introduced |
 
 ⚠ **Before editing any subsystem's prompts or mechanics, read that subsystem's section in
 `FINDINGS.md`.** Most of it is negative results — things tried, measured and reverted — so working
@@ -331,7 +333,10 @@ editing a subsystem's prompts. These are the rules that generalize across the wh
    *"opening with 'Alright'"*, *"'some say…' followed by an answer"* all work. Naming a topic
    *supplies* it — mentioning gators is how gators get into the reply. This has backfired **every**
    time it was tried (drunk remark 7/8 → 2/8; spec §26; the swamp "territory" priming).
-2. **Whichever of two conflicting instructions lands LATER wins.** Measured three times. So hard
+2. **Whichever of two conflicting instructions lands LATER wins.** Measured **six** times, and
+   three of those were bugs — each one documented in a comment at the time and enforced by nothing,
+   found only by measuring a subsystem that was quietly underperforming. **`test_prompt_order.py`
+   asserts the orderings** so the next one fails a test instead. So hard
    limits are emitted **last**, and any carve-out from them (`_secret_override`, `MERC_LATE`) must
    land *after* them. The Herx offer sat before the limits and converted 40%; moved after, 81%.
 3. **Position is a lever.** The true last slot — after the action rules — is the strongest;
@@ -355,7 +360,9 @@ editing a subsystem's prompts. These are the rules that generalize across the wh
 10. **Never quote bad examples in the prompt** — they prime. Move them to a code comment beside it
     (the invented place names went 2-still-invented → 0/8 that way).
 11. **Scarcity.** Two mandatory unprompted behaviours must not stack in one reply — the later one
-    steals the turn (the spy crack ate identification; the introduction suppresses boons).
+    steals the turn (the spy crack ate identification; the introduction suppresses boons). ⚠ The
+    crack also ate the **boss secret** — a stand-down the call site documented but never
+    implemented, worth 30% → 71% conversion at the twins. Enforced by test now, not by comment.
 12. **Measure before rewriting a class of prompt.** Three limit probes scored 6/6 *before* a planned
     rewrite; the work became correctness tidy-up rather than a bug fix, and stayed narrow.
 

@@ -133,8 +133,9 @@ g++ -o packtest packtest.cpp                                       && ./packtest
   from floor 1 to the boss. The tuning numbers are educated guesses until then.
 - **Multiplayer has never met a second machine.** The netcode is verified by reading and by
   driving both sides locally.
-- The false Herx secret has never been observed firing — every test roll landed non-spy, and it is
-  the one branch where a bug would be invisible.
+- The false Herx secret is now driven end to end in `test_herx.py` and measured against the live
+  model by `bench_secret.py` (spy conversion 73-84%). Finding the branch cost three real bugs in
+  it, so the gap was worth closing; what remains untested is only whether it *reads* right in play.
 - Ambient babble has no lore grounding, unlike conversation and taunts.
 - Prompt size swings from ~650 tokens (rat) to ~3,100 (human) because book-lore injection is
   uneven. Thin races are where fabrication would reappear first.

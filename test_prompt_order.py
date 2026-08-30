@@ -134,5 +134,30 @@ ck("secret_eligible requires an introduction",
    not S.herx_eligible(follower(8, introduced=False)[0], "human"))
 ck("and allows one that has happened", S.herx_eligible(follower(9)[0], "human"))
 
+# --- 6. the crack's example pools obey their own documented constraints -------------------
+# ⚠ These are literal example sentences the 8B copies: an earlier one containing "sent" was
+# parroted straight through and leaked the betrayal outright in 2/10. The constraint was a
+# comment; this asserts it. Pool SIZE matters too -- the model echoes a shipped line 20% of
+# the time and the example is load-bearing for compliance (44% with one, 31% with none), so
+# canned-ness is managed by having enough lines that repeats are rare, not by removing them.
+import re as _re
+BANNED = ("sent", "orders", "order", "report", "promised", "mission", "master",
+          "paid", "hired", "spy", "betray")
+_bad = [(c, w) for c in S.SPY_CRACK_CONFESSIONS
+        for w in BANNED if _re.search(r"\b%s\b" % w, c, _re.I)]
+ck("no confession example names what the spy actually is", not _bad, _bad)
+_badw = [(c, w) for _topic, c in S.SPY_CRACK_WARNINGS
+         for w in BANNED if _re.search(r"\b%s\b" % w, c, _re.I)]
+ck("no warning example does either", not _badw, _badw)
+
+_noshape = [c for c in S.SPY_CRACK_CONFESSIONS if not _re.search(r"[\u2014]|--|\.\.\.", c)]
+ck("every confession example is self-interrupted", not _noshape, _noshape)
+ck("no duplicate confession examples",
+   len(S.SPY_CRACK_CONFESSIONS) == len(set(S.SPY_CRACK_CONFESSIONS)))
+# At 20% echo and ~40 crack fires a run, 5 lines repeat one ~3.8 times; 20 lines ~1.3.
+ck("the confession pool is large enough that echoes are not canned",
+   len(S.SPY_CRACK_CONFESSIONS) >= 15, len(S.SPY_CRACK_CONFESSIONS))
+
+
 print("\n%d failure(s)" % len(fails), fails)
 sys.exit(1 if fails else 0)
