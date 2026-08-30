@@ -4,3 +4,4 @@ logs/
 .venv-tts/
 voices/
 name_history.json
+bench_transcripts.jsonl

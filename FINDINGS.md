@@ -618,6 +618,128 @@ follower's state, so the friendship-50 / four-fights gate can be reached without
 Off unless the env var is set, and the service binds loopback only. This is the only practical
 way to exercise the Herx arc; keep it.
 
+### The secret detector and the keywords that are also ordinary talk
+
+⚠ **`herx_detect` is a bare substring match, and some keywords are everyday words.** With an
+offer pending, each of these synthetic lines revealed the secret while telling nothing --
+10/10 constructed probes, across both pools:
+
+| said | pool | consequence |
+|---|---|---|
+| "I found a **silver** ring in that chest" | false | reveal burned, debuff 0 |
+| "My **given name** is Kalthok" | false | collides with the naming pass |
+| "I **borrowed** this blade from a dead man" | true | debuff 2 applied |
+| any reply at all | either | `"secret":` — the schema's own key — matched the literal check |
+
+The cost is not cosmetic: a false positive burns the one reveal per run, hands the engine a
+debuff the follower never told, and for the **twins**, whose false variants are debuff −1,
+**buffs** the boss. `"given name"` / `"true name"` are the sharpest, because
+`resolve_revealed_name` runs a few lines *above* the `herx_detect` call in the same handler.
+
+⚠ **THE OBVIOUS FIX WAS WRONG, AND MEASURING IT IS THE ONLY REASON WE KNOW.** The first attempt
+demoted every common-looking keyword so it could not fire alone. Re-measured over 100 real
+generations with `bench_secret.py`:
+
+| | converts | genuine tellings dropped |
+|---|---|---|
+| old rule (no weak set) | 70/100 | — |
+| demote everything common | 63/100 | **7** |
+| demote only the colliding words | **70/100** | **0** |
+
+The demotion cost 7 real tellings and prevented nothing — **there was not one incidental
+keyword hit in 100 generations.** The reason is obvious afterwards: **the keywords were
+extracted FROM the truth lines**, so a model paraphrasing the secret lands on exactly those
+words. *"He's... thinner than he looks"* **is** variant 2. *"Fight him near the seep on the
+wall"* **is** the false secret. Conversion fell 84% → 72% for nothing.
+
+`SECRET_WEAK_KEYWORDS` is therefore only `silver`, `second`, `she did`, `given name`,
+`true name` — common English that is *not* the core of any truth line, plus the two that
+collide with naming. They can still corroborate (two hits = told).
+⚠ **Re-measure before adding to that set. The intuition was wrong once already.**
+
+**Per-condition conversion, 25 trials each, llama3.1:8b:**
+
+| | converted |
+|---|---|
+| herx, loyal (true secret) | 84% |
+| herx, spy (false secret) | 84% |
+| twins, loyal (true secret) | 80% |
+| twins, spy (false secret) | **32%** |
+
+⚠ The recorded 81% for the loyal Herx arc **holds** — the earlier worry that keyword false
+positives had inflated it is not borne out. **The twins false secret at 32% is the outlier
+worth chasing next**; the other three sit together at 80-84%.
+
+**The log now says which keyword decided it.** `revealed` / `duplicate` carry `matched` (every
+keyword that hit) and `via` — `strong`, `corroborated` (two weak hits), or `literal`. `dropped`
+carries `near`. `logreview.py` prints all of it and flags `corroborated` reveals. Without this
+the 100-generation re-score would not have been possible after the fact.
+
+⚠ **A THIRD BLOCK OUTRANKS THE SECRET OVERRIDE: the intro.** When `st["introduced"]` is false,
+`_persona` emits *"SAY THIS ... and make it the WHOLE of your reply"*, which lands **after**
+`_secret_override()` and wins — measured **0/8** conversions before the bench set `introduced`.
+Not reachable in play (the gate needs a name, friendship 50 and 4 fights, which imply an
+introduction), but it is the same later-instruction-wins trap for the third time, and **nothing
+enforces the ordering invariant**. `test_herx.py` pins offer → limits → override; extending that
+to the intro block would generalise it.
+
+### The spy crack ate the twins secret — a documented stand-down that was never implemented
+
+The boss-secret bench showed one condition far off the others: **twins / spy converted at 32%
+against 80-84% everywhere else.** All 17 misses had *zero* keyword hits, so it was a telling
+failure, not a detection failure — and the misses were the crack's own example lines coming
+back near-verbatim (*"I need to tell you what I - forget it"*, *"you shouldn't trust me as much
+as you do"*, *"get rid of that ring"*).
+
+Suppressing `spy_crack_section` separates cause from content:
+
+| | converted | parroted a crack example |
+|---|---|---|
+| twins / spy, crack ON | **30%** | 15% |
+| twins / spy, crack OFF | **71%** | 0% |
+| herx / spy, crack ON | 70% | 5% |
+| herx / spy, crack OFF | 71% | 0% |
+
+⚠ **Herx reproduces the earlier result (70% vs 71%, noise), which is what validates the
+harness** — the recorded 62%/70% still stands. But the same suppression is worth **+41 points**
+at the twins. Both crack-off cells land at 71%, so the twins secret is exactly as tellable as
+the herx one; the crack is the whole difference. The mechanism is the usual 8B one: the crack
+demands a mandatory line AND forbids the warm route, and it is appended LAST. A short folkloric
+herx line fits alongside it; the twins' longer two-person truths do not, and the later
+instruction wins.
+
+⚠ **THE STAND-DOWN WAS ALREADY DOCUMENTED AND MEASURED — THE CONDITION JUST NEVER CHECKED FOR
+IT.** The comment at the call site reads *"Stands down for an identify request AND for a pending
+Herx secret… Measured: the crack ate a false secret outright… Spec 35/36"*, but the guard was
+`uid and not ident and uid not in LAST_SABOTAGE and uid not in MERC_LATE` — no secret check at
+all. `secret_pending(uid)` now implements it. The bench rediscovered from behaviour a
+regression that the source already described in prose, which is an argument for asserting
+prompt-composition invariants rather than only describing them.
+
+**Confirmed end to end with `secret_pending` in place** (15 trials per cell, so ±12 points at
+one sigma — read the twins jump, not the small moves):
+
+| | before | after |
+|---|---|---|
+| twins / spy (false secret) | **32%** | **73%** |
+| herx / loyal | 84% | 80% |
+| herx / spy | 84% | 73% |
+| twins / loyal | 80% | 67% |
+
+The outlier is gone; all four cells now sit in 67-80%. The three small downward moves are within
+noise at this n and the guard only alters the turn an offer is pending, but they are recorded
+rather than smoothed over. **0 suspect conversions in 60 generations** — the old and narrowed
+detection rules agreed on every one, which is the second independent check that narrowing
+`SECRET_WEAK_KEYWORDS` cost no recall.
+
+⚠ **Separately: the crack's confession examples are parroted 12% of the time** (50 spy replies;
+0% of loyal replies, which never see the block). `SPY_CRACK_WARNINGS` had this fixed by having
+the server pick the concrete detail — but the example sentence is still in the prompt verbatim,
+and `SPY_CRACK_CONFESSIONS` has no equivalent protection, only *"Do NOT reuse the example
+wording"*, which is exactly the instruction-shaped mitigation this project has repeatedly
+measured as insufficient at 8B. **Not yet fixed**: the earlier finding is that removing the
+example entirely dropped compliance to 0/8, so this needs measuring, not editing.
+
 ### The fearful allegiance (8%)
 
 ⚠ **`self_interested` and `fearful` had one prompt line each and no mechanics** — 23% of recruits

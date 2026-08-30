@@ -104,6 +104,17 @@ python3 service.py --names        # validates all 4,153 names through the real e
 python3 logreview.py              # summarise the newest session log
 ```
 
+The boss-secret arc has a measurement harness rather than only assertions, because whether a
+secret is *actually told* is a property of the model, not of the code:
+
+```bash
+BENCH_N=25 python3 bench_secret.py   # ~100 generations against the local model
+```
+
+It drives the real path (`build_prompt` → `ask_ollama` → `herx_detect`), scores every
+generation under both the current and the previous detection rule, and prints the
+disagreements. Conversion currently sits at 84% (herx) and 80% (twins) for a loyal follower.
+
 The engine side has standalone tests that are deliberately *not* in the build (`src/CMakeLists.txt`
 lists sources explicitly, so a second `main()` is inert):
 
