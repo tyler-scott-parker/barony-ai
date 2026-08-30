@@ -784,10 +784,12 @@ per cell, judged by an LLM classifier and by a structural check:
 | no example at all | 31% (14/45) | 0% |
 | three examples, "none of these words" | 33% (15/45) | 0% |
 
-⚠ **Both alternatives eliminate echoing and both cost ~12 points of compliance.** Neither delta
-reaches significance alone; what makes it credible is that two independently-built variants
-landed within 2 points of each other. The example is doing real work, consistent with the older
-finding that atmospheric wording scored 0/8 and naming the speech act took it to 3/8.
+⚠ **Both alternatives eliminate echoing and both measured ~12 points below on compliance —
+but see the variance note below before treating that as settled.** Three later runs of the
+UNCHANGED block at n=15 scored 53%, 67% and 33%, i.e. one standard error is ±13 points at n=15
+and ±7 at n=45. An 11-13 point gap against that is roughly 1.5 SE. What keeps the conclusion
+alive is only that two independently-built variants landed within 2 points of each other;
+treat "the example is load-bearing" as *likely* rather than established.
 
 **So the block keeps its example.** The harm was never echoing *an* example — it is the *same*
 line recurring across a run. That is a pool-size problem: at 20% echo and ~40 crack fires, a
@@ -809,6 +811,48 @@ itself unusable (3/3 on positives, **1/3 on negatives**) until anchored with bot
 `test_prompt_order.py` now asserts the pool constraints that were previously only comments: no
 example names what the spy is (an earlier one containing "sent" leaked the betrayal in 2/10),
 every confession is self-interrupted, no duplicates, and the pool is large enough.
+
+### The confession block's topic-naming prohibition is inert (null result)
+
+The block says *"You must NOT say that you were sent, that you have orders, that you report to
+anyone, that you were promised anything, or why you came."* That names the forbidden **topics**,
+which rule 1 says supplies them — and the comment above `SPY_CRACK_CONFESSIONS` records an
+example containing "sent" leaking the betrayal in 2/10, so the noun was scrubbed from the
+examples and left in the instruction. Predicted: deleting it raises compliance (rule 9, the block
+demands about five things) and does not raise leaks.
+
+**Wrong on every count.**
+
+| | complies | leaks | echoes the shown example |
+|---|---|---|---|
+| as shipped | 48% (43/90) | **0/45** | 20% (6/30) |
+| sentence deleted | 53% (8/15) | 0/15 | 7% |
+| rewritten as a speech act | 60% (9/15) | 0/15 | 13% |
+
+Compliance unmoved, **zero leaks in all 60 trials including the shipped configuration**, and an
+apparent echo effect (33% vs 7%) that vanished on replication (6/30 vs 3/30, p ≈ 0.47).
+**Shipped text unchanged.**
+
+⚠ **This refines rule 1 rather than contradicting it.** Leaks are real — the 2/10 betrayal leak
+happened — but they came from a **copyable example**, not from a prohibition. Everything measured
+in this work points the same way: what the 8B copies is *text it can copy*, not topics mentioned
+in the abstract. The rule's mechanism is narrower than its phrasing.
+
+⚠ **RUN-TO-RUN VARIANCE IS ±13 POINTS AT n=15.** The unchanged block scored 53%, 67% and 33% on
+three identical runs. That is the most useful number in this section: **an n=15 cell cannot
+resolve anything smaller than ~25 points**, and several earlier conclusions here were drawn at
+that size. Budget n=45+ per cell for a 10-point question, or expect to re-derive noise.
+
+⚠ **Two measurement bugs of my own, both found only by re-running:**
+1. The echo metric matched the reply against the WHOLE example pool, so growing
+   `SPY_CRACK_CONFESSIONS` 5 → 20 raised the score from 20% to 40% on unchanged behaviour. It now
+   compares against the single example that prompt actually carried.
+2. A long model run that is killed used to lose every completed trial. `confession2_trials.jsonl`
+   is appended per trial; three runs died today and salvaged nothing before that.
+
+⚠ **Background runs that emit no output get killed.** Four launches died before this was
+diagnosed: Python block-buffers into a pipe, and piping through `tail` withholds everything until
+EOF. Use `python3 -u` and no full-buffering filter in the pipeline.
 
 ### The fearful allegiance (8%)
 
