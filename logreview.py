@@ -132,10 +132,22 @@ def main():
                 bits = [f"stage={r.get('stage')}", f"uid={r.get('uid')}"]
                 if r.get("is_false"): bits.append("FALSE SECRET (spy)")
                 if r.get("debuff") is not None: bits.append(f"debuff={r['debuff']}")
+                # Which keyword decided it, and by which rule -- a `revealed` on a single weak
+                # keyword is the false-positive shape, and `near` on a drop is a near miss.
+                if r.get("matched"): bits.append(f"matched='{r['matched']}' via={r.get('via')}")
+                if r.get("near"): bits.append(f"near='{r['near']}' (not enough)")
                 print(f"   t={r['t']:>8.1f}  " + "  ".join(bits))
                 if r.get("truth"): print(f"                 \"{r['truth']}\"")
             if not any(r.get("stage") == "revealed" for r in herx):
                 print("   (offered but never actually told -- the branch that is otherwise invisible)")
+            # ⚠ The calibration question this data exists to answer: a reveal that turned on a
+            # single weak keyword is exactly the false-positive shape, and should be read as a
+            # suspect conversion rather than a real one.
+            weakish = [r for r in herx if r.get("stage") == "revealed" and r.get("via") == "corroborated"]
+            if weakish:
+                print("   %d reveal(s) needed two weak keywords -- check the transcript, these are"
+                      % len(weakish))
+                print("   the ones a tighter rule would have dropped")
 
         # --- events, with a noise check ---
         evs = collections.Counter(r["event"] for r in recs if r["kind"] == "event")

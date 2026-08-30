@@ -22,6 +22,13 @@ def ready(uid, alleg="loyal", race="human", origin=""):
                         "importance": "notable", "provenance": "participated"} for _ in range(6)]
     return st
 
+def ready_keep(uid, alleg="loyal", race="human"):
+    """ready() clears HERX_STATE; this one leaves the run's reveal latch alone."""
+    saved = dict(S.HERX_STATE)
+    st = ready(uid, alleg, race)
+    S.HERX_STATE.update(saved)
+    return st
+
 # --- 1. the gate ------------------------------------------------------------------------
 st = ready(1)
 ck("a named, trusted, blooded human is eligible", S.herx_eligible(st, "human"))
@@ -101,6 +108,107 @@ ck("an offer is pending", 40 in S.HERX_STATE["pending"])
 S.herx_detect(40, "{}", "Nice weather for it.", 0)
 ck("talked around -> dropped", 40 not in S.HERX_STATE["pending"])
 ck("and nothing was revealed", not S.HERX_STATE["revealed"])
+
+# --- 7. the SPY path end to end -----------------------------------------------------------
+# The endpoints were covered (a spy is offered from the false pool; a false secret reports
+# debuff 0) but nothing drove herx_detect with is_false=True, so the middle of the spy arc had
+# never executed. This is the branch the README calls invisible.
+spy = ready(50, "spy")
+S._secret_section(50, spy, "human", "tell me about herx")
+ck("a spy has a false offer pending", S.HERX_STATE["pending"].get(50, (None, None))[1] is True)
+vi, isf = S.HERX_STATE["pending"][50]
+S.herx_detect(50, "{}", "Listen: %s, that is the truth of it."
+              % S._herx_pool(isf)[vi]["keywords"][0], 0)
+ck("a told FALSE secret is recorded", S.HERX_STATE["revealed"] and S.HERX_STATE["uid"] == 50)
+ck("and it is marked false", S.HERX_STATE["is_false"] is True)
+ck("the recorded variant came from the false pool",
+   S._herx_pool(True)[S.HERX_STATE["variant"]] in S.HERX_FALSE_VARIANTS)
+ck("the engine is told debuff 0", S.herx_secret_field().startswith("0:"), S.herx_secret_field())
+ck("a spy's lie still burns the one reveal per run",
+   not S.herx_eligible(ready_keep(51), "human"))
+
+# --- 8. a keyword that is also ordinary talk cannot fire alone ----------------------------
+# Each line below tells nothing. Before the weak-keyword rule every one revealed the secret:
+# the true-pool ones handed the engine a real debuff, and "given name"/"true name" collide
+# with the naming pass that runs on the same turn, a few lines above the herx_detect() call.
+def talked(uid, pool_is_false, kw, line):
+    """Put a specific variant on offer, say `line`, report whether it counted as told."""
+    S.HERX_STATE.update({"revealed": False, "variant": None, "uid": 0, "pending": {},
+                         "is_false": False, "player": 0})
+    pool = S._herx_pool(pool_is_false)
+    vi = next(i for i, v in enumerate(pool) if kw in v["keywords"])
+    S.HERX_STATE["pending"][uid] = (vi, pool_is_false)
+    S.herx_detect(uid, "{}", line, 0)
+    return S.HERX_STATE["revealed"]
+
+for kw, line in [("silver",     "I found a silver ring in that chest, take it."),
+                 ("given name", "My given name is Kalthok, if you must know."),
+                 ("true name",  "That is not my true name, but it will do.")]:
+    ck("false pool: %r alone is not a telling" % kw, not talked(60, True, kw, line), line)
+
+# ⚠ The mirror of the above, and the more important half. These were demoted too at first,
+# which cost 7 genuine tellings in 100 real generations and prevented nothing -- the keywords
+# come FROM the truth lines, so a real paraphrase lands on them. Measured, then reverted.
+for kw, line in [("thinner", "He's... thinner than he looks."),
+                 ("seep",    "Fight him near the seep on the wall and he will not follow."),
+                 ("picks",   "The picks broke him, that is what I heard.")]:
+    ck("%r alone IS a telling (measured genuine, never incidental)" % kw,
+       talked(61, kw == "seep", kw, line), line)
+
+ck("and a dropped offer is still cleared from pending", 61 not in S.HERX_STATE["pending"])
+
+# --- 9. weak keywords still corroborate ---------------------------------------------------
+# Demoting them must not cost recall: a real paraphrase lands several, and two is enough.
+ck("two weak hits together ARE a telling",
+   talked(62, True, "true name", "They say his true name is not the given name we use."))
+ck("one strong hit alone is still a telling",
+   talked(63, False, "picks", "Strike his left side, that is where he is soft."))
+
+# --- 10. the reply schema's own key is not the model saying "secret" ----------------------
+# `"secret":` appears in every structured reply, so counting it revealed the secret on any
+# turn an offer was pending, regardless of what was actually said.
+S.HERX_STATE.update({"revealed": False, "variant": None, "uid": 0, "pending": {},
+                     "is_false": False, "player": 0})
+S.HERX_STATE["pending"][70] = (0, True)
+S.herx_detect(70, '{"reply":"nothing to say","secret":""}', "Nothing to say.", 0)
+ck('the schema own "secret" key does not count', not S.HERX_STATE["revealed"])
+
+S.HERX_STATE.update({"revealed": False, "variant": None, "uid": 0, "pending": {},
+                     "is_false": False, "player": 0})
+S.HERX_STATE["pending"][71] = (0, True)
+S.herx_detect(71, 'I will tell you the "secret" I carry.', "I will tell you.", 0)
+ck('but the model writing "secret" still counts', S.HERX_STATE["revealed"])
+
+
+# --- 11. the log record says WHICH keyword decided it ------------------------------------
+# A `revealed` record with no matched text cannot be audited afterwards, which is why the
+# false positives above were invisible in real sessions. `near` records the hits that were
+# not enough, so the weak/strong split can be judged against real play instead of guesswork.
+import json as _json
+
+def _last_herx():
+    with open(S.LOG_PATH, encoding="utf-8") as fh:
+        recs = [_json.loads(l) for l in fh if l.strip()]
+    return [r for r in recs if r.get("kind") == "herx"][-1]
+
+talked(80, False, "picks", "Strike his left side, that is where he is soft.")
+r = _last_herx()
+ck("a reveal records the matched keyword", "left side" in (r.get("matched") or ""), r)
+ck("and that it fired on a strong keyword", r.get("via") == "strong", r)
+
+talked(81, True, "true name", "They say his true name is not the given name we use.")
+r = _last_herx()
+ck("a two-weak-hit reveal is marked corroborated", r.get("via") == "corroborated", r)
+ck("and it names both weak keywords", r.get("matched") == "true name,given name", r)
+
+talked(82, True, "silver", "I found a silver ring in that chest.")
+r = _last_herx()
+ck("a drop records the near miss", r.get("stage") == "dropped" and r.get("near") == "silver", r)
+
+talked(83, False, "picks", "Nice weather for it.")
+r = _last_herx()
+ck("a drop with no hits at all records no near", "near" not in r, r)
+
 
 print("\n%d failure(s)" % len(fails), fails)
 sys.exit(1 if fails else 0)

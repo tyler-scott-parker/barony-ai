@@ -2313,6 +2313,28 @@ def herx_eligible(st, race):
 def herx_roll(st, says):
     return secret_roll("herx", st, says)
 
+# ⚠ ONLY KEYWORDS THAT COLLIDE WITH ORDINARY TALK CAN BE DENIED A SOLO FIRE -- AND THAT SET IS
+# MUCH SMALLER THAN IT LOOKS. The detector is a bare substring match, so a bare "silver" trips
+# on "I found a silver ring" (10/10 synthetic false positives before this). The obvious fix --
+# demote every single common word -- was measured against 100 real generations and was WRONG:
+# the keywords were extracted FROM the truth lines, so a model paraphrasing the secret lands on
+# exactly those words. Demoting "thinner", "seep", "ignored" and "warmed" dropped 7 genuine
+# tellings ("He's... thinner than he looks" IS the variant-2 secret) and prevented nothing --
+# there was not one incidental hit in 100 generations. Conversion fell 84% -> 72% for no gain.
+#
+# So the set below is only the words that are common English AND not the core of any truth
+# line, plus the two that collide with the NAMING pass that runs on the same turn, a few lines
+# above the herx_detect() call. Re-scored on the same 100 generations this converts 70/100 --
+# identical to the old rule -- while still refusing a solo "silver" or "given name".
+#
+# ⚠ These stay in the pools and can still CORROBORATE (two hits = told). Re-measure with
+# bench_secret.py before adding to this set; the intuition was wrong once already.
+SECRET_WEAK_KEYWORDS = {
+    "silver",                      # "a silver ring", "silver coins"
+    "second", "she did",           # twins: everyday English
+    "given name", "true name",     # collide with resolve_revealed_name on the same turn
+}
+
 def herx_detect(uid, raw, speech, player=0):
     """If a secret was offered to this follower this turn, decide whether it was actually
     told. There is no sentinel in the model's output -- we match the variant's keywords.
@@ -2330,22 +2352,41 @@ def herx_detect(uid, raw, speech, player=0):
     v = _herx_pool(is_false, boss)[vi]
     state = SECRET_STATE[boss]
     txt = ((speech or "") + " " + (raw or "")).lower()
-    told = '"secret"' in (raw or "").lower() or any(k in txt for k in v["keywords"])
+    hits = [k for k in v["keywords"] if k in txt]
+    strong = [k for k in hits if k not in SECRET_WEAK_KEYWORDS]
+    # ⚠ `"secret"` in raw is a signal only when the MODEL wrote it. The reply schema's own key
+    # (`"secret":`) is present on every structured reply, so counting it revealed the secret
+    # unconditionally -- strip the key before looking for the word.
+    rawl = (raw or "").lower()
+    said_secret = '"secret"' in rawl.replace('"secret":', "")
+    told = bool(strong) or len(hits) >= 2 or said_secret
+    # ⚠ RECORD WHICH KEYWORD MATCHED AND UNDER WHICH RULE. Without this a `revealed` record
+    # cannot be audited after the fact: the 10/10 false positives were invisible in the log,
+    # and past reveals still cannot be re-judged because the matched text was never kept.
+    # `near` does the same job for hits that were NOT enough -- that is the data that says
+    # whether the weak/strong split is calibrated, and it is only observable here.
+    matched = ",".join(hits) or None
+    via = ("strong" if strong else
+           "corroborated" if len(hits) >= 2 else
+           "literal" if said_secret else None)
     if told and state["revealed"]:
         # Another player's follower got there first this run; one reveal only.
         print(f"[SERVICE-DBG] follower {uid} told the secret too, but it is already revealed")
-        logrec("herx", stage="duplicate", uid=uid, player=player, boss=boss)
+        logrec("herx", stage="duplicate", uid=uid, player=player, boss=boss,
+               matched=matched, via=via)
         return
     if not told:
         # Offered and then talked around. This branch is otherwise completely invisible.
-        logrec("herx", stage="dropped", uid=uid, player=player, is_false=is_false, boss=boss)
+        logrec("herx", stage="dropped", uid=uid, player=player, is_false=is_false, boss=boss,
+               near=matched)
     if told:
         state.update({"revealed": True, "variant": vi, "uid": uid,
                       "is_false": is_false, "player": player})
         print(f"[SERVICE-DBG] HERX SECRET revealed by follower {uid} to player{player} "
               f"(debuff variant {v['debuff']})")
         logrec("herx", stage="revealed", uid=uid, player=player, is_false=is_false,
-               boss=boss, who=v.get("who"), debuff=v["debuff"], truth=v["truth"][:120])
+               boss=boss, who=v.get("who"), debuff=v["debuff"], truth=v["truth"][:120],
+               matched=matched, via=via)
 
 # ---- Spy sabotage: calling the minotaur -------------------------------------------------
 # The first thing a follower can do that actively spends the player's run against them.
