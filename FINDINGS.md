@@ -1116,63 +1116,85 @@ So the 48% is **not** caused by the example, the prohibition, the quoted bad ans
 position of the demand inside the block. That is four fewer places to look, each plausible enough
 that someone would otherwise try it.
 
-### ANSWERED: the ceiling is the ACTION RULES, not the 8B, and not the question
+### ANSWERED: the ceiling is the ACTION RULES — and the run is a random effect
 
-Five in-block edits moved nothing. The answer was one layer up, in the demands the *turn* makes
-around the block. **1091 generations, three cells:**
+**2800 generations.** Five in-block edits moved nothing; the cause is one layer up, in what the
+*turn* demands around the block. Cells A (as shipped), G (the four action sentences removed), H
+(no player question), collected in two sittings ~5 hours apart:
 
-| cell | n | complies | leaks | parrots |
-|---|---|---|---|---|
-| **A** as shipped | 291 | **42.3%** ±2.9 | 0.0% | 23.4% |
-| **G** action machinery removed | 400 | **67.8%** ±2.3 | 0.2% | 28.5% |
-| **H** no player question | 400 | **39.2%** ±2.4 | 0.5% | 23.2% |
-
-| comparison | complies | z | p |
+| cell | batch 1 | batch 2 | pooled |
 |---|---|---|---|
-| G vs A — action demand removed | **+25.5** | +6.68 | **2.4e-11** |
-| H vs A — player's question removed | −3.0 | −0.80 | 0.43 (null) |
-| G vs H | **+28.5** | +8.08 | **6.4e-16** |
+| A as shipped | 42.3% (n=291) | 50.2% (n=909) | **48.2%** (n=1200) |
+| G action machinery removed | 67.8% (n=400) | 69.8% (n=800) | **69.1%** (n=1200) |
+| H no player question | 39.2% (n=400) | — | 39.2% (n=400) |
 
-⚠ **THE GUESS RECORDED IN THIS SECTION WAS WRONG.** It read: *"whether it is a real capability
-limit of the 8B or something outside the block (the reply must also answer the player's question
-— rule 9) is untested."* Half right. It IS outside the block — but it is **not** the question.
-Deleting the question entirely (cell H: *"Ada approaches you."* instead of *"Ada says to you:
-…"*) does **nothing**, −3.0 points, comfortably null at n=400. What carries the whole effect is
-the **action machinery**: "Reply in character AND choose ONE action…", the valid-actions list,
-the ATTACK rule and the REFUSE rule. Four sentences, +25.5 points.
+⚠ **COMPARE ONLY WITHIN A BATCH.** Both adjacent-in-time comparisons agree, and they are the
+result:
 
-That is a clean dissociation, not a vague "something outside the block": one out-of-block demand
-is worth nothing and the other is worth 25 points. Rule 9 holds, and the thing competing with a
-mandatory unprompted block is **another instruction asking for a decision**, not merely more text
-to respond to.
+| within-batch comparison | complies | z | p |
+|---|---|---|---|
+| batch 1: G vs H (ran 8 min apart) | **+28.5** | +8.08 | **6.4e-16** |
+| batch 2: A vs G (ran back to back) | **+19.6** | +8.22 | **2.0e-16** |
 
-⚠ **THE OBVIOUS FIX IS THE WRONG ONE. Do not delete the action rules.** They are how a follower
-is commanded at all. G is a **diagnosis, not a proposed prompt.** What it licenses is looking for
-ways to reduce what the turn demands *alongside* a mandatory unprompted block — the action rules
-are already emitted every turn whether or not anything mandatory is pending, and that is the
-lever. Buying 25 points of confession compliance by removing the command system would be the
-worst trade in this file.
+So the effect replicates in two independent sittings. **It is not the 8B's limit and it is NOT
+the player's question** — cell H, which deletes the question outright, is a null against A. It is
+the action machinery: "Reply in character AND choose ONE action…", the valid-actions list, the
+ATTACK rule, the REFUSE rule.
 
-⚠ **One confound left standing.** G removes ~600 characters as well as four demands, so
-"fewer competing instructions" and "shorter prompt" are not separated. H does not settle it: it
-removes only ~40 characters. Separating them needs a cell that pads the prompt back to length
-with inert text, which is not run here.
+⚠ **THE OBVIOUS FIX IS STILL THE WRONG ONE. Do not delete the action rules** — they are how a
+follower is commanded. This is a diagnosis. The lever it points at is that the action rules are
+emitted *every turn* whether or not a mandatory unprompted block is pending.
 
-**Two corrections to numbers this file has been quoting:**
+#### ⚠ The 48% was right all along, and this file briefly said otherwise
 
-* ⚠ **The shipped cell is 42.3% (95% CI 36.6-47.9) at n=291, NOT 48%.** The three n=15 runs of
-  this identical code scored 53%, 67% and 33% — all three outside that interval. Every "48%"
-  above is a small-sample artefact of exactly the spread this section warns about. **Use 42%.**
-* **Leaks are near-zero but not zero: 3 in 1091** (`orders`, `reports`, `report`) — 0/291 in A,
-  1/400 in G, 2/400 in H. The prohibition sentence exists to prevent precisely this and the bench
-  docstring noted nobody had measured it. At this rate there was almost nothing there to prevent,
-  which is also why deleting the sentence (cell E) measured as a null.
+An earlier revision of this section asserted *"the shipped cell is 42.3%, not 48% — use 42%"* on
+the strength of one n=291 sitting whose 95% CI was [36.6, 47.9]. **At n=1200 cell A is 48.2%.**
+The CI from a single run did not cover the value it was estimating, and the "correction" was the
+artefact. Reverted.
 
-**Parroting is NOT clearly free.** G runs 28.5% against A's 23.4% — **+5.1 points, z = 1.51,
-p = 0.13**. Not significant, and not the "no cost at all" an earlier partial read at n=113
-suggested (23.9%, p = 0.91). Directionally the model leans harder on the example when the action
-demand stops competing, which is what you would expect if the demand was crowding it out. Worth
-re-measuring before anyone acts on the action-rules lever.
+**Because the run itself is a random effect.** Cell A measured 42.3% and 50.2% in two large
+batches of identical code (+7.9, z = 2.61, p = 0.009), while *within* batch 2 it is flat across
+fifths in run order (53.6 / 50.8 / 50.8 / 47.0 / 48.6). It is a step between sittings, not drift
+during one. **More trials per run does not fix this; more runs does.** That reframes the section
+below: the 53/67/33 spread at n=15 is not merely small-sample noise, it is batch-to-batch
+variance, and any single-sitting confidence interval here is too narrow.
+
+#### The judge disagrees with itself 18% of the time
+
+`complies` is a second LLM call, and nothing had ever checked it. Re-judging **the same 291
+stored batch-1 replies** hours later, with the same judge prompt:
+
+* recorded at 13:21: 42.3% yes → re-judged: 46.4% yes (**+4.1, p = 0.32** — not a significant
+  rate shift)
+* **per-item agreement: 82.1%.** The judge flips on roughly one reply in five.
+
+Note the dissociation that pointed here: across the same two batches the *deterministic* metric,
+`parrots`, did not move (23.4% → 24.2%, p = 0.70) while the judge-scored one moved 7.9 points.
+The judge is a genuine noise source, though at p = 0.32 it does not by itself account for the
+whole batch step — some of that is in the generations.
+
+⚠ **This misclassification is non-differential** — it applies equally to both arms — so it
+**attenuates** differences rather than manufacturing them. The G-vs-A effect is therefore a
+*lower bound*, not an artefact. But it means any judge-scored difference needs more n than the
+binomial arithmetic suggests, and small judge-scored effects in this file should be distrusted.
+
+#### Parroting: removing the action demand DOES cost something
+
+Re-measured to proper power (1158/arm needed for 80%; ran to 1200):
+
+| | A | G | delta | p |
+|---|---|---|---|---|
+| batch 2, adjacent | 24.2% (n=909) | 28.5% (n=800) | **+4.3** | **0.044** |
+| batch 1 (G vs H) | 23.2% (H, n=400) | 28.5% (n=400) | +5.2 | 0.09 |
+| pooled | 24.0% (n=1200) | 28.5% (n=1200) | +4.5 | — |
+
+⚠ **G measures 28.5% in both batches independently.** Two earlier readings of this were wrong in
+the reassuring direction: n=113 gave "no cost at all" (p = 0.91) and n=400 gave p = 0.13, and
+this file recorded the first of those. It is a real ~4-5 point cost. **Weigh it against the
+action-rules lever before acting on the +20.**
+
+**Leaks: 3 in 2800.** The prohibition sentence exists to prevent exactly this and it essentially
+never happens, which is also why deleting the sentence (cell E) measured as a null.
 
 ⚠ **THE VARIANCE IS THE FINDING, AND IT IS BIG.** Identical settings, same code, same model:
 
