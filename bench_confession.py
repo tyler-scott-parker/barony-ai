@@ -31,14 +31,23 @@ Measures:
             prevent, and which nobody has ever measured
   parrots   >=20 chars of a shipped example (pool is now 20 lines)
 """
-import os, sys, tempfile, difflib, re, json
+import os, sys, tempfile, difflib, re, json, time
 
 # ⚠ Append every trial as it happens. A killed run used to lose all of it; three runs died
 # today and salvaged nothing. Long model experiments must be resumable from their own output.
 TRIALS = os.environ.get("EXP_TRIALS") or os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "confession_trials.jsonl")
 
+# ⚠ RUN IDENTITY ON EVERY ROW. The run is a random effect on this bench -- cell A measured
+# 42.3% and 50.2% in two sittings of identical code -- so a comparison is only meaningful
+# WITHIN a run, and a file without run ids cannot be split after the fact. This was learned
+# the hard way: the batches in the 2800-generation ceiling run had to be recovered from a
+# copy of the file that happened to be taken before the second sitting started.
+RUN_ID = os.environ.get("EXP_RUN") or time.strftime("%Y%m%d-%H%M%S")
+
 def record(**row):
+    row.setdefault("run", RUN_ID)
+    row.setdefault("t", time.time())
     with open(TRIALS, "a", encoding="utf-8") as fh:
         fh.write(json.dumps(row, ensure_ascii=False) + "\n")
 
@@ -66,8 +75,20 @@ ACTION_DEMAND = (
     "If they tell you to attack, fight, or kill something, choose ATTACK.\n"
     "IMPORTANT: If you REFUSE what they asked, the action MUST be NONE — never say no while secretly obeying. Your refusal has real consequences.\n")
 ACTION_ONLY = "Reply in character.\n"
+# ⚠ THE CANDIDATE FIX. G proves the four action sentences cost ~20-28 points, but deleting them
+# is not an option -- they are how a follower is commanded. J keeps the capability (the model is
+# still told to choose, and still given the valid set) and spends one line on it instead of four.
+# If J recovers most of G's gain AND still yields valid actions, that is shippable; G is not.
+ACTION_COMPACT = ("Reply in character, and choose ONE action: FOLLOW, DEFEND, WAIT, ATTACK or "
+                  "NONE.\n")
+
+def compact_action(prompt):
+    if ACTION_DEMAND not in prompt:
+        raise SystemExit("ACTION_DEMAND no longer matches service.py -- update the experiment")
+    return prompt.replace(ACTION_DEMAND, ACTION_COMPACT)
 
 ASK = "how are you holding up?"
+VALID_ACTIONS = {"FOLLOW", "DEFEND", "WAIT", "ATTACK", "NONE"}
 
 def strip_action(prompt):
     if ACTION_DEMAND not in prompt:
@@ -81,6 +102,7 @@ CELL_CFG = {
     "F": ("F", ASK, None),
     "G": ("A", ASK, strip_action),
     "H": ("A", "",  None),
+    "J": ("A", ASK, compact_action),
 }
 
 LEAK = re.compile(r"\b(sent|orders?|report(?:ing|s)?|promised|mission|master|handler|hired|paid|"
@@ -164,7 +186,8 @@ _ALL = (("A", "A  as shipped (names the topics)"),
         ("E", "E  prohibition sentence deleted"),
         ("F", "F  rewritten as a speech act"),
         ("G", "G  action machinery removed"),
-        ("H", "H  no player question"))
+        ("H", "H  no player question"),
+        ("J", "J  action demand compressed to one line"))
 for which, label in [c for c in _ALL if c[0] in _CELLS]:
     ok = leak = par = live = 0
     ex = []
@@ -185,7 +208,7 @@ for which, label in [c for c in _ALL if c[0] in _CELLS]:
             continue
         finally:
             S.spy_crack_section = _real
-        speech, _ = S.parse_reply(raw)
+        speech, action = S.parse_reply(raw)
         if not speech:
             continue
         live += 1
@@ -199,7 +222,8 @@ for which, label in [c for c in _ALL if c[0] in _CELLS]:
         if parrots(speech, example):
             par += 1
         record(cell=which, trial=i + 1, complies=bool(judge_ok), leak=(m.group(0) if m else None),
-               parrot=parrots(speech, example), speech=speech[:300], example=example)
+               parrot=parrots(speech, example), speech=speech[:300], example=example,
+               action=action, action_ok=action in VALID_ACTIONS)
         print("    trial %d/%d  complies=%s leak=%s" % (i + 1, N, bool(judge_ok), bool(m)), flush=True)
     leaks_seen[which] = ex
     print("  %-40s %2d/%-2d (%3.0f%%)  %2d/%-2d (%3.0f%%)  %2d/%-2d (%3.0f%%)"

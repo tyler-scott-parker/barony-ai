@@ -886,6 +886,17 @@ independent n=45 runs of provably identical code.** That is the noise floor, mea
 than estimated, and it lands right on the ±7 the section above computed. Anything under ~10
 points at this n is unreadable, which is the third time this project has had to relearn it.
 
+⚠ **THIS IS THE SAME EFFECT THE CONFESSION BENCH FOUND, AND CALLING IT A "NOISE FLOOR" UNDERSELLS
+IT.** Written up here as sampling noise, it is better described as a **run-level random effect** —
+see the confession ceiling section, where cell A measured 42.3% (n=291) and 50.2% (n=909) in two
+sittings of identical code (p = 0.009) while being flat *within* each sitting. Two different
+benches, two different subsystems, same phenomenon. That upgrades it from an anecdote to a
+property of this measurement setup, and it carries a rule that is stronger than "n=45 is small":
+**a comparison is only trustworthy if both arms ran in the SAME sitting.** More trials per run
+does not help; more runs does. Both benches now stamp a `run` id on every trial for exactly this
+reason — before that, the batches in the 2800-generation run had to be recovered from a copy of
+the file that happened to be taken at the right moment.
+
 **Reading the replies still earns its keep.** In the fresh run, 1 of 8 variant-3 trials converted
 on `never act` alone:
 
@@ -1192,6 +1203,50 @@ Re-measured to proper power (1158/arm needed for 80%; ran to 1200):
 the reassuring direction: n=113 gave "no cost at all" (p = 0.91) and n=400 gave p = 0.13, and
 this file recorded the first of those. It is a real ~4-5 point cost. **Weigh it against the
 action-rules lever before acting on the +20.**
+
+#### The obvious fix is NOT shippable: compressing the action demand doubles parroting
+
+G is a diagnosis, not a prompt — it deletes the command system. **Cell J is the candidate fix
+that keeps it**: the four action sentences replaced by one line that still names the choice and
+the valid set —
+
+> `Reply in character, and choose ONE action: FOLLOW, DEFEND, WAIT, ATTACK or NONE.`
+
+A and J were run **in a single process**, so they share a run id and the comparison is
+within-sitting by construction, which is the rule the section above just established. n=500 each:
+
+| | A as shipped | J compact action line | delta | p |
+|---|---|---|---|---|
+| complies | 50.0% | **67.0%** | **+17.0** | 4.9e-08 |
+| action valid | 100.0% | **100.0%** | +0.0 | 1.00 |
+| **parrots** | 23.0% | **42.2%** | **+19.2** | **9.4e-11** |
+
+**Two of the three say ship it.** J recovers most of G's compliance gain (+17 of G's ~20) and
+**costs nothing in commands** — 500/500 valid actions in both arms, and the action mix barely
+moves (A: 331 WAIT / 154 FOLLOW; J: 313 / 170). The capability G destroyed is entirely intact.
+
+⚠ **The third says do not. J nearly DOUBLES verbatim reuse of the example.** 42.2% against a
+23.0% baseline, and the replies confirm it is real parroting, not a metric artefact:
+
+> example: *"Part of me wants to just tell you the whole — no. Not here."*
+> reply: *"I'm holding up all right, I reckon. But to be honest... Part of me wants to just tell
+> you the whole -"*
+
+That is worse than the 12% that motivated growing `SPY_CRACK_CONFESSIONS` from 5 to 20 in the
+first place. **Buying +17 points of compliance for +19 points of parroting is not a trade this
+project has ever been willing to make**, and a follower quoting the prompt back is the more
+visible failure in play.
+
+⚠ **And it is NOT simply "shorter prompt = more parroting", which is the tempting explanation.**
+G's replacement (`Reply in character.`) is *shorter* than J's and parrots far less: A 23% <
+G 28.5% < J 42.2%, with G shorter than J. Length does not order these. Something about naming
+the action choice in the same breath as the reply instruction is doing it, and this experiment
+does not identify what. **Recorded as unexplained rather than guessed at.**
+
+**Where that leaves the lever.** The interference is real and worth ~20 points, the command
+system can survive its removal, and the naive compression is disqualified on parroting. The next
+candidate has to change *where* the demand sits rather than how long it is — and it must measure
+parroting, because that is the axis that killed this one.
 
 **Leaks: 3 in 2800.** The prohibition sentence exists to prevent exactly this and it essentially
 never happens, which is also why deleting the sentence (cell E) measured as a null.

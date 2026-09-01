@@ -10,7 +10,7 @@ Each generation is scored twice on the same text:
   NEW  a strong keyword alone, or two hits, or a model-written "secret"
 Disagreements (OLD=told, NEW=dropped) are the suspect conversions the 81% included.
 """
-import os, sys, json, tempfile, collections
+import os, sys, json, time, tempfile, collections
 
 _t = tempfile.mkdtemp()
 os.environ["BARONY_AI_LOGDIR"] = _t
@@ -28,7 +28,15 @@ OUT = os.environ.get("BENCH_OUT") or os.path.join(
 TRIALS = os.environ.get("BENCH_TRIALS") or (OUT + ".partial")
 
 
+# ⚠ RUN IDENTITY ON EVERY ROW -- see the note in bench_confession.py. The run is a random
+# effect here too: three cells whose code provably could not change moved -7, +4 and +5 points
+# between two n=45 runs. Without a run id a file cannot be split into the batches that are the
+# only comparisons worth making.
+RUN_ID = os.environ.get("BENCH_RUN") or time.strftime("%Y%m%d-%H%M%S")
+
 def record(row):
+    row.setdefault("run", RUN_ID)
+    row.setdefault("t", time.time())
     with open(TRIALS, "a", encoding="utf-8") as fh:
         fh.write(json.dumps(row, ensure_ascii=False) + "\n")
 
