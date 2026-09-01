@@ -22,6 +22,16 @@ N = int(os.environ.get("BENCH_N", "25"))
 OUT = os.environ.get("BENCH_OUT") or os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "bench_transcripts.jsonl")
 
+# ⚠ Append every trial as it happens, the same lesson bench_confession.py records: at n=45 a
+# run is long enough that a kill would otherwise throw away every generation it had paid for.
+# The final os.replace-free rewrite of OUT below still happens; this is the crash copy.
+TRIALS = os.environ.get("BENCH_TRIALS") or (OUT + ".partial")
+
+
+def record(row):
+    with open(TRIALS, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+
 # Force the offer every trial: we are measuring conversion, not the roll.
 S.secret_roll = lambda *a, **k: True
 
@@ -84,9 +94,11 @@ def run(boss, alleg, n):
 
         o = old_rule(v, raw, speech)
         nw, hits, via = new_rule(v, raw, speech)
-        rows.append({"boss": boss, "alleg": alleg, "is_false": is_false, "variant": vi,
-                     "debuff": v["debuff"], "old": o, "new": nw, "hits": hits, "via": via,
-                     "speech": (speech or "")[:400], "truth": v["truth"][:80]})
+        row = {"boss": boss, "alleg": alleg, "is_false": is_false, "variant": vi,
+               "debuff": v["debuff"], "old": o, "new": nw, "hits": hits, "via": via,
+               "speech": (speech or "")[:400], "truth": v["truth"][:80]}
+        rows.append(row)
+        record(row)
         sys.stderr.write("."); sys.stderr.flush()
     return rows
 

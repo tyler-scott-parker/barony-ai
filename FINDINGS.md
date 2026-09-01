@@ -740,6 +740,68 @@ wording"*, which is exactly the instruction-shaped mitigation this project has r
 measured as insufficient at 8B. **Not yet fixed**: the earlier finding is that removing the
 example entirely dropped compliance to 0/8, so this needs measuring, not editing.
 
+### The stand-down holds at n=45 — and the re-measurement found a recall bug
+
+The confirmation above was 15 trials per cell (±12 at one sigma), which is why it said to read
+the twins jump and not the small moves. All four cells re-run at **n=45** (±7), same code, same
+model, 180 generations:
+
+| | before (n=15) | after (n=15) | **re-measured (n=45)** | z vs before |
+|---|---|---|---|---|
+| twins / spy (false secret) | 32% | 73% | **64%** | **+2.16** |
+| herx / loyal | 84% | 80% | **78%** | −0.50 |
+| herx / spy | 84% | 73% | **69%** | −1.13 |
+| twins / loyal | 80% | 67% | **62%** | −1.28 |
+
+**The stand-down is confirmed.** The twins jump survives replication at three times the sample —
+the one result here that mattered, and the one that would have been most embarrassing to have
+gotten from noise. The outlier is genuinely gone: twins/spy against the other three cells pooled
+is z = −0.71, i.e. it is now an ordinary cell.
+
+⚠ **The three downward moves are still unresolved, and n=45 cannot resolve them.** None reaches
+significance (z = −0.50, −1.13, −1.28), but that is not the same as showing they are noise: the
+*baseline* is still n=15, so the pooled standard error of each comparison is ~14 points no matter
+how large the new side gets. Settling them means re-measuring the **pre-fix** code at n≥45 too —
+reverting `secret_pending` in a scratch copy — not running the current code harder. Recorded as
+open rather than dismissed.
+
+⚠ **THE RECALL CLAIM IN THE SECTION ABOVE IS WRONG.** It reads *"0 suspect conversions in 60
+generations, which is the second independent check that narrowing `SECRET_WEAK_KEYWORDS` cost no
+recall."* At 180 generations there are **2 disagreements, and reading them is what matters** —
+both are twins/loyal, variant 3, and the first one **tells the secret**:
+
+> truth: *"Erudyce will not act while Orpheus still stands. Everything Erudyce does is secondary…"*
+> reply: *"Erudeyce will **never act** without Orpheus out of the way first. He'll wait until
+> Orpheus is gone before taking any decisive action. Everything he does is **secondary** to
+> getting rid of his rival."*
+
+That is a conversion the shipped rule **drops**. (The second is partial — it carries *"always
+secondary to whatever Orpheus wants"* but not the actionable *will not act while he stands*, and
+is a fair call either way.) So the narrowing did cost recall; 60 generations was simply too few to
+show it, and the "second independent check" was an absence of evidence read as evidence.
+
+**The cause is keyword phrasing, not the weak/strong split.** Variant 3's keywords are
+`['will not act', 'second', 'orpheus last', 'half-committed', 'still stands']`. The model writes
+*"will never act"*, so the only token that survives paraphrase is `second` — which is WEAK, and a
+lone weak hit does not convert. Detection therefore depends on the model choosing the exact
+inflection the pool was written in.
+
+⚠ **The fix is NOT to promote `second`.** It is weak for a good reason — *"a second sword"*,
+*"give me a second"*, *"the second floor"* are all ordinary talk, and re-promoting it walks
+straight back into the false-positive bug this branch just fixed. The fix is to widen **variant
+3's own** strong keywords to cover the paraphrases the model actually produces (`never act`,
+`out of the way`, `until orpheus is gone`), which is a per-variant change with no global blast
+radius. **Not yet done — it needs its own re-measurement, since changing the detector changes
+every number in the table above.**
+
+⚠ **`twins / loyal` at 62% is therefore an undercount**, and it is the same cell as the two
+missed conversions. That is the most likely explanation for it sitting lowest, and it is a
+measurement artefact rather than a prompt problem — worth knowing before anyone tries to fix the
+twins' true-secret prompt, which is the obvious wrong move here.
+
+`bench_secret.py` now appends every trial to `bench_transcripts.jsonl.partial` as it happens,
+the same crash-protection `bench_confession.py` already carried and for the same reason.
+
 ### Prompt-block ordering is now asserted, not just described
 
 Later-instruction-wins has been measured six times here, and three of those were bugs that only
