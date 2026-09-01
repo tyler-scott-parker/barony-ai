@@ -185,6 +185,16 @@ VOICES = {
     "earth sprite": {"bands": ["shrill"], "length": 0.94, "fx": ["pitch", "80", "reverb", "25"],
                      "variants": ["m7", "Tweaky"], "speed": 175, "pitch": 65,
                      "efx": ["pitch", "120", "reverb", "30"]},
+    # ⚠ A fire sprite IS a player follower -- SPELL_FIRE_SPRITE sets the special-NPC name and
+    # calls forceFollower, so getMonsterLocalizedName returns "fire sprite" and it speaks. It was
+    # added to race_lore.json when that was found and MISSED here, so it fell through to the
+    # default voice in silence: exactly the failure this table's own _norm() warning describes.
+    # Cast from its lore line -- "bright hurried crackles, saying what matters before the spell
+    # runs out" -- so: faster and brighter than the earth sprite, with overdrive for the crackle.
+    "fire sprite":  {"bands": ["shrill"], "length": 0.88,
+                     "fx": ["pitch", "110", "overdrive", "3", "reverb", "20"],
+                     "variants": ["Tweaky", "m7"], "speed": 190, "pitch": 75,
+                     "efx": ["pitch", "150", "overdrive", "4", "reverb", "25"]},
 
     # --- beasts: these speak in *noises*, so they get pushed well past natural ---
     "rat":          {"bands": ["shrill"], "length": 0.80, "fx": ["pitch", "380", "overdrive", "2"],

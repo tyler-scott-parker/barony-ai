@@ -13,16 +13,33 @@ import json, sys, glob, os, collections
 BASE = os.path.dirname(os.path.abspath(__file__))
 
 def load(path):
+    """⚠ Every record is normalised to HAVE a "kind" here, because seventeen places below index
+    it directly and the review is built top-down: a single record without one raised KeyError on
+    the very first summary line and killed the whole run -- including the PLAYER NOTES section,
+    which is the one thing the playtest guide tells you to bias toward writing. Losing the
+    human's own notes to a malformed machine record is the wrong way round, and the service's
+    own logger already takes the view that logging must never break anything."""
     recs = []
+    unkinded = 0
     with open(path, encoding="utf-8") as fh:
         for i, line in enumerate(fh, 1):
             line = line.strip()
             if not line:
                 continue
             try:
-                recs.append(json.loads(line))
+                rec = json.loads(line)
             except Exception:
                 print(f"  ! unparseable line {i}")
+                continue
+            if not isinstance(rec, dict):
+                print(f"  ! line {i} is not an object")
+                continue
+            if not rec.get("kind"):
+                rec["kind"] = "?"
+                unkinded += 1
+            recs.append(rec)
+    if unkinded:
+        print(f"  ! {unkinded} record(s) with no 'kind' -- counted as '?'")
     return recs
 
 def pct(vals, p):
@@ -150,7 +167,9 @@ def main():
                 print("   the ones a tighter rule would have dropped")
 
         # --- events, with a noise check ---
-        evs = collections.Counter(r["event"] for r in recs if r["kind"] == "event")
+        # .get: an "event" record with no event name is malformed, not a reason to lose the run.
+        evs = collections.Counter(r.get("event") for r in recs
+                                  if r["kind"] == "event" and r.get("event"))
         if evs:
             print("\nEVENTS FIRED")
             for k, v in evs.most_common():

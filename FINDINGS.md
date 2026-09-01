@@ -84,7 +84,22 @@ edit, because a bad sox chain fails for exactly one race and nothing else notice
 **Still open:** `cyclops` and `dwarf` are VOICES keys that match no race the game
 can return — harmless, but they are cast for creatures that never arrive. (`cave crawler` was the
 third; it has been removed from `comprehension.json`, where it had also been sitting in the `beast`
-group. There is no such monster in the 5.0.2 enum.)
+group. There is no such monster in the 5.0.2 enum.) Left in deliberately: an inert cast costs one
+dict entry, and deleting entries carries the opposite risk to the one that actually bites.
+
+⚠ **The direction that DOES bite bit again — `fire sprite` had no voice cast** (found 2026-09-01).
+It was added to all three JSON files when the section below was written, and `tts_bridge.py` was
+missed, so a fire sprite follower spoke in the **default voice, silently** — the same failure the
+`_norm()` warning further down describes, one layer further out. Cast added from its own lore line
+(*"bright hurried crackles, saying what matters before the spell runs out"*): shrill band, length
+0.88, overdrive 3 for the crackle. Validated by rendering, not by inspection (spk17, sox chain
+clean), which is this table's standing rule.
+
+**The real fix is that `test_racecover.py` now covers the voice table** (§5). That file exists
+*because of* fire sprite, and it still did not catch this, because it only knew about the three
+JSON files — **the bridge is a fourth per-race data file and was never treated as one.** It is
+parsed as text rather than imported, since importing the bridge re-execs it into `.venv-tts` and
+a test must not require piper. Mutation-tested: removing the cast fails two assertions.
 
 #### ⚠ The audit was of the ENUM, and one follower race is not in it — `fire sprite`
 
@@ -124,9 +139,31 @@ revisiting if a polymorphed-moth player ever finds it strange.
 or the usual sibling paths) and resolves each one through `lang/en.txt`, falling back to a frozen
 5.0.2 list when no checkout is reachable. 158 assertions: every engine race has lore, a group and a
 name pool; the four files agree with each other in both directions; no race sits in two groups.
-Verified to fail on the pre-fix state. **It cannot catch a second `fire sprite`** — a name reached
-only through a spell is not in the enum, so that one is listed explicitly and the next one will
-have to be too.
+Verified to fail on the pre-fix state.
+
+⚠ **It CAN now catch a second `fire sprite`** — the claim that it could not stood here for a week
+and was wrong (fixed 2026-09-01). A spell-reachable name is not in the enum, but it is not
+unstructured either: `getMonsterLocalizedName` has exactly one shape for these, a
+`nameMatchesSpecialNPCName(*optionalStats, "<key>")` branch returning `optionalStats->name`, so
+the keys are **derived from that function's body** instead of hardcoded. Only that function
+counts — `nameMatchesSpecialNPCName` is called all over the engine for `skeleton knight` and
+`skeleton sentinel`, but those are SKELETONs and the name function reports them as `skeleton`.
+A key matters only if the name function will hand it back.
+
+Mutation-tested both ways against a scratch checkout: **adding a second special NPC upstream
+("storm sprite") fails 5 assertions across all four data files**, and refactoring the call out of
+existence fails the two anti-vacuity assertions rather than silently dropping the whole class —
+which is the failure this file had already suffered once, when it stopped covering the voice
+table without anyone noticing.
+
+⚠ **A third instance of the same normalisation trap, found by looking for it: `get_book_lore`
+keyed `RACE_BOOKS` with `race.lower()`, not `_lore_key()`.** All four book entries are single
+words, so it worked — and would have missed in silence the first time anyone gave a multi-word
+race a book, because the game hands back `crystal golem` and every other per-race file is keyed
+`crystal_golem`. Fixed, with two assertions pinning the key shape rather than the current data.
+That is now three separate places this one mismatch has hidden (the lore lookup, the fire sprite
+voice, this), which is enough to treat "is it keyed through `_lore_key`?" as a standing review
+question for any new per-race table.
 
 #### ⚠ The arachnophobia filter renames spiders, and this is NOT a bug in single-player
 
@@ -791,8 +828,7 @@ inflection the pool was written in.
 straight back into the false-positive bug this branch just fixed. The fix is to widen **variant
 3's own** strong keywords to cover the paraphrases the model actually produces (`never act`,
 `out of the way`, `until orpheus is gone`), which is a per-variant change with no global blast
-radius. **Not yet done — it needs its own re-measurement, since changing the detector changes
-every number in the table above.**
+radius. **Done 2026-09-01 — see the next section for the fix and its re-measurement.**
 
 ⚠ **`twins / loyal` at 62% is therefore an undercount**, and it is the same cell as the two
 missed conversions. That is the most likely explanation for it sitting lowest, and it is a
@@ -801,6 +837,153 @@ twins' true-secret prompt, which is the obvious wrong move here.
 
 `bench_secret.py` now appends every trial to `bench_transcripts.jsonl.partial` as it happens,
 the same crash-protection `bench_confession.py` already carried and for the same reason.
+
+### The variant-3 recall bug is fixed, and fixing it measured the noise floor for free
+
+The keywords in the section above are now widened, **variant 3 only** (`service.py`, the
+`debuff: 4` entry): `never act`, `orpheus out of the way`, `until orpheus is gone`. `second`
+stays WEAK. All 17 tests pass.
+
+⚠ **`out of the way` is qualified with the name, which is a deviation from what the section
+above proposed.** Bare, it fires on *"stay out of the way"* — ordinary combat talk, and exactly
+the false-positive shape the branch had just finished removing. On the stored transcripts the
+qualified form catches the identical reply, so the caution cost no recall.
+
+**The fix was scored on the OLD generations before any GPU was spent**, which is the measurement
+that actually isolates it — same 180 texts, only the detector changed, no resampling:
+
+| cell | shipped rule | with the fix | delta |
+|---|---|---|---|
+| herx / loyal | 78% | 78% | +0 |
+| herx / spy | 69% | 69% | +0 |
+| twins / loyal | 62% | **64%** | **+1 generation** |
+| twins / spy | 64% | 64% | +0 |
+
+A new keyword fires on **1 of 180 stored generations**, and that one is the dropped conversion
+the section above quotes. The second, partial disagreement still does not convert — it carries
+*"always secondary"* and not the actionable claim, which is the call that reading it said was
+fair either way. **So the honest size of this bug is ~2 points on one cell, not the 9 the fresh
+run below appears to show.**
+
+**Re-run at n=45 × 4 cells** (180 generations, 6.4 min, `bench_transcripts_postfix_n45.jsonl`):
+
+| | before (n=15) | after (n=15) | pre-fix (n=45) | **post-fix (n=45)** |
+|---|---|---|---|---|
+| twins / spy (false secret) | 32% | 73% | 64% | **69%** |
+| herx / loyal | 84% | 80% | 78% | **71%** |
+| herx / spy | 84% | 73% | 69% | **73%** |
+| twins / loyal | 80% | 67% | 62% | **71%** |
+
+All four cells now sit in 69-73%, and OLD == NEW in every cell (the new keywords are strong, so
+the two rules agree by construction; the OLD column is no longer the pre-branch rule and should
+not be read as one).
+
+⚠ **THE +9 ON twins/loyal IS MOSTLY RESAMPLING, NOT THE FIX.** The fixed-text scoring above says
+the fix is worth +1 generation. The rest is noise, and the run says exactly how much noise:
+**the detector change cannot touch the other three cells** — the keywords are scoped to one
+variant of the twins' true pool — **yet those three moved −7, +4 and +5 points between two
+independent n=45 runs of provably identical code.** That is the noise floor, measured rather
+than estimated, and it lands right on the ±7 the section above computed. Anything under ~10
+points at this n is unreadable, which is the third time this project has had to relearn it.
+
+**Reading the replies still earns its keep.** In the fresh run, 1 of 8 variant-3 trials converted
+on `never act` alone:
+
+> *"Erudyce will never act while Orpheus is alive. He'll wait until the end, kill him last if he
+> has to."*
+
+Note what the pre-fix detector did with that: **no keyword at all**. Not `still stands` (the model
+wrote *"is alive"*), not `orpheus last` (*"kill him last"*). It was dropped by the OLD rule too,
+so it never appeared as a disagreement — it was invisible to the very instrument built to find
+this class of bug. The n=45 disagreement list found the bug; only reading a *new* run's replies
+shows how much it was missing.
+
+**Settled the same day** — two of the three cells by reading the diff rather than by measuring,
+and the third at n=100 per arm. See the next section, which is also where the interesting result
+turned out to be.
+
+### "Herx is unaffected" is wrong — the stand-down costs one variant 41 points
+
+The three downward cells are settled, and two of them never needed the GPU. **`30cefca` added
+exactly one condition — `and not secret_pending(uid)` on the `spy_crack_section` call site — and
+`spy_crack_section` returns `""` on its first line unless `allegiance == "spy"`.** For a loyal
+follower the section is empty either way, no RNG is consumed on either path, and the prompt is
+byte-identical. `herx/loyal` and `twins/loyal` are therefore two runs of behaviourally identical
+code, exactly like the three inert cells that drifted −7/+4/+5 in the section above. Their −0.50
+and −1.28 are noise **by construction**, not "unresolved". Read the diff before booking GPU time.
+
+That left one real cell. `herx/spy`, both arms fresh at **n=100** (the pre arm is the stand-down
+reverted in a scratch copy; the two `service.py` differ by that one line and nothing else):
+
+| herx / spy | crack ON (pre) | stand-down (post) | delta | z | p |
+|---|---|---|---|---|---|
+| v0 *running water* | 20/31 (65%) | **8/34 (24%)** | **−41** | **−3.33** | **0.0009** |
+| v1 *silver clasp* | 26/39 (67%) | 20/30 (67%) | +0 | 0.00 | 1.00 |
+| v2 *true name Herxel* | 28/30 (93%) | 35/36 (97%) | +4 | 0.76 | 0.45 |
+| **aggregate** | 74/100 (74%) | 63/100 (63%) | −11 | −1.67 | 0.094 |
+
+⚠ **The aggregate is the wrong number and it nearly buried the finding.** −11 at p = 0.094 reads
+as "another unresolved downward drift, needs more n". It is not: it is a **41-point collapse on
+one variant** averaged against two that do not move at all. Survives Bonferroni across the three
+variants (p = 0.0024). More n on the aggregate would have been the wrong experiment run harder.
+
+⚠ **This contradicts `30cefca`'s own conclusion, which `secret_pending`'s docstring still states
+as fact:** *"Herx is unaffected (70% vs 71%)"*. That was 15 trials with the variant drawn at
+random, so a −41 on a third of the draws shows up as −1. **The commit generalised "herx is fine"
+from a sample that could not see the variant it was wrong about.** Docstring corrected.
+
+**It is a telling failure, not a detection one — the replies say so plainly.** With the crack ON,
+v0 lands the secret flat: *"He cannot cross running water."* With it stood down, the same variant
+retreats into vague lore that hits no keyword and reveals nothing:
+
+> *"He ruled Hamlet tyrannically, I've heard."*
+> *"I've heard rumors, nothing more than that. A ruler of old, said to be cursed."*
+> *"We've had... whispers about him, yes."*
+
+The crack demands a concrete, unhedged line and forbids the warm evasive route. **That pressure
+is apparently load-bearing for the secret sitting next to it** — remove it and the model falls
+back on the folkloric-hedge attractor that herx talk is full of. v2 is immune because *Herxel* is
+a name the model either says or does not; v0 is *"he cannot cross running water"*, which has a
+vague-myth paraphrase sitting right next to it, and that is the one it takes.
+
+**So the stand-down is not free, and the twins result does not license it globally:** +41 at
+twins/spy, −41 on herx/spy v0.
+
+**The cost side is now measured too, from the same 200 replies — no extra GPU.** Longest verbatim
+word-run against the 26 `SPY_CRACK_CONFESSIONS`/`SPY_CRACK_WARNINGS` example strings:
+
+| herx / spy, n=100 each | ≥5-word run | ≥6-word | ≥8-word |
+|---|---|---|---|
+| crack ON | 6% | 3% | 1% |
+| stand-down | 0% | 0% | 0% |
+
+which replicates the commit's "herx crack ON parroted an example 5%" at 6.7× the sample. **So the
+trade at herx is +41 points of conversion on v0 against 3-6% near-verbatim parroting.** On the
+numbers alone, scoping the stand-down to twins wins easily.
+
+⚠ **IT IS STILL NOT DONE, AND THE REASON IS THE INTERESTING PART.** The one-line narrowing —
+`secret_pending(uid, "twins")` — passes 16 of the 17 test files and is rejected by
+`test_prompt_order.py`, failing exactly the two STAND-DOWN assertions the ordering section
+records as mutation-tested (*"the spy crack does not land after the override"*, *"stands down for
+a pending secret"*). Those encode the general rule that **no second mandatory unprompted
+behaviour may land after the first**, which has caught three real bugs here.
+
+**The measurement and the invariant disagree, and the invariant is not obviously the one that is
+wrong.** Its premise is that the later mandatory block *displaces* the earlier one — true at the
+twins, where the crack costs 41 points. At herx the same adjacency *helps* by 41: the crack
+demands a concrete unhedged line, and v0's failure mode is hedging into folklore. Whether that
+means the rule needs a documented per-boss exception, or that this is a fourth instance of the
+rule being right and the mechanic wanting a different fix (an anti-hedge instruction on the
+secret block itself, which would help v0 without readmitting the crack), is **not settled here
+and should not be decided by whoever next reads the +41.** The change was written, tested,
+rejected by the suite, and reverted; `secret_pending` carries the reason at the call site.
+
+**The variant-3 fix is now mutation-tested** (`test_herx.py` §13), on all three axes, with real
+bench replies rather than invented lines: reverting the widened keywords fails the two positives;
+promoting `second` to strong fails the two ordinary-talk negatives; and **un-qualifying
+`orpheus out of the way` to the bare `out of the way` this notebook originally proposed fails on
+*"Stay out of the way when the big one charges."*** That last one is the caution from the
+previous section turned into an assertion, which is the only form that survives.
 
 ### Prompt-block ordering is now asserted, not just described
 
@@ -931,8 +1114,65 @@ hypotheses, ~500 generations, none of them moved it:
 
 So the 48% is **not** caused by the example, the prohibition, the quoted bad answers, or the
 position of the demand inside the block. That is four fewer places to look, each plausible enough
-that someone would otherwise try it. Whether it is a real capability limit of the 8B or something
-outside the block (the reply must also answer the player's question — rule 9) is untested.
+that someone would otherwise try it.
+
+### ANSWERED: the ceiling is the ACTION RULES, not the 8B, and not the question
+
+Five in-block edits moved nothing. The answer was one layer up, in the demands the *turn* makes
+around the block. **1091 generations, three cells:**
+
+| cell | n | complies | leaks | parrots |
+|---|---|---|---|---|
+| **A** as shipped | 291 | **42.3%** ±2.9 | 0.0% | 23.4% |
+| **G** action machinery removed | 400 | **67.8%** ±2.3 | 0.2% | 28.5% |
+| **H** no player question | 400 | **39.2%** ±2.4 | 0.5% | 23.2% |
+
+| comparison | complies | z | p |
+|---|---|---|---|
+| G vs A — action demand removed | **+25.5** | +6.68 | **2.4e-11** |
+| H vs A — player's question removed | −3.0 | −0.80 | 0.43 (null) |
+| G vs H | **+28.5** | +8.08 | **6.4e-16** |
+
+⚠ **THE GUESS RECORDED IN THIS SECTION WAS WRONG.** It read: *"whether it is a real capability
+limit of the 8B or something outside the block (the reply must also answer the player's question
+— rule 9) is untested."* Half right. It IS outside the block — but it is **not** the question.
+Deleting the question entirely (cell H: *"Ada approaches you."* instead of *"Ada says to you:
+…"*) does **nothing**, −3.0 points, comfortably null at n=400. What carries the whole effect is
+the **action machinery**: "Reply in character AND choose ONE action…", the valid-actions list,
+the ATTACK rule and the REFUSE rule. Four sentences, +25.5 points.
+
+That is a clean dissociation, not a vague "something outside the block": one out-of-block demand
+is worth nothing and the other is worth 25 points. Rule 9 holds, and the thing competing with a
+mandatory unprompted block is **another instruction asking for a decision**, not merely more text
+to respond to.
+
+⚠ **THE OBVIOUS FIX IS THE WRONG ONE. Do not delete the action rules.** They are how a follower
+is commanded at all. G is a **diagnosis, not a proposed prompt.** What it licenses is looking for
+ways to reduce what the turn demands *alongside* a mandatory unprompted block — the action rules
+are already emitted every turn whether or not anything mandatory is pending, and that is the
+lever. Buying 25 points of confession compliance by removing the command system would be the
+worst trade in this file.
+
+⚠ **One confound left standing.** G removes ~600 characters as well as four demands, so
+"fewer competing instructions" and "shorter prompt" are not separated. H does not settle it: it
+removes only ~40 characters. Separating them needs a cell that pads the prompt back to length
+with inert text, which is not run here.
+
+**Two corrections to numbers this file has been quoting:**
+
+* ⚠ **The shipped cell is 42.3% (95% CI 36.6-47.9) at n=291, NOT 48%.** The three n=15 runs of
+  this identical code scored 53%, 67% and 33% — all three outside that interval. Every "48%"
+  above is a small-sample artefact of exactly the spread this section warns about. **Use 42%.**
+* **Leaks are near-zero but not zero: 3 in 1091** (`orders`, `reports`, `report`) — 0/291 in A,
+  1/400 in G, 2/400 in H. The prohibition sentence exists to prevent precisely this and the bench
+  docstring noted nobody had measured it. At this rate there was almost nothing there to prevent,
+  which is also why deleting the sentence (cell E) measured as a null.
+
+**Parroting is NOT clearly free.** G runs 28.5% against A's 23.4% — **+5.1 points, z = 1.51,
+p = 0.13**. Not significant, and not the "no cost at all" an earlier partial read at n=113
+suggested (23.9%, p = 0.91). Directionally the model leans harder on the example when the action
+demand stops competing, which is what you would expect if the demand was crowding it out. Worth
+re-measuring before anyone acts on the action-rules lever.
 
 ⚠ **THE VARIANCE IS THE FINDING, AND IT IS BIG.** Identical settings, same code, same model:
 
@@ -3153,3 +3393,41 @@ restarting the service with the env var. **No C++ changed at all, so this needs 
 mispronounces invented names (a follower who calls itself "Zx'thal") and there is no lexicon pass.
 In co-op only the machine running the bridge hears anything; a client could run its own bridge, but
 the spool is written host-side, so that needs a relay first.
+
+### The review tool could lose the playtest notes to one malformed record
+
+`logreview.py` is the thing you run after a playthrough, and `PLAYTEST.md` tells the tester to
+**bias toward over-using `/ailog`** because player notes get pulled to the top of the review.
+
+⚠ **One record without a `"kind"` key raised `KeyError` on the first summary line and killed the
+entire review — including the `>> PLAYER NOTES` section, which is printed fourteen lines later.**
+The tool is built top-down and indexed `r["kind"]` directly in seventeen places. So the failure
+mode was: the human writes notes all session, the game says *"[MYMOD] noted in the session log"*,
+and one malformed machine record throws all of it away at review time. `r["event"]` had the same
+shape (an `event` record with no event name).
+
+**It went unnoticed because the path has never run.** All 107 real session logs were checked and
+**not one contains a player note**, so the single most valuable branch in the tool was dead code
+in practice. The `/ailog` chain itself is intact end to end — `mymod_playerNote` →
+`mymod_log("NOTE (p%d): …")` → `POST {"log":…,"src":"cpp"}` → `logrec("cpp", msg=…)` → the
+`kind in ("mod","cpp") and "NOTE" in msg` filter — verified by reading it through both repos and
+then exercising it synthetically.
+
+**Fixed at the load boundary, not at the seventeen call sites:** every record is normalised to
+have a `kind` (`"?"` when absent, and the count is reported rather than hidden), non-object lines
+are skipped like unparseable ones, and the `event` counter uses `.get`. This matches the view the
+service's own `logrec` already takes — *"logging must never break the game"* — which the reviewer
+was not honouring about its own input.
+
+**Verified zero-regression by replaying all 107 real logs through both versions: the output is
+byte-identical on every one.** Only the malformed cases differ, where the old one tracebacks.
+
+`test_logreview.py` (new, 11 assertions, no game/service/model) pins the note path itself so it
+cannot rot again while unexercised, plus the four half-written-log shapes. Mutation-tested: the
+pre-fix reviewer fails 5 of them.
+
+⚠ **Not a finding, recorded so it is not re-investigated:** `mymod_log` builds its POST body with
+`snprintf` into a fixed 1024-byte buffer from a 512-byte message that is JSON-escaped first, so a
+sufficiently escape-heavy note could truncate into invalid JSON and be dropped silently. The
+arithmetic says it cannot happen in practice — plain text is 1:1 and caps at ~570 bytes of body;
+you would need ~450 quote or control characters in one note to overflow. Left alone.

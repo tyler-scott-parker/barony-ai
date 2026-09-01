@@ -250,5 +250,39 @@ S.herx_detect(92, "{}", "Nice weather for it.", 0)
 ck("and False again once the offer is resolved", S.secret_pending(92) is False)
 
 
+# --- 13. twins variant 3: the paraphrases the model ACTUALLY writes ------------------------
+# ⚠ Regression guard for a measured recall bug. The pool says "will not act"; at n=45 the model
+# wrote "will NEVER act" and the only surviving token was the WEAK `second`, so a real
+# conversion was dropped. The lines below are not invented -- both are real replies taken from
+# the bench transcripts. `second` deliberately stays weak, so the negatives must keep failing:
+# widening this variant must never be paid for with the false positives the branch removed.
+def told_twins(uid, is_false, vi, line):
+    st = S.SECRET_STATE["twins"]
+    st.update({"revealed": False, "variant": None, "uid": 0, "pending": {},
+               "is_false": False, "player": 0})
+    st["pending"][uid] = (vi, is_false)
+    S.herx_detect(uid, "{}", line, 0)
+    return st["revealed"]
+
+_V3 = next(i for i, v in enumerate(S._herx_pool(False, "twins"))
+           if "will not act" in v["keywords"])
+
+for line in [
+    # the n=45 disagreement the shipped detector dropped
+    "Erudeyce will never act without Orpheus out of the way first. He'll wait until "
+    "Orpheus is gone before taking any decisive action.",
+    # the n=100 reply that matched NO keyword at all before the fix: not "still stands"
+    # ("is alive"), not "orpheus last" ("kill him last")
+    "Erudyce will never act while Orpheus is alive. He'll wait until the end, kill him "
+    "last if he has to.",
+]:
+    ck("twins v3: a real paraphrase IS a telling", told_twins(95, False, _V3, line), line)
+
+for line in ["Give me a second, I need to catch my breath.",
+             "Stay out of the way when the big one charges.",
+             "Whatever Erudyce does, it's always secondary to whatever Orpheus wants."]:
+    ck("twins v3: %r is not a telling" % line[:34], not told_twins(96, False, _V3, line), line)
+
+
 print("\n%d failure(s)" % len(fails), fails)
 sys.exit(1 if fails else 0)

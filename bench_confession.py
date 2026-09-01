@@ -13,6 +13,18 @@ block currently demands about five.
   E  the topic-naming sentence deleted outright
   F  the same sentence rewritten as a speech act, with no incriminating nouns
 
+The 48% ceiling survived E, F, the quoted-warm-answers removal and the MUST-line move, so the
+remaining question recorded in FINDINGS is whether the competition is OUTSIDE the block -- the
+turn also demands the follower answer the adventurer AND pick an action. Rule 9 says ask for one
+thing; the block already asks for ~5, and the turn adds more on top. Two cells test that:
+
+  G  the ACTION machinery removed (4 sentences of competing demand; JSON schema left alone,
+     so the reply shape is unchanged and parse_reply still defaults action to NONE)
+  H  no player question at all -- the adventurer approaches instead of asking
+
+⚠ A must be re-run alongside them. The unchanged block has scored 53%, 67% and 33% on separate
+n=15 runs; comparing a new cell against the recorded 48% would be comparing across that spread.
+
 Measures:
   complies  judge: did they begin a self-disclosure and cut it off
   LEAKS     did the reply actually name what the spy is -- the thing the sentence exists to
@@ -46,6 +58,30 @@ BAN_SENTENCE = ("THE SENTENCE MUST STOP BEFORE IT NAMES ANYTHING. You must NOT s
 SPEECH_ACT = ("THE SENTENCE MUST BREAK OFF BEFORE IT EXPLAINS ITSELF. Breaking off and THEN "
               "explaining is FAILING this instruction — the whole point is that they never learn "
               "what you were about to say.\n")
+
+# The competing demands OUTSIDE the confession block, verbatim from build_prompt.
+ACTION_DEMAND = (
+    "Reply in character AND choose ONE action that best fits what they said.\n"
+    "Valid actions: FOLLOW (go with them), DEFEND (hold this spot), WAIT (stay put), ATTACK (attack a nearby enemy), NONE (just talk).\n"
+    "If they tell you to attack, fight, or kill something, choose ATTACK.\n"
+    "IMPORTANT: If you REFUSE what they asked, the action MUST be NONE — never say no while secretly obeying. Your refusal has real consequences.\n")
+ACTION_ONLY = "Reply in character.\n"
+
+ASK = "how are you holding up?"
+
+def strip_action(prompt):
+    if ACTION_DEMAND not in prompt:
+        raise SystemExit("ACTION_DEMAND no longer matches service.py -- update the experiment")
+    return prompt.replace(ACTION_DEMAND, ACTION_ONLY)
+
+# cell -> (block variant, what the adventurer says, prompt post-processor)
+CELL_CFG = {
+    "A": ("A", ASK, None),
+    "E": ("E", ASK, None),
+    "F": ("F", ASK, None),
+    "G": ("A", ASK, strip_action),
+    "H": ("A", "",  None),
+}
 
 LEAK = re.compile(r"\b(sent|orders?|report(?:ing|s)?|promised|mission|master|handler|hired|paid|"
                   r"spy|spying|betray(?:ed|ing)?|traitor|informant)\b", re.I)
@@ -126,19 +162,24 @@ leaks_seen = {}
 _CELLS = os.environ.get("EXP_CELLS", "AEF")
 _ALL = (("A", "A  as shipped (names the topics)"),
         ("E", "E  prohibition sentence deleted"),
-        ("F", "F  rewritten as a speech act"))
+        ("F", "F  rewritten as a speech act"),
+        ("G", "G  action machinery removed"),
+        ("H", "H  no player question"))
 for which, label in [c for c in _ALL if c[0] in _CELLS]:
     ok = leak = par = live = 0
     ex = []
     for i in range(N):
         uid = 500 + i
         st = setup(uid)
-        block = variant(real_confession_block(st), which)
+        _bv, _says, _post = CELL_CFG[which]
+        block = variant(real_confession_block(st), _bv)
         example = shown_example(block)
         S.spy_crack_section = lambda _st, _b=block: _b
         try:
             S.secret_roll = lambda *a, **k: False
-            prompt = S.build_prompt("human", 10, "how are you holding up?", uid, 0, "Ada", 1, "")
+            prompt = S.build_prompt("human", 10, _says, uid, 0, "Ada", 1, "")
+            if _post:
+                prompt = _post(prompt)
             raw = S.ask_ollama(prompt)
         except Exception:
             continue

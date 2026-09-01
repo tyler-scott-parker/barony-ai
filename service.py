@@ -172,9 +172,14 @@ def noise_for(speaker_race):
 
 _book_cache = {}
 def get_book_lore(race):
-    """Canonical in-game book text for a race, concatenated. Cached per file."""
+    """Canonical in-game book text for a race, concatenated. Cached per file.
+    ⚠ Keyed with _lore_key, not race.lower(). The game hands back display names with spaces
+    ('crystal golem') and every other per-race file is keyed with underscores; this lookup used
+    `.lower()` alone, which happens to work only because all four current entries are single
+    words. Adding a multi-word race would have missed silently -- the same normalisation trap
+    that hid the lore lookup and the fire sprite voice."""
     out = []
-    for fn in RACE_BOOKS.get(race.lower(), []):
+    for fn in RACE_BOOKS.get(_lore_key(race), []):
         if fn not in _book_cache:
             try:
                 with open(os.path.join(BOOKS_DIR, fn), encoding="utf-8", errors="ignore") as bf:
@@ -2252,7 +2257,14 @@ TWINS_SECRET_VARIANTS = [
     {"debuff": 3, "who": 1, "truth": "Erudyce holds the cold around herself like a held breath. Break her concentration once and the whole of it has to be rebuilt.",
      "keywords": ["held breath", "concentration", "rebuilt", "holds the cold"]},
     {"debuff": 4, "who": 1, "truth": "Erudyce will not act while Orpheus still stands. Everything Erudyce does is second — kill Orpheus LAST and Erudyce fights half-committed the whole way.",
-     "keywords": ["will not act", "second", "orpheus last", "half-committed", "still stands"]},
+     # ⚠ `never act` / `orpheus out of the way` / `until orpheus is gone` are here because the
+     # n=45 run caught this variant DROPPING a real conversion: the pool writes "will not act",
+     # the model writes "will never act", and the only survivor was the WEAK `second`. Scoped to
+     # this variant, not global, and `second` stays weak -- "a second sword" is the false
+     # positive this branch just fixed. `out of the way` is qualified with the name on purpose:
+     # bare, it fires on ordinary "stay out of the way" combat talk.
+     "keywords": ["will not act", "second", "orpheus last", "half-committed", "still stands",
+                  "never act", "orpheus out of the way", "until orpheus is gone"]},
 ]
 # ⚠ Negative debuff = a BUFF. Plausible, wrong, and acted upon.
 TWINS_FALSE_VARIANTS = [
@@ -2332,13 +2344,27 @@ def secret_roll(boss, st, says):
         chance = min(0.95, chance + 0.25)   # a spy wants you to believe it
     return random.random() < chance
 
-def secret_pending(uid):
-    """True while ANY boss's secret has been offered to this follower and not yet resolved.
+def secret_pending(uid, boss=None):
+    """True while a boss secret has been offered to this follower and not yet resolved.
+    `boss` narrows it to one pool; the default is ANY, which is what the tests assert.
     ⚠ Used to stand the spy crack down. Both are mandatory unprompted behaviours and the crack
     is appended last, so without this it takes the turn -- measured 30% vs 71% conversion for
-    the twins false secret. Herx is unaffected (70% vs 71%): its truths are short enough to
-    fit alongside a crack line, the twins' are not."""
-    return any(uid in SECRET_STATE[b]["pending"] for b in BOSS_SECRETS)
+    the twins false secret.
+    ⚠ THE STAND-DOWN IS SCOPED TO TWINS, and that scoping is measured, not assumed. The
+    original claim here -- "Herx is unaffected (70% vs 71%)" -- was WRONG: it came from n=15
+    with the variant drawn at random. At n=100 per arm the herx false secret's *running water*
+    variant converts 65% with the crack and 24% without it (-41, p=0.0009), while the other two
+    variants do not move, so the aggregate (-11, p=0.09) hides it entirely. Standing the crack
+    down at herx COSTS 41 points on that variant and buys 3-6% less example-parroting; at the
+    twins it buys +41.
+    ⚠ Scoping this to twins is therefore tempting and is NOT done, because `test_prompt_order`
+    rejects it: narrowing the guard fails the two STAND-DOWN assertions ("the spy crack does not
+    land after the override", "stands down for a pending secret"). Those encode the general rule
+    that no second mandatory unprompted behaviour may land after the first -- a rule that has
+    caught three real bugs. The herx measurement contradicts what that rule predicts, so the
+    scoping needs a deliberate documented exception, not a quiet one-line edit. See FINDINGS."""
+    return any(uid in SECRET_STATE[b]["pending"]
+               for b in ((boss,) if boss else BOSS_SECRETS))
 
 
 def herx_eligible(st, race):

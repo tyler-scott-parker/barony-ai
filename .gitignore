@@ -4,5 +4,5 @@ logs/
 .venv-tts/
 voices/
 name_history.json
-bench_transcripts.jsonl
-confession_trials.jsonl
+bench_transcripts*.jsonl*
+confession_trials*.jsonl*
