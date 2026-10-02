@@ -1516,11 +1516,13 @@ def agrees_to_quote(says):
 def is_merc(st):
     return st.get("allegiance") == "self_interested"
 
-def merc_quote(st, kind, floor, gold_here=0):
+def merc_quote(st, kind, floor, gold_here=0, subject=None):
     """Put a price on the table. Returns the price, and remembers the offer so the next thing
-    the player says can accept it."""
+    the player says can accept it. `subject` pins an appraisal quote to the item it priced."""
     price = merc_price(kind, floor, gold_here)
     st["quote"] = {"kind": kind, "price": price, "floor": floor}
+    if subject is not None:
+        st["quote"]["subject"] = subject
     return price
 
 def merc_settled(st, kind):
@@ -1617,9 +1619,19 @@ def get_follower_state(uid, race, player=0, origin="", origin_key="", persist=0)
     return dims_init(follower_state[uid])
 
 def friendship_descriptor(f):
+    # ⚠ Banded on the 0-100 scale the rest of the vector uses. The old 1/4/9 thresholds predate
+    # the vector, and they put "genuinely trust and value" at friendship 10 -- one recruitment and
+    # a couple of fights -- right beside DIMENSION_BEHAVIOR's "you are warming to them, but you
+    # still choose your words", which holds for the whole of 15-39. Two instructions in one prompt
+    # saying opposite things about the same relationship.
+    # ⚠ The 40+ wording is deliberately UNCHANGED: bench_secret and bench_confession both run at
+    # friendship 55-70, so editing that line changes what they measured. Its "trust" also sits
+    # oddly beside a low trust dimension -- but that is a measured prompt, and it needs a re-run
+    # to change, not an edit.
     if f <= 1:  return "You barely know this adventurer."
     if f <= 4:  return "You have spoken a few times; you are still taking their measure."
-    if f <= 9:  return "You are warming to this adventurer; they keep you close and speak with you often."
+    if f <= 14: return "You are warming to this adventurer; they keep you close and speak with you often."
+    if f <= 39: return "You have been through a fair amount together, and you are getting to know this adventurer well."
     return "You have come to genuinely trust and value this adventurer."
 
 # Every line below says what to DO, never what to feel. Naming a feeling produced nothing
@@ -2141,6 +2153,20 @@ def flush_resummon(uid, race, floor, player=0):
         return
     record_event(uid, race or st.get("race", ""), "resummoned", floor, player)
 
+def resolve_follower(uid, race, player, origin, origin_key, floor):
+    """The state row for a follower, from ANY request -- which may be the first the service has
+    heard of this uid since a staircase.
+
+    ⚠ Every branch has to pass the origin. The remark, hunger, valuable and favour branches used
+    to call get_follower_state(uid, race, player) and nothing else, so when one of them was the
+    first request on a new floor -- common: the biome or area remark fires on arrival -- a summon
+    or a bot missed its `summon:`/`bot:` identity and got a brand new row with a re-rolled
+    allegiance, no name and friendship 0. Later conversation stayed bound to that row. (Ordinary
+    followers were saved by the persist token; summons and bots are keyed by origin instead.)"""
+    st = get_follower_state(uid, race, player, origin, origin_key)
+    flush_resummon(uid, race, floor, player)
+    return st
+
 # Deaths and injuries that carry no social cost, because the target had it coming.
 #
 # Killing a traitor you correctly identified should not cost you the loyalty of everyone else.
@@ -2283,19 +2309,26 @@ TWINS_FALSE_VARIANTS = [
 # "pending" is keyed by follower uid, not a single slot: with several players talking at
 # once, two followers can each be holding an unconfirmed offer in the same instant.
 def _fresh_secret_state():
+    # `persist` is the informant's engine token -- see secret_informant_field for why the uid
+    # alone cannot find them again by the time the boss spawns.
     return {"revealed": False, "variant": None, "uid": 0, "pending": {},
-            "is_false": False, "player": 0}
+            "is_false": False, "player": 0, "persist": 0}
 
 BOSS_SECRETS = {
     # ⚠ `until` matters as much as `floor`: Herx dies on floor 20, so a follower offering his
     # weakness on floor 30 is offering something worthless -- and worse, it consumes the roll
     # that should have gone to the Archmagisters.
+    # ⚠ And the boss's OWN floor is already too late. initLich/initLichFire/initLichIce run on
+    # the boss's first actMonster tick after the level loads (actmonster.cpp:2834), which is
+    # before anyone can say a word on that floor -- so a secret told on floor 20 (or 35) changes
+    # nothing in the fight while still spending the run's one reveal. That is also exactly where
+    # a player asks, with the boss in view and the +30% probe bonus. Hence 19 and 34.
     "herx":  {"races": HERX_ELIGIBLE_RACES,  "friendship": HERX_MIN_FRIENDSHIP,
-              "fights": HERX_MIN_FIGHTS,     "floor": 0, "until": 20,
+              "fights": HERX_MIN_FIGHTS,     "floor": 0, "until": 19,
               "true": HERX_SECRET_VARIANTS,  "false": HERX_FALSE_VARIANTS,
               "subject": "Baron Herx"},
     "twins": {"races": TWINS_ELIGIBLE_RACES, "friendship": TWINS_MIN_FRIENDSHIP,
-              "fights": TWINS_MIN_FIGHTS,    "floor": TWINS_MIN_FLOOR, "until": 99,
+              "fights": TWINS_MIN_FIGHTS,    "floor": TWINS_MIN_FLOOR, "until": 34,
               "true": TWINS_SECRET_VARIANTS, "false": TWINS_FALSE_VARIANTS,
               "subject": "the Archmagisters, Orpheus and Erudyce"},
 }
@@ -2445,7 +2478,8 @@ def herx_detect(uid, raw, speech, player=0):
                near=matched)
     if told:
         state.update({"revealed": True, "variant": vi, "uid": uid,
-                      "is_false": is_false, "player": player})
+                      "is_false": is_false, "player": player,
+                      "persist": int(follower_state.get(uid, {}).get("persist") or 0)})
         print(f"[SERVICE-DBG] HERX SECRET revealed by follower {uid} to player{player} "
               f"(debuff variant {v['debuff']})")
         logrec("herx", stage="revealed", uid=uid, player=player, is_false=is_false,
@@ -2992,10 +3026,24 @@ def _merc_section(uid, st, floor, says, gold=0, ident=None):
     if ident:
         return ""
     kind = q["kind"]
+    # ⚠ An APPRAISAL quote is accepted only by asking again with /aiidentify -- that is the
+    # design, and the handler's identify branch implements it. Read here, any "ok" or "sure" in
+    # ordinary chat settled it: the player was charged with no item in the request, so nothing
+    # was appraised, and the agreed rate then billed the real /aiidentify a second time.
+    if kind == "identify":
+        return ""
     # A quote for work on THIS floor dies with the floor: the minotaur's clock and the boulder
     # room are both left behind, and an offer that outlives the job is just clutter.
     if kind in ("minotaur", "sokoban", "map") and q.get("floor") != floor:
         st.pop("quote", None)
+        return ""
+    # ⚠ The minotaur can arrive before the player answers (150-210s after the timer starts), and
+    # then there is nothing left to head off. The engine says whether the countdown still exists;
+    # without this a "yes" after the arrival paid him to report a job he could not have done.
+    # None means an older binary that does not send the flag, which keeps the old behaviour.
+    if kind == "minotaur" and _req("mino_timer") in (0, False):
+        st.pop("quote", None)
+        logrec("merc", uid=uid, what=kind, stage="expired", price=q["price"])
         return ""
     ans = agrees_to_quote(says)
     if ans is False:
@@ -3046,7 +3094,10 @@ def _secret_section(uid, st, race, says, floor=0):
     # the rest of the run. Measured before this: 0 twins offers in 200 tries with the gate open.
     told = ""
     for b, state in SECRET_STATE.items():
-        if state["revealed"] and state["uid"] == uid:
+        # ⚠ By ROW, not only by uid: the informant has a new uid after every staircase, and the
+        # old uid still points at the same state dict -- so the reminder survives the stairs.
+        if state["revealed"] and (state["uid"] == uid
+                                  or follower_state.get(state["uid"]) is st):
             told += ("YOU HAVE ALREADY TOLD THIS ADVENTURER WHAT YOU KNOW ABOUT "
                      + BOSS_SECRETS[b]["subject"].upper() + ": "
                      + _herx_pool(state.get("is_false"), b)[state["variant"]]["truth"] + "\n")
@@ -3572,9 +3623,19 @@ def _follower_sections(uid, race, floor, says, player=0, ident=None, gold=0, map
     # Settled before the boon roll: a man who has just been hired is not also handing out
     # free bread in the same breath.
     merc = _merc_section(uid, st, floor, says, gold, ident)
-    boon = "" if merc else _boon_section(uid, st, race_l, floor, player)
-    if uid in MERC_LATE:
-        boon = ""              # a map sale is being made; nothing else unprompted this turn
+    # ⚠ Whether this turn has room for a boon is decided BEFORE rolling one, not by blanking the
+    # text afterwards. _boon_section is not just text: it stamps LAST_BOON (the engine drops the
+    # item, maps the floor or disarms the traps whatever the reply says), spends the floor's slot
+    # and the once-per-run latches, and for a mercenary can put a map pitch into MERC_LATE --
+    # which then took the LAST slot of an /aiidentify reply and talked over the appraisal.
+    # Blanking afterwards hid all of that, so identify and introduction turns delivered boons
+    # nobody mentioned. Reproduced before this (rolls forced): a trap disarm delivered on both,
+    # never once mentioned.
+    will_intro = not st.get("introduced")
+    if merc or ident or will_intro or uid in MERC_LATE:
+        boon = ""              # this turn already belongs to something else
+    else:
+        boon = _boon_section(uid, st, race_l, floor, player)
     # ⚠ A map SALE has to land late, where the other mercenary blocks do. Measured in the boon
     # slot -- which sits mid-prompt, before the allegiance and obedience blocks -- the offer
     # fired correctly (quote stamped, price right) and the model ignored it completely, talking
@@ -3587,8 +3648,11 @@ def _follower_sections(uid, race, floor, says, player=0, ident=None, gold=0, map
     # one takes the turn. Unlike the Herx/crack pair -- which measured as ALIGNED, both being
     # "let something slip" -- the tell and the crack pull opposite ways. The crack wants
     # visible strain; the tell only works if it sounds like nothing.
+    # ⚠ Nor on the introduction turn, for the reason the boon above stands down: the intro goes
+    # into the LATE channel and owns the reply, so the tell would be talked over -- while the
+    # sabotage itself still fired, leaving the player nothing to catch.
     sabotage = ""
-    if not secret and not ident:
+    if not secret and not ident and not will_intro:
         rolled = sabotage_roll(st, floor)
         if rolled:
             kind, tell = rolled
@@ -3605,9 +3669,8 @@ def _follower_sections(uid, race, floor, says, player=0, ident=None, gold=0, map
     identify = ident or ""
     # One special behaviour per reply. The player asked a direct question about an item; a boon
     # offer on top of it produces a reply doing two unprompted things at once, and the later
-    # instruction simply wins. Spec 35/36: scarcity, and chaos without noise.
-    if identify:
-        boon = ""
+    # instruction simply wins. Spec 35/36: scarcity, and chaos without noise. (Enforced above,
+    # before the roll -- see `will_intro`.)
     # `fixed` lands AFTER the obedience section on purpose: that block is about carrying out
     # orders, and at 8B whatever follows an instruction competes with it. An emplacement told
     # to obey and then told it cannot move gets the order of those two the right way round.
@@ -3619,7 +3682,6 @@ def _follower_sections(uid, race, floor, says, player=0, ident=None, gold=0, map
     # mandatory behaviours in one reply, and the later one takes the turn. Spec 35/36.
     intro = _introduction_section(uid, st, race)
     if intro:
-        boon = ""
         # ⚠ Into the LATE channel, replacing any map pitch. Measured emitted here, five blocks
         # from the end with `limits` and the action rules after it: 2.5 of 4 services stated,
         # and the "do not open with your life story" line was ignored outright. Position is the
@@ -3905,8 +3967,11 @@ HAGGLE_PHRASES = (
 MERCHANT_TONE = (
     ("courteous", ("thank you", "thanks", "please", "appreciate", "good day", "well met",
                    "kind of you", "much obliged", "sorry", "apolog"), 1),
+    # ⚠ No bare "you're a": it is how compliments start too, so "you're a lifesaver" cost -2
+    # regard and a merchant you had just praised marked the price UP on the next haggle. The
+    # insults it was presumably there for ("you're a thief / crook / cheat") are listed anyway.
     ("rude",      ("rip off", "ripoff", "robbery", "thief", "crook", "swindl", "cheat",
-                   "you're a", "idiot", "fool", "shut up", "or else", "i'll kill",
+                   "idiot", "fool", "shut up", "or else", "i'll kill",
                    "don't make me", "hand it over", "give me it"), -2),
 )
 
@@ -4205,6 +4270,53 @@ def parse_reply(raw):
     fb = re.sub(r'[{}"]', '', raw).replace('speech:', '').replace('action:', '').strip()
     return (fb or '...'), 'NONE'
 
+# ---- Which follower commands the player actually gave ----------------------------------------
+# ⚠ The model attaches an action to EVERY reply, and FOLLOW / WAIT / DEFEND each drive a real
+# ALLY_CMD engine-side. Asked "what is your name?", it answered WAIT and the follower stopped
+# where it stood: 8 of 18 replies in the first real session moved a follower nobody had ordered
+# ("Do you know this floor?", "Can you see what armor I'm wearing?"), and the confession bench --
+# "how are you holding up?", no order in it at all -- came back WAIT/DEFEND 343/500, NONE 3/500.
+#
+# Whether a line WAS an order is a condition, and conditions are resolved server-side (rule 6).
+# This does not touch obedience: the model still decides whether to obey, and a refusal is still
+# its NONE. It only stops the model issuing an order the player never gave. Deliberately generous
+# -- a false positive merely leaves today's behaviour in place, a false negative eats a real order.
+#
+# Interjections are excluded where they collide: "Wait, how can I even understand you?" is the
+# real-session line that produced a WAIT, so `wait`/`stop`/`hold on` followed by a comma are not
+# orders. "stay" is an order only in its command shapes -- "did you stay long?" is not one.
+FOLLOW_ORDER = re.compile(
+    r"\b(follow|come (with|along|on|here|back|over|to|quick|now|closer)|with me|this way|"
+    r"keep up|keep moving|let'?s (go|move|head|get)|move (out|on|along|it)|get (moving|going)|"
+    r"stay (close|near|with)|stick (close|with|together)|after me|behind me|catch up|heel|"
+    r"on me|over here|lead (on|the way)|go (on|ahead|first)|walk with|hurry)\b")
+# (The bare-word shapes -- "Stay!", "Hold." -- are lookaheads so the match still ends on a word
+# character; ending it on the "!" would fail the closing \b and drop the order.)
+HOLD_ORDER = re.compile(
+    r"\b(wait(?!\s*,)|stop(?!\s*,)|halt|hold on(?!\s*,)|"
+    r"hold(?= (?:it|up|here|there|position|the|your|this|that|back|fast)\b|\s*[.!]|\s*$)|"
+    r"stay(?= (?:here|there|put|back|behind|by|where|in place|at)\b|\s*[.!]|\s*$)|"
+    r"guard|defend|protect (me|us|the|this|that|him|her)|cover (me|us|the|this|that)|"
+    r"keep (watch|guard|an eye)|"
+    r"watch (the|that|this|my|our|over)|stand (guard|watch|still|here|there|your ground|back)|"
+    r"don'?t move|remain (here|there|behind|where)|make camp|camp (here|there))\b")
+ATTACK_ORDER = re.compile(
+    r"\b(attack|fight|kill|charge|strike|engage|slay|destroy|smash|shoot|bite|ambush|murder|"
+    r"take (him|her|it|them|that|those) (out|down)|get (him|her|it|them|that|those)|"
+    r"go (for|after)|sic|hit (him|her|it|them|that|the)|fire at)\b")
+
+def ordered_actions(says):
+    """The actions this line could be ordering. NONE is always allowed."""
+    low = (says or "").lower().replace("’", "'")
+    allowed = {"NONE"}
+    if FOLLOW_ORDER.search(low):
+        allowed.add("FOLLOW")
+    if HOLD_ORDER.search(low):
+        allowed.update(("WAIT", "DEFEND"))   # one engine command, ALLY_CMD_DEFEND
+    if ATTACK_ORDER.search(low):
+        allowed.add("ATTACK")
+    return allowed
+
 def ask_ollama(prompt):
     print(f"[SERVICE-DBG] prompt ~{len(prompt)//4} tokens")
     body = json.dumps({"model": MODEL, "prompt": prompt, "stream": False,
@@ -4213,6 +4325,34 @@ def ask_ollama(prompt):
     req = urllib.request.Request(OLLAMA_URL, data=body, headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=60) as r:
         return json.loads(r.read())["response"].strip()
+
+def _as_int(v, default=-1):
+    """An int field from the engine's payload, without the two traps `int(x or d)` has: 0 is a
+    real value (the REACTIVE remark tier, which `or -1` logged as -1 so logreview filed every
+    reactive remark under "?"), and a string that is not a number is a default, not a crash."""
+    if isinstance(v, bool):
+        return int(v)
+    if isinstance(v, int):
+        return v
+    try:
+        return int(str(v).strip())
+    except (TypeError, ValueError):
+        return default
+
+def secret_informant_field():
+    """The persist token of whoever told the secret that herx_secret_field() is reporting, or "".
+
+    ⚠ NOT the uid. The secret field carries the uid the informant had at the moment of the reveal,
+    and every follower gets a NEW uid at every staircase -- so by the time the boss spawns floors
+    later, uidToEntity(informant) finds nobody and tier 2 ("doubled if the informant is still
+    alive") could never fire. The persist token rides MISC_FLAGS[22] across every staircase, which
+    is the one thing the engine can still match at spawn. A separate field rather than a change of
+    the secret field's shape, so a binary that predates it ignores it and keeps tier 1."""
+    for b in ("twins", "herx"):          # the same precedence herx_secret_field uses
+        st = SECRET_STATE[b]
+        if st["revealed"]:
+            return str(int(st.get("persist") or 0) or "")
+    return ""
 
 def herx_secret_field():
     """What the C++ side reads. Herx keeps its original two-field shape for compatibility:
@@ -4300,7 +4440,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
                      # ⚠ "voice" when this line was spoken rather than typed. A mangled
                      # transcript reads as the player saying something strange, and without
                      # this the log cannot tell a transcription failure from a model failure.
-                     via=(data.get("via") or "typed").strip())
+                     via=(data.get("via") or "typed").strip(),
+                     # Whether a minotaur countdown still exists on this floor: 1/0 from the
+                     # engine, None from a binary that does not send it. See _merc_section.
+                     mino_timer=(_as_int(data.get("mino_timer"), None)
+                                 if "mino_timer" in data else None))
             # How this follower came to be, and the part of its identity that outlives this
             # body (see the origin section). Empty for an ordinary recruit.
             origin = (data.get("origin") or "").strip()
@@ -4391,7 +4535,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if remark == "hunger":
                 _state = (data.get("state") or "").strip()
                 with STATE_LOCK:
-                    st_h = get_follower_state(uid, race, player) if uid else {}
+                    st_h = (resolve_follower(uid, race, player, origin, origin_key, floor)
+                            if uid else {})
                 _al = st_h.get("allegiance", "loyal")
                 if _al == "spy":
                     _al = "loyal"
@@ -4403,7 +4548,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 line_h = (raw_h or "").strip().strip('"').split("\n")[0][:200]
                 print(f"[SERVICE] -> hunger ({_state}): {race}: {line_h}")
                 logrec("remark", uid=uid, race=race, floor=floor, player=player, what="hunger",
-                       tier=int(data.get("tier", -1) or -1),
+                       tier=_as_int(data.get("tier")),
                        state=_state, blood=bool(data.get("blood")) or None,
                        allegiance=st_h.get("allegiance"), reply=line_h[:200])
                 tts_emit(line_h, race, uid, "remark", "", player)
@@ -4411,15 +4556,26 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
             if remark in REMARK_SITUATION:
                 with STATE_LOCK:
-                    st_r = get_follower_state(uid, race, player) if uid else {}
+                    st_r = (resolve_follower(uid, race, player, origin, origin_key, floor)
+                            if uid else {})
                 _al = st_r.get("allegiance", "loyal")
                 if _al == "spy":
                     _al = "loyal"     # the disguise holds here too
                 if remark in ("skillbest", "skillworst"):
+                    # ⚠ "skilltier", NOT "tier". requestRemark already sends the remark tier (an
+                    # int, for the log) as "tier", and the skill extra used to add a SECOND
+                    # "tier" key holding "an expert" -- json.loads keeps the last duplicate, so
+                    # the int() in the log line below raised AFTER the generation and the
+                    # follower spoke the 500's "(service error: invalid literal for int()...)"
+                    # on every skill remark from 2026-08-23 on. A string "tier" is still
+                    # accepted so a binary built before the rename keeps working.
+                    _tier_raw = data.get("tier")
+                    _skill_tier = (data.get("skilltier")
+                                   or (_tier_raw if isinstance(_tier_raw, str) else "") or "")
                     prompt_r = build_skill_prompt(
                         remark, race, floor, map_name, _al,
                         (data.get("skill") or "").strip(),
-                        (data.get("tier") or "").strip(),
+                        str(_skill_tier).strip(),
                         st_r.get("friendship", 0))
                     if not prompt_r:
                         return self._send_json({"reply": "", "action": "NONE"})
@@ -4450,14 +4606,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 line_r = (raw_r or "").strip().strip('"').split("\n")[0][:200]
                 print(f"[SERVICE] -> remark {remark}: {race}: {line_r}")
                 logrec("remark", uid=uid, race=race, floor=floor, player=player, what=remark,
-                       tier=int(data.get("tier", -1) or -1),
+                       tier=_as_int(data.get("tier")),
                        allegiance=st_r.get("allegiance"), reply=line_r[:200])
                 tts_emit(line_r, race, uid, "remark", "", player)
                 return self._send_json({"reply": line_r, "action": "NONE"})
 
             if remark == "valuable":
                 with STATE_LOCK:
-                    st_v = get_follower_state(uid, race, player) if uid else {}
+                    st_v = (resolve_follower(uid, race, player, origin, origin_key, floor)
+                            if uid else {})
                 _alleg = st_v.get("allegiance", "loyal")
                 # ⚠ A spy reacts exactly as a loyal follower would; the disguise is the point.
                 if _alleg == "spy":
@@ -4485,7 +4642,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 # recovers rather than a flat fee.
                 gold_here = int(data.get("gold_here", 0) or 0)
                 with STATE_LOCK:
-                    st_g = get_follower_state(uid, race, player) if uid else {}
+                    # ⚠ Usually the FIRST request on the floor for this follower: the engine
+                    # asks the moment it sees the countdown, which on a minotaur floor is level
+                    # load. Without its identity (and, before the engine sent `persist` here, a
+                    # token to find it by) the guard was judged by a fresh row -- trust 0, a
+                    # re-rolled allegiance -- so it refused every natural minotaur floor and
+                    # every Sokoban, and that floor's talk went to a stranger.
+                    st_g = (resolve_follower(uid, race, player, origin, origin_key, floor)
+                            if uid else {})
                     did = (favour_roll(favour, st_g, gold=gold, gold_here=gold_here,
                                        floor=floor, says=says) if st_g else False)
                     charge_g = str(LAST_CHARGE.pop(uid, "")) if uid else ""
@@ -4535,8 +4699,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             # call site needing to care.
             if uid and not npc:
                 with STATE_LOCK:
-                    get_follower_state(uid, race, player, origin, origin_key)
-                    flush_resummon(uid, race, floor, player)
+                    resolve_follower(uid, race, player, origin, origin_key, floor)
 
             # TEST-ONLY: force follower state, so the Herx gates can be reached without
             # playing to friendship 50. Guarded by an env var so it cannot exist in a release.
@@ -4624,9 +4787,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
                         elif is_merc(st_i):
                             _p = merc_price("identify", floor, _ivalue)
                             _q = st_i.get("quote")
-                            _asked_again = bool(_q and _q.get("kind") == "identify")
+                            # ⚠ Asking again about the SAME item. The price is a cut of what the
+                            # thing is worth, so a quote for a dagger is not an agreement to
+                            # appraise a spellbook at five times the price nobody was shown.
+                            _subject = "%s|%d" % (ident_req.get("real") or "", _ivalue)
+                            _asked_again = bool(_q and _q.get("kind") == "identify"
+                                                and _q.get("subject") == _subject)
                             if not merc_settled(st_i, "identify") and not _asked_again:
-                                merc_quote(st_i, "identify", floor, _ivalue)
+                                merc_quote(st_i, "identify", floor, _ivalue, subject=_subject)
                                 LAST_QUOTE[uid] = "identify:%d" % _p
                                 ident_line = merc_quote_section("identify")
                                 _skip_ident = True
@@ -4677,6 +4845,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
             # as well as forbidden in the prompt, because the action drives a real ALLY_CMD.
             if is_emplacement(race):
                 action = "NONE"
+            # ⚠ And nobody takes an order the player never gave -- see ordered_actions. Kept in
+            # `model_action` for the log, so a suppression is visible rather than silent.
+            model_action = action
+            if not taunt and not ambient and not npc and action not in ordered_actions(says):
+                action = "NONE"
 
             # NPCs keep their own light memory and never touch follower state.
             if npc:
@@ -4698,7 +4871,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                         "haggle": haggle_field})
 
             name, secret, boon, sabotage_field = "", "", "", ""
-            charge_field = favour_field = quote_field = hint_field = ""
+            charge_field = favour_field = quote_field = hint_field = informant_field = ""
             with STATE_LOCK:
                 if uid:
                     st = get_follower_state(uid, race, player)
@@ -4724,7 +4897,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     hint_field = LAST_HINT.pop(uid, "")
                     print(f"[SERVICE-DBG] follower {uid} (player{player}) {dims_summary(st)}")
                 secret = herx_secret_field()
-            print(f"[SERVICE] -> action={action} speech={speech}")
+                informant_field = secret_informant_field() if secret else ""
+            print(f"[SERVICE] -> action={action} speech={speech}"
+                  + (f" (model said {model_action}; not an order)"
+                     if model_action != action else ""))
             _st = follower_state.get(uid, {}) if uid else {}
             _kind = "taunt" if taunt else ("ambient" if ambient else "reply")
             tts_emit(speech, race, uid, _kind, name, player)
@@ -4733,6 +4909,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             logrec(_kind, uid=uid, race=race, floor=floor, map=map_name, player=player,
                    via=(_req("via") if _req("via") != "typed" else None),
                    says=says[:400], reply=speech[:400], action=action, name=name,
+                   model_action=(model_action if model_action != action else None),
                    allegiance=(_st.get("allegiance") if _st else None),
                    open_tiers=(len(_open) if _st else None),
                    tensions=(_tens or None) if _st else None,
@@ -4743,6 +4920,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                    dims={d: _st.get(d, 0) for d in DIMENSIONS} if _st else None)
             self._send_json({"reply": speech, "action": action, "name": name, "player": player,
                              "secret": secret, "boon": boon, "sabotage": sabotage_field,
+                             # The persist token of whoever told `secret` -- what tier 2 is
+                             # judged by at the boss's spawn. See secret_informant_field.
+                             "informant": informant_field,
                              # The mercenary's fee, the job the engine should now actually
                              # perform because he was just hired for it, and a price for the
                              # engine to PRINT -- the model is forbidden from saying a number.
@@ -4757,7 +4937,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
         except Exception as e:
             print(f"[SERVICE] ERROR: {e}")
             logrec("error", err=str(e)[:300], where=traceback.format_exc(limit=3)[-400:])
-            self._send_json({"reply": f"(service error: {e})"}, status=500)
+            # ⚠ The error goes in "error", NEVER in "reply". The engine reads "reply" as the
+            # follower's speech, so a reply of "(service error: ...)" was SPOKEN in a bubble and
+            # the chat feed -- every skill remark did exactly that from 2026-08-23 on.
+            self._send_json({"reply": "", "action": "NONE", "error": str(e)[:200]}, status=500)
 
     def log_message(self, *a): pass  # quiet default logging
 

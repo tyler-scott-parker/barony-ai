@@ -44,18 +44,27 @@ print("[VOICE] loading faster-whisper...")
 model = _load()
 print(f"[VOICE] ready. Hold V in game to talk.  (watching {CLIP})")
 
+# ⚠ A clip is CLAIMED by renaming it before it is transcribed. The bridge used to transcribe
+# CLIP in place and then delete CLIP -- so a clip the mod wrote while the last one was still
+# being transcribed (the mod writes-then-renames onto the same path) was deleted unheard.
+WORK = CLIP + ".work"
+
 while True:
     if not os.path.exists(CLIP):
         time.sleep(0.05)
         continue
     try:
-        segments, _ = model.transcribe(CLIP, language="en", beam_size=1)
+        os.replace(CLIP, WORK)
+    except OSError:
+        continue            # the mod replaced it under us; take the new one next pass
+    try:
+        segments, _ = model.transcribe(WORK, language="en", beam_size=1)
         text = " ".join(s.text for s in segments).strip()
     except Exception as e:
         print(f"[VOICE] transcription failed: {e}")
         text = ""
     try:
-        os.remove(CLIP)     # removed BEFORE the reply is written, so a crash cannot loop
+        os.remove(WORK)     # removed BEFORE the reply is written, so a crash cannot loop
     except OSError:
         pass
     # A junk filter belongs here as well as in the mod: whisper hallucinates confident

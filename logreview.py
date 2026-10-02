@@ -305,6 +305,18 @@ def main():
                 print(f"   t={r['t']:>8.1f}  heard: \"{r.get('says','')}\"")
                 print(f"                 -> {r.get('reply','')[:110]}")
 
+        # --- ⚠ ACTIONS THE SERVICE DID NOT TAKE: the model picked one, the player gave no order.
+        # The service drops them (ordered_actions) because "what is your name?" was halting
+        # followers. The audit runs the other way: an order that WAS given and was dropped
+        # anyway means the pattern list is too narrow -- read the lines, not the count.
+        dropped = [r for r in recs if r.get("model_action")]
+        if dropped:
+            print(f"\nACTIONS NOT TAKEN ({len(dropped)}) -- the player gave no order; "
+                  "check none of these was one")
+            for r in dropped[:12]:
+                print(f"   t={r['t']:>8.1f}  {r.get('model_action'):<7} "
+                      f"heard: \"{(r.get('says') or '')[:70]}\"")
+
         # --- the mercenary's economy ---
         merc = [r for r in recs if r.get("kind") == "merc"]
         if merc:

@@ -64,6 +64,17 @@ ck("an 'event' record with no event name is not fatal", rc == 0 and "PLAYER NOTE
 rc, out = review([])
 ck("an empty log does not traceback", "Traceback" not in out, out[-300:])
 
+# --- 5. the action gate is auditable --------------------------------------------------------
+# The service drops an action the player never ordered and keeps what the model wanted in
+# `model_action`. A playtest has to be able to see those, or a real order the patterns missed
+# would vanish without trace.
+rc, out = review([{"t": 1.0, "kind": "start"},
+                  {"t": 2.0, "kind": "reply", "uid": 4, "says": "What is your name?",
+                   "action": "NONE", "model_action": "WAIT"}])
+ck("a dropped action is surfaced", "ACTIONS NOT TAKEN" in out and "What is your name?" in out,
+   out[-400:])
+ck("and the run exits clean", rc == 0, rc)
+
 print()
-print("FAILED: %d" % len(fails) if fails else "ALL PASS (11 assertions)")
+print("FAILED: %d" % len(fails) if fails else "ALL PASS (13 assertions)")
 sys.exit(1 if fails else 0)
