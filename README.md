@@ -96,10 +96,12 @@ the shop window, `/aiidentify`, and haggled prices — all gracefully.
 
 ## Tests
 
-Service-side suites run with no arguments and no service running:
+Service-side suites run with no arguments and no service running (each is its own script, so
+run them one at a time -- `python3 a.py b.py` would only run `a.py`):
 
 ```bash
-python3 test_names.py test_origin.py test_resummon.py test_heckle.py test_haggle.py test_memory.py
+for t in test_*.py; do python3 "$t" > /dev/null || echo "FAILED: $t"; done
+python3 test_handler.py           # the HTTP handler, fed payloads built exactly as the C++ builds them
 python3 service.py --names        # validates all 4,153 names through the real extractor
 python3 logreview.py              # summarise the newest session log
 ```

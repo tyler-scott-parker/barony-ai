@@ -17,7 +17,7 @@ An AI-NPC mod for **Barony** (open-source C++ roguelike, v5.0.2), built from sou
 | File | Loaded | Contents |
 |---|---|---|
 | **`CLAUDE.md`** (this file) | every session | paths, hooks, build, the region map, diagnostics, and the *Hard-won prompt rules* digest |
-| **`FINDINGS.md`** | **on demand — read it** | the lab notebook: all 39 subsystem sections and the measurements behind them |
+| **`FINDINGS.md`** | **on demand — read it** | the lab notebook: every subsystem's section and the measurements behind it |
 | **`bench_secret.py`** | on demand | measures boss-secret conversion against the live model — whether a secret is TOLD is a property of the model, not the code |
 | **`test_prompt_order.py`** | on demand | asserts prompt-block ORDER and the stand-downs; add to its `MANDATORY` list whenever a new must-say block is introduced |
 
@@ -71,8 +71,10 @@ would corrupt everything after it. Field lookup cannot do that; there is a regre
 | bridges hardcoded `/tmp` | `tempfile.gettempdir()` — reads the same variables the C++ does |
 
 **Test it with `g++ -o httptest httptest.cpp $(pkg-config --cflags --libs SDL2_net) && ./httptest`**
-— 26 assertions covering URL parsing, field extraction, the real escapes, the marker regression,
-the heckle array, a live POST, and a dead port failing cleanly instead of hanging. Not in the
+— 33 assertions covering URL parsing, field extraction, the real escapes, the marker regression,
+the heckle array, a live POST, a dead port failing cleanly instead of hanging, and ⚠ **a 500 being
+a failure rather than a reply** (a mock server serves one): a service exception used to come back
+as `"(service error: ...)"` in `reply`, and the follower SAID it. Not in the
 build (`CMakeLists.txt` lists sources explicitly), same arrangement as `packtest.cpp`.
 
 **Still open, and none of it verifiable from Linux:**
@@ -92,11 +94,13 @@ build (`CMakeLists.txt` lists sources explicitly), same arrangement as `packtest
 |---|---|---|
 | `game.cpp` | `mymod_pollAI()`, `mymod_ambientTick()` | per-frame, in the game loop |
 | `actmonster.cpp` | `mymod_recordEvent("recruitment", ...)` ×2 | `forceFollower` (~11186, guard `leader.behavior == &actPlayer`) and interact-recruit (~2170). **The interact path is the one `/friendly` and normal recruitment actually use.** |
-| `files.cpp` | `new_run` event in `physfsLoadMapFile` at `levelToLoad <= 1`; plus a `__attribute__((weak))` `mymod_recordEvent` stub | The weak stub exists because the **editor** target compiles `files.cpp` without the mod and would otherwise fail to link |
-| `monster_lich.cpp` | Herx debuff block after `my->setHardcoreStats(*myStats)` | inside the `!MONSTER_INIT` guard, so it can't double-apply |
-| `consolecommand.cpp` | `/aicommand`, `/aiserver`, `/aitest` + `#include "../mymod/mymod.hpp"` | commands legitimately belong here |
-| `net.cpp` | `{'MYAI'}`, `{'MYID'}` in `serverPacketHandlers`; `{'MYNM'}`, `{'MYSH'}`, `{'MYIV'}`, `{'MYFR'}` in `clientPacketHandlers` + `#include "mymod/mymod.hpp"` | the six mod packets. The tables are file-`static`, so registration cannot happen from `mymod.cpp` |
+| `files.cpp` | `mymod_onLevelLoad(levelToLoad)` at the top of `physfsLoadMapFile`, plus a `__attribute__((weak))` stub of it | The **mod** decides it is a new run (`levelToLoad == startfloor`) -- the test needs `startfloor`, which the **editor** target (it compiles `files.cpp` without the mod) does not link. ⚠ The old inline test was `levelToLoad <= 1`, but the first floor is **0** (`levels.txt` line 0 is `map: start`), so every run was reset a second time at the first staircase |
+| `monster_lich.cpp`, `monster_lichfire.cpp`, `monster_lichice.cpp` | boss debuff blocks after `my->setHardcoreStats(*myStats)` | inside the `!MONSTER_INIT` guard, so they can't double-apply. Tier 2 asks `mymod_bossInformantAlive()`, which matches the informant by **persist token** -- the uid they had when they told is a body from floors ago |
+| `consolecommand.cpp` | `/aicommand`, `/aiidentify`, `/aiserver`, `/aistatus`, `/ailog`, `/aitest` + `#include "../mymod/mymod.hpp"` | commands legitimately belong here. ⚠ `/aicommand` and `/aiidentify` are **not** cheat-gated (they were, copied from `/aitest`, and answered "Cheats are disabled" in every normal game); the debug ones still are |
+| `net.cpp` | `{'MYAI'}`, `{'MYID'}`, `{'MYNT'}` in `serverPacketHandlers`; `{'MYNM'}`, `{'MYSH'}`, `{'MYIV'}`, `{'MYFR'}`, `{'MYHG'}`, `{'MYFG'}` in `clientPacketHandlers`; `mymod_clientChat` in vanilla `'MSGS'` + `#include "mymod/mymod.hpp"` | the nine mod packets (`MYNT` carries a client's `/ailog` note to the host's log). The tables are file-`static`, so registration cannot happen from `mymod.cpp` |
 | `actmonster.cpp` | `mymod_npcEngage()` at the top of `handleMonsterChatter` (~12216) | clicking a talking NPC. **Falls through to the vanilla canned line when it returns false**, so an NPC is never mute if the service is down |
+| `actmonster.cpp` | `mymod_onFollowerHitByPlayer()` at the top of `Entity::updateEntityOnHit` (~757); a `[MYMOD] ally command` printlog in `monsterAllySendCommand` | friendly fire -> `hurt_by_player`. The printlog is debug only |
+| `items.cpp` | `value *= mymod_priceModifier(...)` in `Item::buyValue` and `Item::sellValue` | haggled prices -- the one place both the shop DISPLAY and the transaction pass through. Note `buyValue` then floors at `getGoldValue()`, which swallows a discount for a skilled trader (see Haggling in FINDINGS) |
 | `shops.cpp` | `mymod_npcEngage()` at the end of `startTradingServer` | merchant greets on shop open. At the END of the function on purpose — the local-player and remote-client branches both flow through it |
 | `player.cpp` | `everybodyfriendly || intro` early-out at the top of `monsterIsFriendlyForTooltip` (~3367) | **the other half of `MYFR`** — without it a client receives the flag and still ignores it, because the `checkEnemy` shortcut that reads it is wrapped in `if (multiplayer != CLIENT)`. Mirrors `checkFriend`/`checkEnemy` exactly |
 
@@ -378,6 +382,11 @@ editing a subsystem's prompts. These are the rules that generalize across the wh
   the GPU keeps all 8 GB for the 8B. Mispronounced generated names remain a real, unfixed cost —
   the reason it is opt-in rather than default.
 - **Obedience is earned, not gated in C++** — prompt-driven, so it stays probabilistic and characterful. A hard C++ friendship gate is a possible later layer.
+- **But an ORDER has to have been given.** `ordered_actions(says)` drops any action the player's line could not have
+  ordered ("what is your name?" + WAIT -> NONE): the model attached WAIT/DEFEND to 8 of 18 replies in the first real
+  session and to 343/500 in the confession bench, each one halting the follower. Obedience is untouched -- the model
+  still decides whether to obey, and a refusal is still its NONE. Suppressions are logged as `model_action` and
+  `logreview` lists them under ACTIONS NOT TAKEN, which is where a too-narrow pattern would show up.
 - **ATTACK stays diegetic** — target-based attack needs cursor-aim, parked.
 - **The event log is structured records, not flat strings** — so new event types slot in with just a type + importance.
 

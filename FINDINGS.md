@@ -3508,3 +3508,55 @@ pre-fix reviewer fails 5 of them.
 sufficiently escape-heavy note could truncate into invalid JSON and be dropped silently. The
 arithmetic says it cannot happen in practice — plain text is 1:1 and caps at ~570 bytes of body;
 you would need ~450 quote or control characters in one note to overflow. Left alone.
+
+### The 2026-10-02 review: eighteen bugs found by reading both repos end to end, all fixed
+
+A full read of `service.py` and `src/mymod/` (plus every upstream hook), each finding then
+**reproduced** -- the service ones by driving the real `Handler` over HTTP with payloads built
+exactly as the C++ builds them, the engine ones by reading the code paths they depend on. All 18
+suites were green throughout, because none of them ever sent the handler a C++-shaped payload --
+which is exactly where the worst one lived. `test_handler.py` (new, 53 assertions) closes that
+layer; **every service fix is mutation-tested: reverting any one of the 16 makes it fail.**
+
+**No measured prompt changed.** The action gate runs after generation; the boon and sabotage
+stand-downs only change which turns roll; the one prompt-text edit (`friendship_descriptor`'s
+10-39 band) is below every bench's friendship (55-70), and its 40+ line is untouched on purpose.
+
+| # | What the player saw | Cause | Fix |
+|---|---|---|---|
+| 1 | `/aicommand` and `/aiidentify` answer *"Cheats are disabled on this server"* in any normal game; the host could only talk by voice | both copied the `SV_FLAG_CHEATS` gate from `/aitest`; the test harness always runs `/enablecheats`, so it never showed | gate removed from those two only |
+| 2 | every skill remark spoke *"(service error: invalid literal for int()...)"*, from 2026-08-23 | the payload carried `"tier"` twice (remark tier int, then skill tier string); `json.loads` keeps the last, and the log line's `int()` raised after generating | `skilltier` key; `_as_int`; old payloads still accepted |
+| 3 | asking a follower a question made it stop and hold position | the model attaches WAIT/DEFEND to plain talk -- 8/18 real-session replies, 343/500 in the confession bench -- and every one became `ALLY_CMD_DEFEND` | `ordered_actions`: no action the line could not have ordered; logged as `model_action`, listed by logreview |
+| 4 | last run's Herx debuff, or a spy's twins BUFF, in the next run of the same session | the engine's `new_run` reset never cleared `mymod_herx_*`/`mymod_twins_*`, and an empty secret field means "no change" | cleared in the reset |
+| 5 | a secret told on floor 20 or 35 did nothing (and spent the run's reveal) | `initLich*` runs at level load; `until` was 20 / 99 | `until` 19 / 34 |
+| 6 | tier 2 ("informant still alive") never fired | the informant was a reveal-time uid, and uids churn at every staircase | new `informant` field = persist token; `mymod_bossInformantAlive()` matches it at spawn |
+| 7 | followers killed by arrows, spells, traps or mid-floor spawns were not mourned | the death sweep runs first in the frame and called a lingering HP-0 corpse "dismissed" | dismissed means present AND alive |
+| 8 | after an appraisal quote, any "ok" in chat charged the fee with no appraisal -- and the real `/aiidentify` charged again | `_merc_section` accepted identify quotes from ordinary talk | identify quotes ignored there; a quote is also pinned to its item |
+| 9 | a fee held while a shop was open was lost, the job done free | the next reply's worker overwrote `cv.charge` | `mymod_heldFee`, settled every frame once the shop closes |
+| 10 | "yes" after the minotaur had arrived charged for a job that no longer existed | nobody checked | engine sends `mino_timer`; service retires the quote; engine waives too |
+| 11 | identify and introduction turns delivered boons nobody mentioned; a merc's map pitch took over an `/aiidentify` reply | `_boon_section` ran (stamping `LAST_BOON`, latches, `MERC_LATE`) and only its text was blanked | decided before rolling; sabotage stands down on the intro turn too |
+| 12 | an ambient line during the host's `/aiidentify` threw away a truthful appraisal | the world slot resolved `pnum` to the host and consumed the identify block | player slots only |
+| 13 | a summon or bot came back as a stranger when a remark was the first thing said on a new floor | remark/hunger/valuable/favour branches never passed the origin | `resolve_follower()` everywhere |
+| 14 | **the minotaur guard refused every natural minotaur floor and every Sokoban** (found while fixing 13) | the favour payload had no persist token, and it is the first request on such a floor, so the guard judged a fresh row: trust 0, allegiance re-rolled | identity sent with the favour |
+| 15 | putting on an unknown ring had the follower name it | equip/gift/food remarks sent `getIdentifiedName()` unconditionally | `mymod_lookOf()`; "legendary" only once identified |
+| 16 | a dead service made every remark say "(no reply)", and NPCs said it instead of their vanilla line | HTTP status never checked; empty replies became "(no reply)" | non-2xx is a failure, empty is silence, a once-a-minute hint, NPC falls back to vanilla after a failure |
+| 17 | every run reset a second time at the first staircase | `levelToLoad <= 1`, but the first floor is 0 (`map: start`) | `mymod_onLevelLoad`: `== startfloor` |
+| 18 | a recruit after a reload (or after that second reset) could share a relationship row with a carried follower | persist tokens were a counter from 1, but save games keep them | random tokens |
+
+Smaller, same pass: the mic cap counted 16 kHz samples at the device rate (5 s, not 15, on a
+48 kHz mic); co-op skill and biome remarks only ever rolled for player 0, and the boss
+announcement's `break` sat outside its `if`; a client's `/ailog` never reached the host's log
+(`MYNT`); REACTIVE remarks were logged as tier -1; *"you're a lifesaver"* was rude; the voice
+bridge deleted a clip recorded mid-transcription, and the engine's `rename` failed on Windows
+whenever an old clip was waiting; a long client line could truncate the payload JSON; "yes" went
+to the nearest follower rather than the one that quoted (`mymod_addressee`).
+
+**Deliberately NOT changed:**
+- ⚠ **The haggle floor.** The *Haggling* section says the negotiation stops mattering at PRO_TRADING
+  75; for an identified item in excellent condition it is actually **~58** (0.72 x 150/(50+s) <= 1),
+  and a -5% deal is swallowed from ~53. The decision there -- a master trader has nothing left to
+  haggle for -- still stands; only the number was off.
+- `friendship_descriptor`'s 40+ line still says "trust" beside a trust dimension that can be low.
+  Both benches run there, so it needs a re-run, not an edit.
+- A challenge run with a custom start level loads through `loadMap`, not `physfsLoadMapFile`, so it
+  still never fires `new_run`.
